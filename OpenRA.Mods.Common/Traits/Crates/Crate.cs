@@ -1,4 +1,4 @@
-#region Copyright & License Information
+﻿#region Copyright & License Information
 /*
  * Copyright (c) The OpenRA Developers and Contributors
  * This file is part of OpenRA, which is free software. It is made
@@ -12,6 +12,7 @@
 using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Linq;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Activities;
 using OpenRA.Mods.Common.Traits.Render;
 using OpenRA.Primitives;
@@ -73,8 +74,11 @@ namespace OpenRA.Mods.Common.Traits
 	}
 
 	public class Crate : ITick, IPositionable, ICrushable, ISync, INotifyCreated,
-		INotifyParachute, INotifyAddedToWorld, INotifyRemovedFromWorld, INotifyCrushed
+		INotifyParachute, INotifyAddedToWorld, INotifyRemovedFromWorld, INotifyCrushed, ISaveState
 	{
+		const string TicksKey = "Ticks";
+		const string CollectedKey = "Collected";
+
 		readonly Actor self;
 		readonly CrateInfo info;
 		bool collected;
@@ -257,7 +261,8 @@ namespace OpenRA.Mods.Common.Traits
 
 			self.World.WorldActor.TraitOrDefault<CrateSpawner>()?.IncrementCrates();
 
-			if (self.World.Map.DistanceAboveTerrain(CenterPosition) > WDist.Zero && self.TraitOrDefault<Parachutable>() != null)
+			if (!self.World.IsRestoringSnapshot &&
+				self.World.Map.DistanceAboveTerrain(CenterPosition) > WDist.Zero && self.TraitOrDefault<Parachutable>() != null)
 				self.QueueActivity(new Parachute(self));
 		}
 
@@ -266,6 +271,27 @@ namespace OpenRA.Mods.Common.Traits
 			self.World.RemoveFromMaps(self, this);
 
 			self.World.WorldActor.TraitOrDefault<CrateSpawner>()?.DecrementCrates();
+		}
+
+		TraitInfo ISaveState.SaveStateInfo => info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
+		{
+			return
+			[
+				new(TicksKey, FieldSaver.FormatValue(ticks)),
+				new(CollectedKey, FieldSaver.FormatValue(collected))
+			];
+		}
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
+		{
+			var nodes = data.ToDictionary();
+			if (nodes.TryGetValue(TicksKey, out var t))
+				ticks = FieldLoader.GetValue<int>(TicksKey, t.Value);
+
+			if (nodes.TryGetValue(CollectedKey, out var c))
+				collected = FieldLoader.GetValue<bool>(CollectedKey, c.Value);
 		}
 	}
 }

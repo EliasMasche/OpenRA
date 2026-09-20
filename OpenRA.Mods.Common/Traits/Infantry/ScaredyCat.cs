@@ -11,6 +11,8 @@
 
 using System;
 using System.Collections.Frozen;
+using System.Collections.Generic;
+using OpenRA.GameSaves;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Traits
@@ -39,8 +41,11 @@ namespace OpenRA.Mods.Common.Traits
 		public override object Create(ActorInitializer init) { return new ScaredyCat(init.Self, this); }
 	}
 
-	sealed class ScaredyCat : ITick, INotifyIdle, INotifyDamage, INotifyAttack, ISpeedModifier, ISync, IRenderInfantrySequenceModifier
+	sealed class ScaredyCat : ITick, INotifyIdle, INotifyDamage, INotifyAttack, ISpeedModifier, ISync, IRenderInfantrySequenceModifier,
+		ISaveState
 	{
+		const string PanicStartedTickKey = "PanicStartedTick";
+
 		readonly ScaredyCatInfo info;
 		readonly Mobile mobile;
 		readonly Actor self;
@@ -111,6 +116,20 @@ namespace OpenRA.Mods.Common.Traits
 		int ISpeedModifier.GetSpeedModifier()
 		{
 			return Panicking ? info.PanicSpeedModifier : 100;
+		}
+
+		TraitInfo ISaveState.SaveStateInfo => info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
+		{
+			return [new(PanicStartedTickKey, FieldSaver.FormatValue(panicStartedTick))];
+		}
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
+		{
+			var node = data.NodeWithKeyOrDefault(PanicStartedTickKey);
+			if (node != null)
+				panicStartedTick = FieldLoader.GetValue<int>(PanicStartedTickKey, node.Value.Value);
 		}
 	}
 }

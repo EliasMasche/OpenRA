@@ -13,6 +13,7 @@ using System;
 using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Linq;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Activities;
 using OpenRA.Primitives;
 using OpenRA.Support;
@@ -57,7 +58,8 @@ namespace OpenRA.Mods.Common.Traits
 		public override object Create(ActorInitializer init) { return new DockClientManager(init.Self, this); }
 	}
 
-	public class DockClientManager : ConditionalTrait<DockClientManagerInfo>, IResolveOrder, IOrderVoice, IIssueOrder, INotifyKilled, INotifyActorDisposing
+	public class DockClientManager : ConditionalTrait<DockClientManagerInfo>, IResolveOrder, IOrderVoice, IIssueOrder,
+		INotifyKilled, INotifyActorDisposing, ISaveState
 	{
 		readonly Actor self;
 		protected IDockClient[] dockClients;
@@ -332,6 +334,25 @@ namespace OpenRA.Mods.Common.Traits
 		void INotifyKilled.Killed(Actor self, AttackInfo e) { UnreserveHost(); }
 
 		void INotifyActorDisposing.Disposing(Actor self) { UnreserveHost(); }
+
+		TraitInfo ISaveState.SaveStateInfo => Info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
+		{
+			return [new("ReservedHostActor", w.ActorRef(ReservedHostActor))];
+		}
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
+		{
+			r.DeferActor(data.NodeWithKeyOrDefault("ReservedHostActor").Value.Value, a =>
+			{
+				if (a == null)
+					return;
+
+				ReservedHostActor = a;
+				ReservedHost = a.TraitsImplementing<IDockHost>().FirstOrDefault();
+			});
+		}
 	}
 
 	public class DockActorTargeter : IOrderTargeter

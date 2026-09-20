@@ -13,6 +13,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using OpenRA.Activities;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Activities;
 using OpenRA.Primitives;
 using OpenRA.Traits;
@@ -228,6 +229,7 @@ namespace OpenRA.Mods.Common.Traits
 			}
 		}
 
+		[SaveableActivity]
 		sealed class AttackActivity : Activity, IActivityNotifyStanceChanged
 		{
 			readonly AttackFollow attack;
@@ -426,6 +428,56 @@ namespace OpenRA.Mods.Common.Traits
 				moveCooldownHelper.NotifyMoveQueued();
 				QueueChild(move.MoveWithinRange(target, minRange, maxRange, checkTarget.CenterPosition));
 				return false;
+			}
+
+			internal AttackActivity(Actor self, SnapshotReader r, MiniYaml yaml)
+			{
+				attack = self.Trait<AttackFollow>();
+				revealsShroud = self.TraitsImplementing<RevealsShroud>().ToArray();
+				rearmable = self.TraitOrDefault<Rearmable>();
+				isAircraft = self.Info.HasTraitInfo<AircraftInfo>();
+				ChildHasPriority = false;
+
+				var n = yaml.ToDictionary();
+				source = FieldLoader.GetValue<AttackSource>("Source", n["Source"].Value);
+				forceAttack = FieldLoader.GetValue<bool>("ForceAttack", n["ForceAttack"].Value);
+				hasTicked = FieldLoader.GetValue<bool>("HasTicked", n["HasTicked"].Value);
+				returnToBase = FieldLoader.GetValue<bool>("ReturnToBase", n["ReturnToBase"].Value);
+
+				move = FieldLoader.GetValue<bool>("AllowMove", n["AllowMove"].Value) ? self.TraitOrDefault<IMove>() : null;
+				moveCooldownHelper = new MoveCooldownHelper(self.World, move as Mobile) { RetryIfDestinationBlocked = true };
+				moveCooldownHelper.LoadState(n["Cooldown"]);
+
+				useLastVisibleTarget = LastVisibleTargetState.UseLastVisible(n);
+				lastVisibleMinimumRange = LastVisibleTargetState.MinimumRange(n);
+				lastVisibleMaximumRange = LastVisibleTargetState.MaximumRange(n);
+				lastVisibleOwner = LastVisibleTargetState.Owner(n, r);
+				lastVisibleTargetTypes = LastVisibleTargetState.TargetTypes(n);
+
+				var color = n["TargetLineColor"].Value;
+				if (!string.IsNullOrEmpty(color))
+					targetLineColor = FieldLoader.GetValue<Color>("TargetLineColor", color);
+
+				r.DeferTarget(n[LastVisibleTargetState.TargetKey].Value, t => target = t);
+				r.DeferTarget(n[LastVisibleTargetState.LastVisibleTargetKey].Value, t => lastVisibleTarget = t);
+			}
+
+			public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+			{
+				var nodes = new List<MiniYamlNode>
+				{
+					new("Source", FieldSaver.FormatValue(source)),
+					new("ForceAttack", FieldSaver.FormatValue(forceAttack)),
+					new("AllowMove", FieldSaver.FormatValue(move != null)),
+					new("HasTicked", FieldSaver.FormatValue(hasTicked)),
+					new("ReturnToBase", FieldSaver.FormatValue(returnToBase)),
+					new("TargetLineColor", targetLineColor.HasValue ? FieldSaver.FormatValue(targetLineColor.Value) : ""),
+					new("Cooldown", new MiniYaml("", moveCooldownHelper.SaveState()))
+				};
+
+				LastVisibleTargetState.Save(nodes, w, target, lastVisibleTarget, useLastVisibleTarget,
+					lastVisibleMinimumRange, lastVisibleMaximumRange, lastVisibleOwner, lastVisibleTargetTypes);
+				return nodes;
 			}
 
 			protected override void OnLastRun(Actor self)

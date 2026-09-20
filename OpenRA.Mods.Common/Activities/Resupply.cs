@@ -13,22 +13,24 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using OpenRA.Activities;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Traits;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Activities
 {
+	[SaveableActivity]
 	public class Resupply : Activity
 	{
 		readonly IHealth health;
-		readonly RepairsUnits[] allRepairsUnits;
-		readonly Target host;
+		RepairsUnits[] allRepairsUnits;
+		Target host;
 		readonly WDist closeEnough;
 		readonly Repairable repairable;
 		readonly RepairableNear repairableNear;
 		readonly Rearmable rearmable;
-		readonly INotifyResupply[] notifyResupplies;
-		readonly INotifyDockHost[] notifyDockHosts;
+		INotifyResupply[] notifyResupplies;
+		INotifyDockHost[] notifyDockHosts;
 		readonly INotifyDockClient[] notifyDockClients;
 		readonly ICallForTransport[] transportCallers;
 		readonly IMove move;
@@ -85,6 +87,60 @@ namespace OpenRA.Mods.Common.Activities
 			var cannotRearmAtHost = rearmable == null || !rearmable.Info.RearmActors.Contains(host.Info.Name) || rearmable.RearmableAmmoPools.All(p => p.HasFullAmmo);
 			if (!cannotRearmAtHost)
 				activeResupplyTypes |= ResupplyType.Rearm;
+		}
+
+		internal Resupply(Actor self, SnapshotReader r, MiniYaml yaml)
+		{
+			health = self.TraitOrDefault<IHealth>();
+			repairable = self.TraitOrDefault<Repairable>();
+			repairableNear = self.TraitOrDefault<RepairableNear>();
+			rearmable = self.TraitOrDefault<Rearmable>();
+			notifyDockClients = self.TraitsImplementing<INotifyDockClient>().ToArray();
+			transportCallers = self.TraitsImplementing<ICallForTransport>().ToArray();
+			move = self.Trait<IMove>();
+			aircraft = move as Aircraft;
+			moveInfo = self.Info.TraitInfo<IMoveInfo>();
+			playerResources = self.Owner.PlayerActor.Trait<PlayerResources>();
+			moveCooldownHelper = new MoveCooldownHelper(self.World, move as Mobile) { RetryIfDestinationBlocked = true };
+
+			var valued = self.Info.TraitInfoOrDefault<ValuedInfo>();
+			unitCost = valued != null ? valued.Cost : 0;
+
+			var n = yaml.ToDictionary();
+			closeEnough = FieldLoader.GetValue<WDist>("CloseEnough", n["CloseEnough"].Value);
+			stayOnResupplier = FieldLoader.GetValue<bool>("StayOnResupplier", n["StayOnResupplier"].Value);
+			remainingTicks = FieldLoader.GetValue<int>("RemainingTicks", n["RemainingTicks"].Value);
+			played = FieldLoader.GetValue<bool>("Played", n["Played"].Value);
+			actualResupplyStarted = FieldLoader.GetValue<bool>("ActualResupplyStarted", n["ActualResupplyStarted"].Value);
+			wasRepaired = FieldLoader.GetValue<bool>("WasRepaired", n["WasRepaired"].Value);
+			moveCooldownHelper.LoadState(n["Cooldown"]);
+
+			activeResupplyTypes = FieldLoader.GetValue<ResupplyType>("ActiveResupplyTypes", n["ActiveResupplyTypes"].Value);
+
+			r.DeferTarget(n["Host"].Value, t =>
+			{
+				host = t;
+				var hostActor = t.Type == TargetType.Actor ? t.Actor : null;
+				allRepairsUnits = hostActor?.TraitsImplementing<RepairsUnits>().ToArray() ?? [];
+				notifyResupplies = hostActor?.TraitsImplementing<INotifyResupply>().ToArray() ?? [];
+				notifyDockHosts = hostActor?.TraitsImplementing<INotifyDockHost>().ToArray() ?? [];
+			});
+		}
+
+		public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+		{
+			return
+			[
+				new("Host", w.TargetRef(host)),
+				new("CloseEnough", FieldSaver.FormatValue(closeEnough)),
+				new("StayOnResupplier", FieldSaver.FormatValue(stayOnResupplier)),
+				new("RemainingTicks", FieldSaver.FormatValue(remainingTicks)),
+				new("Played", FieldSaver.FormatValue(played)),
+				new("ActualResupplyStarted", FieldSaver.FormatValue(actualResupplyStarted)),
+				new("WasRepaired", FieldSaver.FormatValue(wasRepaired)),
+				new("ActiveResupplyTypes", FieldSaver.FormatValue(activeResupplyTypes)),
+				new("Cooldown", new MiniYaml("", moveCooldownHelper.SaveState()))
+			];
 		}
 
 		public override bool Tick(Actor self)
@@ -231,7 +287,7 @@ namespace OpenRA.Mods.Common.Activities
 					{
 						moveCooldownHelper.NotifyMoveQueued();
 						foreach (var cell in rp.Path)
-							QueueChild(new AttackMoveActivity(self, () => move.MoveTo(
+							QueueChild(new AttackMoveActivity(self, MoveSpec.ToCellAt(
 								cell,
 								1,
 								ignoreActor: repairableNear != null ? null : host.Actor,
@@ -258,7 +314,7 @@ namespace OpenRA.Mods.Common.Activities
 				{
 					if (rp != null && rp.Path.Count > 0)
 						foreach (var cell in rp.Path)
-							QueueChild(new AttackMoveActivity(self, () => move.MoveTo(cell, 1, repairableNear != null ? null : host.Actor, true, moveInfo.GetTargetLineColor())));
+							QueueChild(new AttackMoveActivity(self, MoveSpec.ToCellAt(cell, 1, repairableNear != null ? null : host.Actor, true, moveInfo.GetTargetLineColor())));
 					else if (repairableNear == null)
 						QueueChild(move.MoveToTarget(self, host));
 				}

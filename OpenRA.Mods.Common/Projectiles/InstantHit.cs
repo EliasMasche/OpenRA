@@ -11,8 +11,10 @@
 
 using System.Collections.Generic;
 using OpenRA.GameRules;
+using OpenRA.GameSaves;
 using OpenRA.Graphics;
 using OpenRA.Mods.Common.Traits;
+using OpenRA.Scripting;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Projectiles
@@ -42,8 +44,12 @@ namespace OpenRA.Mods.Common.Projectiles
 		public IProjectile Create(ProjectileArgs args) { return new InstantHit(this, args); }
 	}
 
-	public class InstantHit : IProjectile
+	[SaveableEffect]
+	public class InstantHit : IProjectile, ISaveableEffect, IProjectileScriptInfo
 	{
+		const string ArgsKey = "Args";
+		const string TargetKey = "Target";
+
 		readonly ProjectileArgs args;
 		readonly InstantHitInfo info;
 
@@ -59,11 +65,35 @@ namespace OpenRA.Mods.Common.Projectiles
 			else if (info.Inaccuracy.Length > 0)
 			{
 				var maxInaccuracyOffset = Util.GetProjectileInaccuracy(info.Inaccuracy.Length, info.InaccuracyType, args);
-				var inaccuracyOffset = WVec.FromPDF(args.SourceActor.World.SharedRandom, 2) * maxInaccuracyOffset / 1024;
+				var inaccuracyOffset = WVec.FromPDF(args.World.SharedRandom, 2) * maxInaccuracyOffset / 1024;
 				target = Target.FromPos(args.PassiveTarget + inaccuracyOffset);
 			}
 			else
 				target = Target.FromPos(args.PassiveTarget);
+		}
+
+		internal InstantHit(World world, SnapshotReader r, MiniYaml yaml)
+		{
+			var nodes = yaml.ToDictionary();
+
+			args = ProjectileArgsCodec.Load(nodes[ArgsKey], world, r);
+
+			info = (InstantHitInfo)args.Weapon.Projectile;
+
+			r.DeferTarget(nodes[TargetKey].Value, t => target = t);
+		}
+
+		List<MiniYamlNode> ISaveableEffect.SaveState(World world, SnapshotWriter w)
+		{
+			var argNodes = ProjectileArgsCodec.Save(args, world, w);
+			if (argNodes == null)
+				return null;
+
+			return
+			[
+				new(ArgsKey, new MiniYaml("", argNodes)),
+				new(TargetKey, w.TargetRef(target))
+			];
 		}
 
 		public void Tick(World world)
@@ -75,7 +105,7 @@ namespace OpenRA.Mods.Common.Projectiles
 
 			// Check for blocking actors
 			if (info.Blockable && BlocksProjectiles.AnyBlockingActorsBetween(
-				world, args.SourceActor.Owner, args.Source, target.CenterPosition, info.Width, out var blockedPos))
+				args.World, args.SourceOwner, args.Source, target.CenterPosition, info.Width, out var blockedPos))
 				target = Target.FromPos(blockedPos);
 
 			var warheadArgs = new WarheadArgs(args)
@@ -92,5 +122,11 @@ namespace OpenRA.Mods.Common.Projectiles
 		{
 			return [];
 		}
+
+		WPos IProjectileScriptInfo.Position => args.Source;
+		WPos IProjectileScriptInfo.TargetPosition => target.CenterPosition;
+		ScriptProjectileInterface IProjectileScriptInfo.LuaInterface { get; set; }
+		Actor IProjectileScriptInfo.SourceActor => args.SourceActor;
+		WeaponInfo IProjectileScriptInfo.Weapon => args.Weapon;
 	}
 }

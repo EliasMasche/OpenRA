@@ -14,6 +14,7 @@ using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Activities;
 using OpenRA.Traits;
 
@@ -89,8 +90,11 @@ namespace OpenRA.Mods.Common.Traits
 		public override object Create(ActorInitializer init) { return new CrateSpawner(init.Self, this); }
 	}
 
-	public class CrateSpawner : ITick, INotifyCreated
+	public class CrateSpawner : ITick, INotifyCreated, ISaveState
 	{
+		const string CratesKey = "Crates";
+		const string TicksKey = "Ticks";
+
 		readonly Actor self;
 		readonly CrateSpawnerInfo info;
 		bool enabled;
@@ -111,9 +115,31 @@ namespace OpenRA.Mods.Common.Traits
 				.OptionOrDefault("crates", info.CheckboxEnabled);
 		}
 
+		TraitInfo ISaveState.SaveStateInfo => info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
+		{
+			return
+			[
+				new(CratesKey, FieldSaver.FormatValue(crates)),
+				new(TicksKey, FieldSaver.FormatValue(ticks))
+			];
+		}
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
+		{
+			var nodes = data.ToDictionary();
+
+			if (nodes.TryGetValue(CratesKey, out var c))
+				crates = FieldLoader.GetValue<int>(CratesKey, c.Value);
+
+			if (nodes.TryGetValue(TicksKey, out var t))
+				ticks = FieldLoader.GetValue<int>(TicksKey, t.Value);
+		}
+
 		void ITick.Tick(Actor self)
 		{
-			if (!enabled)
+			if (!enabled || self.World.IsRestoringSnapshot)
 				return;
 
 			if (--ticks <= 0)

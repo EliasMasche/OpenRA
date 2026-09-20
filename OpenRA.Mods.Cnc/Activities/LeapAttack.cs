@@ -12,6 +12,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using OpenRA.Activities;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Cnc.Traits;
 using OpenRA.Mods.Common;
 using OpenRA.Mods.Common.Activities;
@@ -21,6 +22,7 @@ using OpenRA.Traits;
 
 namespace OpenRA.Mods.Cnc.Activities
 {
+	[SaveableActivity]
 	public class LeapAttack : Activity, IActivityNotifyStanceChanged
 	{
 		readonly AttackLeapInfo info;
@@ -70,6 +72,46 @@ namespace OpenRA.Mods.Cnc.Activities
 					lastVisibleTargetTypes = target.FrozenActor.TargetTypes;
 				}
 			}
+		}
+
+		internal LeapAttack(Actor self, SnapshotReader r, MiniYaml yaml)
+		{
+			mobile = self.Trait<Mobile>();
+			attack = self.Trait<AttackLeap>();
+			info = self.Info.TraitInfoOrDefault<AttackLeapInfo>();
+			moveCooldownHelper = new MoveCooldownHelper(self.World, mobile);
+
+			var n = yaml.ToDictionary();
+			allowMovement = FieldLoader.GetValue<bool>("AllowMovement", n["AllowMovement"].Value);
+			forceAttack = FieldLoader.GetValue<bool>("ForceAttack", n["ForceAttack"].Value);
+			useLastVisibleTarget = LastVisibleTargetState.UseLastVisible(n);
+			lastVisibleMinRange = LastVisibleTargetState.MinimumRange(n);
+			lastVisibleMaxRange = LastVisibleTargetState.MaximumRange(n);
+			lastVisibleOwner = LastVisibleTargetState.Owner(n, r);
+			lastVisibleTargetTypes = LastVisibleTargetState.TargetTypes(n);
+			moveCooldownHelper.LoadState(n["Cooldown"]);
+
+			var color = n["TargetLineColor"].Value;
+			if (!string.IsNullOrEmpty(color))
+				targetLineColor = FieldLoader.GetValue<Color>("TargetLineColor", color);
+
+			r.DeferTarget(n[LastVisibleTargetState.TargetKey].Value, t => target = t);
+			r.DeferTarget(n[LastVisibleTargetState.LastVisibleTargetKey].Value, t => lastVisibleTarget = t);
+		}
+
+		public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+		{
+			var nodes = new List<MiniYamlNode>
+			{
+				new("AllowMovement", FieldSaver.FormatValue(allowMovement)),
+				new("ForceAttack", FieldSaver.FormatValue(forceAttack)),
+				new("TargetLineColor", targetLineColor.HasValue ? FieldSaver.FormatValue(targetLineColor.Value) : ""),
+				new("Cooldown", new MiniYaml("", moveCooldownHelper.SaveState()))
+			};
+
+			LastVisibleTargetState.Save(nodes, w, target, lastVisibleTarget, useLastVisibleTarget,
+				lastVisibleMinRange, lastVisibleMaxRange, lastVisibleOwner, lastVisibleTargetTypes);
+			return nodes;
 		}
 
 		protected override void OnFirstRun(Actor self)

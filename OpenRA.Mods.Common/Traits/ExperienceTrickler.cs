@@ -9,6 +9,8 @@
  */
 #endregion
 
+using System.Collections.Generic;
+using OpenRA.GameSaves;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Traits
@@ -28,8 +30,10 @@ namespace OpenRA.Mods.Common.Traits
 		public override object Create(ActorInitializer init) { return new ExperienceTrickler(init.Self, this); }
 	}
 
-	public class ExperienceTrickler : PausableConditionalTrait<ExperienceTricklerInfo>, ITick, ISync
+	public class ExperienceTrickler : PausableConditionalTrait<ExperienceTricklerInfo>, ITick, ISync, ISaveState
 	{
+		const string TicksKey = "Ticks";
+
 		readonly ExperienceTricklerInfo info;
 		readonly GainsExperience gainsExperience;
 
@@ -57,6 +61,20 @@ namespace OpenRA.Mods.Common.Traits
 				ticks = info.Interval;
 				gainsExperience.GiveExperience(info.Amount);
 			}
+		}
+
+		TraitInfo ISaveState.SaveStateInfo => info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
+		{
+			return [new(TicksKey, FieldSaver.FormatValue(ticks))];
+		}
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
+		{
+			var node = data.NodeWithKeyOrDefault(TicksKey);
+			if (node != null)
+				ticks = FieldLoader.GetValue<int>(TicksKey, node.Value.Value);
 		}
 	}
 }

@@ -9,7 +9,9 @@
  */
 #endregion
 
+using System.Collections.Generic;
 using System.Linq;
+using OpenRA.GameSaves;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Traits
@@ -43,10 +45,14 @@ namespace OpenRA.Mods.Common.Traits
 		}
 	}
 
-	public class ReloadAmmoPool : PausableConditionalTrait<ReloadAmmoPoolInfo>, ITick, INotifyAttack, ISync
+	public class ReloadAmmoPool : PausableConditionalTrait<ReloadAmmoPoolInfo>, ITick, INotifyAttack, ISync, ISaveState
 	{
+		const string RemainingTicksKey = "RemainingTicks";
+
 		AmmoPool ammoPool;
 		IReloadAmmoModifier[] modifiers;
+
+		bool ticksRestored;
 
 		[VerifySync]
 		int remainingTicks;
@@ -61,7 +67,10 @@ namespace OpenRA.Mods.Common.Traits
 			base.Created(self);
 
 			self.World.AddFrameEndTask(w =>
-				remainingTicks = Util.ApplyPercentageModifiers(Info.Delay, modifiers.Select(m => m.GetReloadAmmoModifier())));
+			{
+				if (!ticksRestored)
+					remainingTicks = Util.ApplyPercentageModifiers(Info.Delay, modifiers.Select(m => m.GetReloadAmmoModifier()));
+			});
 		}
 
 		void INotifyAttack.Attacking(Actor self, in Target target, Armament a, Barrel barrel)
@@ -90,6 +99,24 @@ namespace OpenRA.Mods.Common.Traits
 
 				ammoPool.GiveAmmo(self, reloadCount);
 			}
+		}
+
+		TraitInfo ISaveState.SaveStateInfo => Info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
+		{
+			return [new(RemainingTicksKey, FieldSaver.FormatValue(remainingTicks))];
+		}
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
+		{
+			var node = data.NodeWithKeyOrDefault(RemainingTicksKey);
+			if (node == null)
+				return;
+
+			remainingTicks = FieldLoader.GetValue<int>(RemainingTicksKey, node.Value.Value);
+
+			ticksRestored = true;
 		}
 	}
 }

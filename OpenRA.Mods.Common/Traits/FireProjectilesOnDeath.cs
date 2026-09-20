@@ -101,7 +101,9 @@ namespace OpenRA.Mods.Common.Traits
 
 						Source = source,
 						CurrentSource = () => source,
+						World = self.World,
 						SourceActor = self,
+						SourceOwner = self.Owner,
 						PassiveTarget = source + new WVec(range, 0, 0).Rotate(rotation)
 					};
 

@@ -14,6 +14,7 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.IO;
 using System.Linq;
+using OpenRA.GameSaves;
 using OpenRA.Graphics;
 using OpenRA.Mods.Common.Effects;
 using OpenRA.Primitives;
@@ -85,7 +86,7 @@ namespace OpenRA.Mods.Common.Traits
 		public override object Create(ActorInitializer init) { return new SmudgeLayer(init.Self, this); }
 	}
 
-	public class SmudgeLayer : IRenderOverlay, IWorldLoaded, ITickRender, INotifyActorDisposing
+	public class SmudgeLayer : IRenderOverlay, IWorldLoaded, ITickRender, INotifyActorDisposing, IWorldSaveState
 	{
 		struct Smudge
 		{
@@ -124,17 +125,20 @@ namespace OpenRA.Mods.Common.Traits
 
 		public void WorldLoaded(World w, WorldRenderer wr)
 		{
-			var sprites = smudges.Values.SelectMany(v => Exts.MakeArray(v.Length, x => v.GetSprite(x))).ToList();
-			var sheet = sprites[0].Sheet;
-			var blendMode = sprites[0].BlendMode;
-			var emptySprite = new Sprite(sheet, Rectangle.Empty, TextureChannel.Alpha);
+			if (wr != null)
+			{
+				var sprites = smudges.Values.SelectMany(v => Exts.MakeArray(v.Length, x => v.GetSprite(x))).ToList();
+				var sheet = sprites[0].Sheet;
+				var blendMode = sprites[0].BlendMode;
+				var emptySprite = new Sprite(sheet, Rectangle.Empty, TextureChannel.Alpha);
 
-			if (sprites.Any(s => s.BlendMode != blendMode))
-				throw new InvalidDataException("Smudges specify different blend modes. "
-					+ "Try using different smudge types for smudges that use different blend modes.");
+				if (sprites.Any(s => s.BlendMode != blendMode))
+					throw new InvalidDataException("Smudges specify different blend modes. "
+						+ "Try using different smudge types for smudges that use different blend modes.");
 
-			paletteReference = wr.Palette(Info.Palette);
-			render = new TerrainSpriteLayer(w, wr, emptySprite, blendMode, true);
+				paletteReference = wr.Palette(Info.Palette);
+				render = new TerrainSpriteLayer(w, wr, emptySprite, blendMode, true);
+			}
 
 			// Add map smudges
 			foreach (var kv in Info.InitialSmudges)
@@ -152,7 +156,50 @@ namespace OpenRA.Mods.Common.Traits
 				};
 
 				tiles.Add(kv.Key, smudge);
-				render.Update(kv.Key, seq, paletteReference, s.Depth);
+				render?.Update(kv.Key, seq, paletteReference, s.Depth);
+			}
+		}
+
+		string IWorldSaveState.SectionName => "SmudgeLayer/" + Info.Type;
+
+		void IWorldSaveState.SaveState(Actor self, Stream s, SnapshotWriter w)
+		{
+			var all = new Dictionary<CPos, Smudge>(tiles);
+			foreach (var kv in dirty)
+				all[kv.Key] = kv.Value;
+
+			var live = all.Where(kv => kv.Value.Sequence != null && kv.Value.Type != null).ToList();
+
+			var writer = new BinaryWriter(s);
+			writer.Write(live.Count);
+
+			foreach (var kv in live)
+			{
+				writer.Write(kv.Key.X);
+				writer.Write(kv.Key.Y);
+				writer.Write(kv.Value.Type);
+				writer.Write(kv.Value.Depth);
+			}
+		}
+
+		void IWorldSaveState.LoadState(Actor self, Stream s, SnapshotReader r)
+		{
+			var reader = new BinaryReader(s);
+			var count = reader.ReadInt32();
+
+			foreach (var cell in tiles.Keys.ToList())
+				RemoveSmudge(cell);
+
+			for (var i = 0; i < count; i++)
+			{
+				var cell = new CPos(reader.ReadInt32(), reader.ReadInt32());
+				var type = reader.ReadString();
+				var depth = reader.ReadInt32();
+
+				if (!smudges.TryGetValue(type, out var sequence))
+					continue;
+
+				dirty[cell] = new Smudge { Type = type, Depth = depth, Sequence = sequence };
 			}
 		}
 
@@ -187,7 +234,8 @@ namespace OpenRA.Mods.Common.Traits
 				// Existing smudge; make it deeper
 				// A null Sequence indicates a deleted smudge.
 				var tile = dirty.TryGetValue(loc, out var d) && d.Sequence != null ? d : tiles[loc];
-				var maxDepth = smudges[tile.Type].Length;
+
+				var maxDepth = world.Map.Sequences.SpritesLoaded ? smudges[tile.Type].Length : 1;
 				if (tile.Depth < maxDepth - 1)
 					tile.Depth++;
 
@@ -236,13 +284,13 @@ namespace OpenRA.Mods.Common.Traits
 					if (kv.Value.Sequence == null)
 					{
 						tiles.Remove(kv.Key);
-						render.Clear(kv.Key);
+						render?.Clear(kv.Key);
 					}
 					else
 					{
 						var smudge = kv.Value;
 						tiles[kv.Key] = smudge;
-						render.Update(kv.Key, smudge.Sequence, paletteReference, smudge.Depth);
+						render?.Update(kv.Key, smudge.Sequence, paletteReference, smudge.Depth);
 					}
 
 					remove.Add(kv.Key);
@@ -267,7 +315,7 @@ namespace OpenRA.Mods.Common.Traits
 			world.Map.CustomTerrain.CellEntryChanged -= RemoveUnacceptableSmudgeOnCellChange;
 			world.Map.Ramp.CellEntryChanged -= RemoveUnacceptableSmudgeOnCellChange;
 			world.Map.Height.CellEntryChanged -= RemoveUnacceptableSmudgeOnCellChange;
-			render.Dispose();
+			render?.Dispose();
 			disposed = true;
 		}
 	}

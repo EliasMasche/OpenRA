@@ -12,6 +12,7 @@
 using System;
 using System.Linq;
 using Eluant;
+using OpenRA.GameRules;
 using OpenRA.Mods.Common.Traits;
 using OpenRA.Scripting;
 
@@ -151,7 +152,7 @@ namespace OpenRA.Mods.Common.Scripting
 		[Desc("Returns true if actor was originally specified in the map file.")]
 		public bool IsNamedActor(Actor actor)
 		{
-			return actor.ActorID <= sma.LastMapActorID && actor.ActorID > sma.LastMapActorID - sma.Actors.Count;
+			return sma.IsMapActor(actor.ActorID);
 		}
 
 		[Desc("Returns a table of all actors tagged with the given string.")]
@@ -162,5 +163,39 @@ namespace OpenRA.Mods.Common.Scripting
 
 		[Desc("Returns a table of all the actors that are currently on the map/in the world.")]
 		public Actor[] ActorsInWorld => world.Actors.ToArray();
+
+		[Desc("Returns a table of all projectiles currently in flight. A projectile is removed from ",
+			"the world as soon as it lands, so these must be used within the same tick and never ",
+			"stored across a Trigger.AfterDelay.")]
+		public IProjectileScriptInfo[] ProjectilesInWorld =>
+			world.Effects.OfType<IProjectileScriptInfo>().ToArray();
+
+		[Desc("Returns a table of all projectiles in flight within the requested region, filtered ",
+			"using the specified function. See ProjectilesInWorld for how long these may be kept.")]
+		public IProjectileScriptInfo[] ProjectilesInCircle(WPos location, WDist radius,
+			[ScriptEmmyTypeOverride("fun(p: projectile):boolean")] LuaFunction filter = null)
+		{
+			var projectiles = world.Effects.OfType<IProjectileScriptInfo>()
+				.Where(p => (p.Position - location).LengthSquared <= radius.LengthSquared);
+
+			return FilteredObjects(projectiles, filter).ToArray();
+		}
+
+		[Desc("Returns a table of all projectiles in flight within the requested rectangle, ",
+			"filtered using the specified function. See ProjectilesInWorld for how long these may ",
+			"be kept.")]
+		public IProjectileScriptInfo[] ProjectilesInBox(WPos topLeft, WPos bottomRight,
+			[ScriptEmmyTypeOverride("fun(p: projectile):boolean")] LuaFunction filter = null)
+		{
+			var projectiles = world.Effects.OfType<IProjectileScriptInfo>()
+				.Where(p => IsInBox(p.Position, topLeft, bottomRight));
+
+			return FilteredObjects(projectiles, filter).ToArray();
+		}
+
+		static bool IsInBox(WPos p, WPos topLeft, WPos bottomRight)
+		{
+			return p.X >= topLeft.X && p.X <= bottomRight.X && p.Y >= topLeft.Y && p.Y <= bottomRight.Y;
+		}
 	}
 }

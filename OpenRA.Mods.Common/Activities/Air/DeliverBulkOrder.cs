@@ -12,18 +12,20 @@
 using System.Collections.Generic;
 using System.Linq;
 using OpenRA.Activities;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Traits;
 using OpenRA.Primitives;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Activities
 {
+	[SaveableActivity]
 	public class DeliverBulkOrder : Activity
 	{
-		readonly Actor producer;
+		Actor producer;
 		readonly List<(ActorInfo Actor, int Resources, int Cash)> orderedActors;
 		readonly string productionType;
-		readonly BulkProductionQueue queue;
+		BulkProductionQueue queue;
 		readonly Cargo cargo;
 		int delayBetweenUnloads = 0;
 
@@ -35,6 +37,44 @@ namespace OpenRA.Mods.Common.Activities
 			this.productionType = productionType;
 			this.queue = queue;
 			cargo = transport.Trait<Cargo>();
+		}
+
+		internal DeliverBulkOrder(Actor self, SnapshotReader r, MiniYaml yaml)
+		{
+			cargo = self.Trait<Cargo>();
+
+			var n = yaml.ToDictionary();
+			productionType = n["ProductionType"].Value;
+			delayBetweenUnloads = FieldLoader.GetValue<int>("DelayBetweenUnloads", n["DelayBetweenUnloads"].Value);
+
+			orderedActors = [];
+			foreach (var node in n["OrderedActors"].Nodes)
+			{
+				var parts = FieldLoader.GetValue<int[]>("OrderedActors", node.Value.Value);
+				if (self.World.Map.Rules.Actors.TryGetValue(node.Key, out var info))
+					orderedActors.Add((info, parts[0], parts[1]));
+			}
+
+			r.DeferActor(n["Producer"].Value, a =>
+			{
+				producer = a;
+				queue = a?.TraitsImplementing<BulkProductionQueue>().FirstOrDefault(q => q.Info.Type == productionType);
+			});
+		}
+
+		public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+		{
+			var ordered = new List<MiniYamlNode>();
+			foreach (var o in orderedActors)
+				ordered.Add(new MiniYamlNode(o.Actor.Name, FieldSaver.FormatValue(new[] { o.Resources, o.Cash })));
+
+			return
+			[
+				new("Producer", w.ActorRef(producer)),
+				new("ProductionType", productionType),
+				new("DelayBetweenUnloads", FieldSaver.FormatValue(delayBetweenUnloads)),
+				new("OrderedActors", new MiniYaml("", ordered))
+			];
 		}
 
 		protected override void OnFirstRun(Actor self)

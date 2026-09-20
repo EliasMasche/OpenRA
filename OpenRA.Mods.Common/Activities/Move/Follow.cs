@@ -11,14 +11,25 @@
 
 using System.Collections.Generic;
 using OpenRA.Activities;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Traits;
 using OpenRA.Primitives;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Activities
 {
+	[SaveableActivity]
 	public class Follow : Activity
 	{
+		const string TargetKey = "Target";
+		const string LastVisibleTargetKey = "LastVisibleTarget";
+		const string UseLastVisibleTargetKey = "UseLastVisibleTarget";
+		const string MinRangeKey = "MinRange";
+		const string MaxRangeKey = "MaxRange";
+		const string CooldownKey = "Cooldown";
+
+		const string TargetLineColorKey = "TargetLineColor";
+
 		readonly WDist minRange;
 		readonly WDist maxRange;
 		readonly IMove move;
@@ -45,6 +56,25 @@ namespace OpenRA.Mods.Common.Activities
 				lastVisibleTarget = Target.FromPos(target.CenterPosition);
 			else if (initialTargetPosition.HasValue)
 				lastVisibleTarget = Target.FromPos(initialTargetPosition.Value);
+		}
+
+		protected Follow(Actor self, SnapshotReader r, MiniYaml yaml)
+		{
+			move = self.Trait<IMove>();
+			moveCooldownHelper = new MoveCooldownHelper(self.World, move as Mobile) { RetryIfDestinationBlocked = true };
+
+			var nodes = yaml.ToDictionary();
+			minRange = FieldLoader.GetValue<WDist>(MinRangeKey, nodes[MinRangeKey].Value);
+			maxRange = FieldLoader.GetValue<WDist>(MaxRangeKey, nodes[MaxRangeKey].Value);
+			useLastVisibleTarget = FieldLoader.GetValue<bool>(UseLastVisibleTargetKey, nodes[UseLastVisibleTargetKey].Value);
+			moveCooldownHelper.LoadState(nodes[CooldownKey]);
+
+			var color = nodes[TargetLineColorKey].Value;
+			if (!string.IsNullOrEmpty(color))
+				targetLineColor = FieldLoader.GetValue<Color>(TargetLineColorKey, color);
+
+			r.DeferTarget(nodes[TargetKey].Value, t => target = t);
+			r.DeferTarget(nodes[LastVisibleTargetKey].Value, t => lastVisibleTarget = t);
 		}
 
 		public override bool Tick(Actor self)
@@ -84,6 +114,20 @@ namespace OpenRA.Mods.Common.Activities
 		{
 			if (targetLineColor != null)
 				yield return new TargetLineNode(useLastVisibleTarget ? lastVisibleTarget : target, targetLineColor.Value);
+		}
+
+		public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+		{
+			return
+			[
+				new(TargetKey, w.TargetRef(target)),
+				new(LastVisibleTargetKey, w.TargetRef(lastVisibleTarget)),
+				new(UseLastVisibleTargetKey, FieldSaver.FormatValue(useLastVisibleTarget)),
+				new(MinRangeKey, FieldSaver.FormatValue(minRange)),
+				new(MaxRangeKey, FieldSaver.FormatValue(maxRange)),
+				new(TargetLineColorKey, targetLineColor.HasValue ? FieldSaver.FormatValue(targetLineColor.Value) : ""),
+				new(CooldownKey, new MiniYaml("", moveCooldownHelper.SaveState()))
+			];
 		}
 	}
 }

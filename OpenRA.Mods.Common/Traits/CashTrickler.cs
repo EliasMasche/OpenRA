@@ -9,7 +9,9 @@
  */
 #endregion
 
+using System.Collections.Generic;
 using System.Linq;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Effects;
 using OpenRA.Traits;
 
@@ -45,8 +47,10 @@ namespace OpenRA.Mods.Common.Traits
 		public override object Create(ActorInitializer init) { return new CashTrickler(this); }
 	}
 
-	public class CashTrickler : PausableConditionalTrait<CashTricklerInfo>, ITick, ISync, INotifyCreated, INotifyOwnerChanged
+	public class CashTrickler : PausableConditionalTrait<CashTricklerInfo>, ITick, ISync, INotifyCreated, INotifyOwnerChanged, ISaveState
 	{
+		const string TicksKey = "Ticks";
+
 		readonly CashTricklerInfo info;
 		PlayerResources resources;
 		Cloak[] cloaks;
@@ -72,6 +76,20 @@ namespace OpenRA.Mods.Common.Traits
 		void INotifyOwnerChanged.OnOwnerChanged(Actor self, Player oldOwner, Player newOwner)
 		{
 			resources = newOwner.PlayerActor.Trait<PlayerResources>();
+		}
+
+		TraitInfo ISaveState.SaveStateInfo => Info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
+		{
+			return [new(TicksKey, FieldSaver.FormatValue(Ticks))];
+		}
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
+		{
+			var node = data.NodeWithKeyOrDefault(TicksKey);
+			if (node != null)
+				Ticks = FieldLoader.GetValue<int>(TicksKey, node.Value.Value);
 		}
 
 		void ITick.Tick(Actor self)

@@ -12,12 +12,14 @@
 using System.Collections.Generic;
 using System.Linq;
 using OpenRA.Activities;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Traits;
 using OpenRA.Primitives;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Activities
 {
+	[SaveableActivity]
 	public class MoveToDock : Activity
 	{
 		readonly DockClientManager dockClient;
@@ -42,6 +44,42 @@ namespace OpenRA.Mods.Common.Activities
 			this.dockLineColor = dockLineColor;
 			notifyDockClientMoving = self.TraitsImplementing<INotifyDockClientMoving>().ToArray();
 			moveCooldownHelper = new MoveCooldownHelper(self.World, self.Trait<IMove>() as Mobile) { RetryIfDestinationBlocked = true };
+		}
+
+		internal MoveToDock(Actor self, SnapshotReader r, MiniYaml yaml)
+		{
+			dockClient = self.Trait<DockClientManager>();
+			notifyDockClientMoving = self.TraitsImplementing<INotifyDockClientMoving>().ToArray();
+			moveCooldownHelper = new MoveCooldownHelper(self.World, self.Trait<IMove>() as Mobile) { RetryIfDestinationBlocked = true };
+
+			var n = yaml.ToDictionary();
+			forceEnter = FieldLoader.GetValue<bool>("ForceEnter", n["ForceEnter"].Value);
+			ignoreOccupancy = FieldLoader.GetValue<bool>("IgnoreOccupancy", n["IgnoreOccupancy"].Value);
+			dockingCancelled = FieldLoader.GetValue<bool>("DockingCancelled", n["DockingCancelled"].Value);
+			moveCooldownHelper.LoadState(n["Cooldown"]);
+
+			var color = n["DockLineColor"].Value;
+			if (!string.IsNullOrEmpty(color))
+				dockLineColor = FieldLoader.GetValue<Color>("DockLineColor", color);
+
+			r.DeferActor(n["DockHostActor"].Value, a =>
+			{
+				dockHostActor = a;
+				dockHost = a?.TraitsImplementing<IDockHost>().FirstOrDefault();
+			});
+		}
+
+		public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+		{
+			return
+			[
+				new("DockHostActor", w.ActorRef(dockHostActor)),
+				new("ForceEnter", FieldSaver.FormatValue(forceEnter)),
+				new("IgnoreOccupancy", FieldSaver.FormatValue(ignoreOccupancy)),
+				new("DockingCancelled", FieldSaver.FormatValue(dockingCancelled)),
+				new("DockLineColor", dockLineColor.HasValue ? FieldSaver.FormatValue(dockLineColor.Value) : ""),
+				new("Cooldown", new MiniYaml("", moveCooldownHelper.SaveState()))
+			];
 		}
 
 		protected override void OnFirstRun(Actor self)

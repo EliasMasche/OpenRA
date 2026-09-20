@@ -73,7 +73,7 @@ namespace OpenRA.Mods.Common.Traits
 		public HierarchicalPathFinderOverlay(HierarchicalPathFinderOverlayInfo info)
 		{
 			this.info = info;
-			font = Game.Renderer.Fonts[info.Font];
+			font = Renderer.FontOrDefault(info.Font);
 		}
 
 		void IWorldLoaded.WorldLoaded(World w, WorldRenderer wr)

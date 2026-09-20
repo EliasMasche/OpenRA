@@ -1,4 +1,4 @@
-#region Copyright & License Information
+﻿#region Copyright & License Information
 /*
  * Copyright (c) The OpenRA Developers and Contributors
  * This file is part of OpenRA, which is free software. It is made
@@ -12,6 +12,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using OpenRA.GameSaves;
 using OpenRA.Graphics;
 using OpenRA.Mods.Common.Orders;
 using OpenRA.Traits;
@@ -22,11 +23,19 @@ namespace OpenRA.Mods.Common.Traits
 	[Desc("Attach this to the player actor.")]
 	public class SupportPowerManagerInfo : TraitInfo, Requires<DeveloperModeInfo>, Requires<TechTreeInfo>
 	{
-		public override object Create(ActorInitializer init) { return new SupportPowerManager(init); }
+		public override object Create(ActorInitializer init) { return new SupportPowerManager(init, this); }
 	}
 
-	public class SupportPowerManager : ITick, IResolveOrder, ITechTreeElement
+	public class SupportPowerManager : ITick, IResolveOrder, ITechTreeElement, ISaveState
 	{
+		const string PowersKey = "Powers";
+
+		internal const string ChargeKey = "Charge";
+		internal const string ActiveKey = "Active";
+		internal const string OneShotFiredKey = "OneShotFired";
+
+		readonly SupportPowerManagerInfo info;
+
 		public readonly Actor Self;
 		public readonly Dictionary<string, SupportPowerInstance> Powers = [];
 
@@ -34,8 +43,9 @@ namespace OpenRA.Mods.Common.Traits
 		public readonly TechTree TechTree;
 		public readonly Lazy<RadarPings> RadarPings;
 
-		public SupportPowerManager(ActorInitializer init)
+		public SupportPowerManager(ActorInitializer init, SupportPowerManagerInfo info)
 		{
+			this.info = info;
 			Self = init.Self;
 			DevMode = Self.Trait<DeveloperMode>();
 			TechTree = Self.Trait<TechTree>();
@@ -136,6 +146,35 @@ namespace OpenRA.Mods.Common.Traits
 
 		public void PrerequisitesItemHidden(string key) { }
 		public void PrerequisitesItemVisible(string key) { }
+
+		TraitInfo ISaveState.SaveStateInfo => info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
+		{
+			if (Powers.Count == 0)
+				return null;
+
+			var powers = Powers
+				.OrderBy(kv => kv.Key, StringComparer.Ordinal)
+				.Select(kv => new MiniYamlNode(kv.Key, new MiniYaml("", kv.Value.SaveState())))
+				.ToList();
+
+			return [new(PowersKey, new MiniYaml("", powers))];
+		}
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
+		{
+			var powersNode = data.NodeWithKeyOrDefault(PowersKey);
+			if (powersNode == null)
+				return;
+
+			r.DeferCompleted(() =>
+			{
+				foreach (var node in powersNode.Value.Nodes)
+					if (Powers.TryGetValue(node.Key, out var power))
+						power.LoadState(node.Value);
+			});
+		}
 	}
 
 	public class SupportPowerInstance
@@ -170,6 +209,32 @@ namespace OpenRA.Mods.Common.Traits
 		public void ResetTimer()
 		{
 			remainingSubTicks = TotalTicks * 100;
+		}
+
+		internal List<MiniYamlNode> SaveState()
+		{
+			return
+			[
+				new(SupportPowerManager.ChargeKey, FieldSaver.FormatValue(remainingSubTicks)),
+				new(SupportPowerManager.ActiveKey, FieldSaver.FormatValue(Active)),
+				new(SupportPowerManager.OneShotFiredKey, FieldSaver.FormatValue(oneShotFired))
+			];
+		}
+
+		internal void LoadState(MiniYaml data)
+		{
+			var nodes = data.ToDictionary();
+			if (nodes.TryGetValue(SupportPowerManager.ChargeKey, out var charge))
+				remainingSubTicks = FieldLoader.GetValue<int>(SupportPowerManager.ChargeKey, charge.Value);
+
+			if (nodes.TryGetValue(SupportPowerManager.ActiveKey, out var active))
+				Active = FieldLoader.GetValue<bool>(SupportPowerManager.ActiveKey, active.Value);
+
+			if (nodes.TryGetValue(SupportPowerManager.OneShotFiredKey, out var fired))
+				oneShotFired = FieldLoader.GetValue<bool>(SupportPowerManager.OneShotFiredKey, fired.Value);
+
+			notifiedCharging = true;
+			notifiedReady = RemainingTicks == 0;
 		}
 
 		public SupportPowerInstance(string key, SupportPowerInfo info, SupportPowerManager manager)

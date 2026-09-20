@@ -10,6 +10,7 @@
 #endregion
 
 using System.Collections.Generic;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Cnc.Effects;
 using OpenRA.Mods.Common;
 using OpenRA.Mods.Common.Traits;
@@ -55,8 +56,16 @@ namespace OpenRA.Mods.Cnc.Traits
 	}
 
 	public class ConyardChronoReturn : ITick, ISync, IObservesVariables, ISelectionBar, INotifySold,
-		IDeathActorInitModifier, ITransformActorInitModifier
+		IDeathActorInitModifier, ITransformActorInitModifier, ISaveState
 	{
+		const string OriginKey = "Origin";
+		const string ReturnTicksKey = "ReturnTicks";
+		const string DurationKey = "Duration";
+		const string TriggeredKey = "Triggered";
+		const string ReturnOriginalKey = "ReturnOriginal";
+		const string SellingKey = "Selling";
+		const string ChronosphereKey = "Chronosphere";
+
 		readonly ConyardChronoReturnInfo info;
 		readonly Health health;
 		readonly Actor self;
@@ -65,7 +74,7 @@ namespace OpenRA.Mods.Cnc.Traits
 		int conditionToken = Actor.InvalidConditionToken;
 
 		Actor chronosphere;
-		readonly int duration;
+		int duration;
 		bool returnOriginal;
 		bool selling;
 
@@ -73,7 +82,7 @@ namespace OpenRA.Mods.Cnc.Traits
 		int returnTicks = 0;
 
 		[VerifySync]
-		readonly CPos origin;
+		CPos origin;
 
 		[VerifySync]
 		bool triggered;
@@ -117,12 +126,14 @@ namespace OpenRA.Mods.Cnc.Traits
 
 			triggered = true;
 
-			self.World.AddFrameEndTask(w => w.Add(new ConyardChronoVortex(self, () =>
-			{
-				triggered = false;
-				if (conditionToken != Actor.InvalidConditionToken && !self.Disposed)
-					conditionToken = self.RevokeCondition(conditionToken);
-			})));
+			self.World.AddFrameEndTask(w => w.Add(new ConyardChronoVortex(self)));
+		}
+
+		public void VortexCompleted()
+		{
+			triggered = false;
+			if (conditionToken != Actor.InvalidConditionToken && !self.Disposed)
+				conditionToken = self.RevokeCondition(conditionToken);
 		}
 
 		CPos? ChooseBestDestinationCell(MobileInfo mobileInfo, CPos destination)
@@ -241,5 +252,52 @@ namespace OpenRA.Mods.Cnc.Traits
 
 		Color ISelectionBar.GetColor() { return info.TimeBarColor; }
 		bool ISelectionBar.DisplayWhenEmpty => false;
+
+		TraitInfo ISaveState.SaveStateInfo => info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
+		{
+			return
+			[
+				new(OriginKey, FieldSaver.FormatValue(origin)),
+				new(ReturnTicksKey, FieldSaver.FormatValue(returnTicks)),
+				new(DurationKey, FieldSaver.FormatValue(duration)),
+				new(TriggeredKey, FieldSaver.FormatValue(triggered)),
+				new(ReturnOriginalKey, FieldSaver.FormatValue(returnOriginal)),
+				new(SellingKey, FieldSaver.FormatValue(selling)),
+				new(ChronosphereKey, w.ActorRef(chronosphere))
+			];
+		}
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
+		{
+			var nodes = data.ToDictionary();
+
+			if (nodes.TryGetValue(OriginKey, out var originNode))
+				origin = FieldLoader.GetValue<CPos>(OriginKey, originNode.Value);
+
+			if (nodes.TryGetValue(ReturnTicksKey, out var ticks))
+				returnTicks = FieldLoader.GetValue<int>(ReturnTicksKey, ticks.Value);
+
+			if (nodes.TryGetValue(DurationKey, out var d))
+				duration = FieldLoader.GetValue<int>(DurationKey, d.Value);
+
+			if (nodes.TryGetValue(ReturnOriginalKey, out var original))
+				returnOriginal = FieldLoader.GetValue<bool>(ReturnOriginalKey, original.Value);
+
+			if (nodes.TryGetValue(SellingKey, out var sellingNode))
+				selling = FieldLoader.GetValue<bool>(SellingKey, sellingNode.Value);
+
+			if (nodes.TryGetValue(TriggeredKey, out var t))
+			{
+				triggered = FieldLoader.GetValue<bool>(TriggeredKey, t.Value);
+
+				if (triggered && conditionToken == Actor.InvalidConditionToken && info.Condition != null)
+					conditionToken = self.GrantCondition(info.Condition);
+			}
+
+			if (nodes.TryGetValue(ChronosphereKey, out var sphere))
+				r.DeferActor(sphere.Value, a => chronosphere = a);
+		}
 	}
 }

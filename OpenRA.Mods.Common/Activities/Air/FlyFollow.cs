@@ -11,12 +11,14 @@
 
 using System.Collections.Generic;
 using OpenRA.Activities;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Traits;
 using OpenRA.Primitives;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Activities
 {
+	[SaveableActivity]
 	public class FlyFollow : Activity
 	{
 		readonly Aircraft aircraft;
@@ -44,6 +46,38 @@ namespace OpenRA.Mods.Common.Activities
 				lastVisibleTarget = Target.FromPos(target.CenterPosition);
 			else if (initialTargetPosition.HasValue)
 				lastVisibleTarget = Target.FromPos(initialTargetPosition.Value);
+		}
+
+		internal FlyFollow(Actor self, SnapshotReader r, MiniYaml yaml)
+		{
+			aircraft = self.Trait<Aircraft>();
+
+			var n = yaml.ToDictionary();
+			minRange = FieldLoader.GetValue<WDist>("MinRange", n["MinRange"].Value);
+			maxRange = FieldLoader.GetValue<WDist>("MaxRange", n["MaxRange"].Value);
+			useLastVisibleTarget = FieldLoader.GetValue<bool>("UseLastVisibleTarget", n["UseLastVisibleTarget"].Value);
+			wasMovingWithinRange = FieldLoader.GetValue<bool>("WasMovingWithinRange", n["WasMovingWithinRange"].Value);
+
+			var color = n["TargetLineColor"].Value;
+			if (!string.IsNullOrEmpty(color))
+				targetLineColor = FieldLoader.GetValue<Color>("TargetLineColor", color);
+
+			r.DeferTarget(n["Target"].Value, t => target = t);
+			r.DeferTarget(n["LastVisibleTarget"].Value, t => lastVisibleTarget = t);
+		}
+
+		public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+		{
+			return
+			[
+				new("Target", w.TargetRef(target)),
+				new("LastVisibleTarget", w.TargetRef(lastVisibleTarget)),
+				new("UseLastVisibleTarget", FieldSaver.FormatValue(useLastVisibleTarget)),
+				new("WasMovingWithinRange", FieldSaver.FormatValue(wasMovingWithinRange)),
+				new("MinRange", FieldSaver.FormatValue(minRange)),
+				new("MaxRange", FieldSaver.FormatValue(maxRange)),
+				new("TargetLineColor", targetLineColor.HasValue ? FieldSaver.FormatValue(targetLineColor.Value) : "")
+			];
 		}
 
 		public override bool Tick(Actor self)

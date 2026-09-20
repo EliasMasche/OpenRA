@@ -10,8 +10,10 @@
 #endregion
 
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using OpenRA.Activities;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Cnc.Traits;
 using OpenRA.Mods.Common.Traits;
 using OpenRA.Mods.Common.Traits.Render;
@@ -20,9 +22,10 @@ using OpenRA.Traits;
 
 namespace OpenRA.Mods.Cnc.Activities
 {
+	[SaveableActivity]
 	public class Teleport : Activity
 	{
-		readonly Actor teleporter;
+		Actor teleporter;
 		readonly int? maximumDistance;
 		readonly bool killOnFailure;
 		readonly BitSet<DamageType> killDamageTypes;
@@ -50,6 +53,42 @@ namespace OpenRA.Mods.Cnc.Activities
 
 			if (!interruptable)
 				IsInterruptible = false;
+		}
+
+		internal Teleport(Actor _, SnapshotReader r, MiniYaml yaml)
+		{
+			var n = yaml.ToDictionary();
+			destination = FieldLoader.GetValue<CPos>("Destination", n["Destination"].Value);
+			killCargo = FieldLoader.GetValue<bool>("KillCargo", n["KillCargo"].Value);
+			screenFlash = FieldLoader.GetValue<bool>("ScreenFlash", n["ScreenFlash"].Value);
+			sound = n["Sound"].Value;
+			killOnFailure = FieldLoader.GetValue<bool>("KillOnFailure", n["KillOnFailure"].Value);
+			killDamageTypes = FieldLoader.GetValue<BitSet<DamageType>>("KillDamageTypes", n["KillDamageTypes"].Value);
+
+			var max = n["MaximumDistance"].Value;
+			if (!string.IsNullOrEmpty(max))
+				maximumDistance = FieldLoader.GetValue<int>("MaximumDistance", max);
+
+			if (!FieldLoader.GetValue<bool>("Interruptible", n["Interruptible"].Value))
+				IsInterruptible = false;
+
+			r.DeferActor(n["Teleporter"].Value, a => teleporter = a);
+		}
+
+		public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+		{
+			return
+			[
+				new("Teleporter", w.ActorRef(teleporter)),
+				new("Destination", FieldSaver.FormatValue(destination)),
+				new("MaximumDistance", maximumDistance.HasValue ? FieldSaver.FormatValue(maximumDistance.Value) : ""),
+				new("KillCargo", FieldSaver.FormatValue(killCargo)),
+				new("ScreenFlash", FieldSaver.FormatValue(screenFlash)),
+				new("Sound", sound ?? ""),
+				new("KillOnFailure", FieldSaver.FormatValue(killOnFailure)),
+				new("KillDamageTypes", FieldSaver.FormatValue(killDamageTypes)),
+				new("Interruptible", FieldSaver.FormatValue(IsInterruptible))
+			];
 		}
 
 		public override bool Tick(Actor self)

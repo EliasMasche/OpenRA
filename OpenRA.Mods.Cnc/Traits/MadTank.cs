@@ -12,6 +12,7 @@
 using System.Collections.Generic;
 using OpenRA.Activities;
 using OpenRA.GameRules;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Activities;
 using OpenRA.Mods.Common.Orders;
 using OpenRA.Mods.Common.Traits;
@@ -145,6 +146,7 @@ namespace OpenRA.Mods.Cnc.Traits
 				self.QueueActivity(order.Queued, new DetonationSequence(self, this));
 		}
 
+		[SaveableActivity]
 		sealed class DetonationSequence : Activity
 		{
 			readonly Actor self;
@@ -170,6 +172,30 @@ namespace OpenRA.Mods.Cnc.Traits
 
 				move = self.Trait<IMove>();
 				wfsb = self.Trait<WithFacingSpriteBody>();
+			}
+
+			internal DetonationSequence(Actor self, SnapshotReader r, MiniYaml yaml)
+			{
+				this.self = self;
+				mad = self.Trait<MadTank>();
+				move = self.Trait<IMove>();
+				wfsb = self.Trait<WithFacingSpriteBody>();
+
+				var n = yaml.ToDictionary();
+				ticks = FieldLoader.GetValue<int>("Ticks", n["Ticks"].Value);
+				assignTargetOnFirstRun = FieldLoader.GetValue<bool>("AssignTargetOnFirstRun", n["AssignTargetOnFirstRun"].Value);
+
+				r.DeferTarget(n["Target"].Value, t => target = t);
+			}
+
+			public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+			{
+				return
+				[
+					new("Target", w.TargetRef(target)),
+					new("Ticks", FieldSaver.FormatValue(ticks)),
+					new("AssignTargetOnFirstRun", FieldSaver.FormatValue(assignTargetOnFirstRun))
+				];
 			}
 
 			protected override void OnFirstRun(Actor self)

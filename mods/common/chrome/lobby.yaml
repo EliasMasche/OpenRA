@@ -106,6 +106,13 @@ Background@SERVER_LOBBY:
 			Height: 25
 			Text: button-server-lobby-changemap
 			Font: Bold
+		Button@LOADSAVE_BUTTON:
+			X: PARENT_WIDTH - WIDTH - 204
+			Y: 291
+			Width: 120
+			Height: 25
+			Text: button-server-lobby-loadsave
+			Font: Bold
 		Container@LOBBYCHAT:
 			X: 20
 			Y: PARENT_HEIGHT - HEIGHT - 20

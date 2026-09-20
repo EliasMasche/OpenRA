@@ -11,6 +11,7 @@
 
 using System.Collections.Generic;
 using System.Linq;
+using OpenRA.GameSaves;
 using OpenRA.Primitives;
 using OpenRA.Traits;
 
@@ -74,8 +75,16 @@ namespace OpenRA.Mods.Common.Traits
 		public override object Create(ActorInitializer init) { return new DeveloperMode(this); }
 	}
 
-	public class DeveloperMode : IResolveOrder, ISync, INotifyCreated, IUnlocksRenderPlayer
+	public class DeveloperMode : IResolveOrder, ISync, INotifyCreated, IUnlocksRenderPlayer, ISaveState
 	{
+		const string FastChargeKey = "FastCharge";
+		const string AllTechKey = "AllTech";
+		const string FastBuildKey = "FastBuild";
+		const string DisableShroudKey = "DisableShroud";
+		const string PathDebugKey = "PathDebug";
+		const string UnlimitedPowerKey = "UnlimitedPower";
+		const string BuildAnywhereKey = "BuildAnywhere";
+
 		public static class Orders
 		{
 			public const string All = "DevAll";
@@ -154,6 +163,43 @@ namespace OpenRA.Mods.Common.Traits
 		{
 			Enabled = self.World.LobbyInfo.NonBotPlayers.Count() == 1 || self.World.LobbyInfo.GlobalSettings
 				.OptionOrDefault("cheats", info.CheckboxEnabled);
+		}
+
+		TraitInfo ISaveState.SaveStateInfo => info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
+		{
+			if (!fastCharge && !allTech && !fastBuild && !disableShroud && !pathDebug && !unlimitedPower && !buildAnywhere)
+				return null;
+
+			return
+			[
+				new(FastChargeKey, FieldSaver.FormatValue(fastCharge)),
+				new(AllTechKey, FieldSaver.FormatValue(allTech)),
+				new(FastBuildKey, FieldSaver.FormatValue(fastBuild)),
+				new(DisableShroudKey, FieldSaver.FormatValue(disableShroud)),
+				new(PathDebugKey, FieldSaver.FormatValue(pathDebug)),
+				new(UnlimitedPowerKey, FieldSaver.FormatValue(unlimitedPower)),
+				new(BuildAnywhereKey, FieldSaver.FormatValue(buildAnywhere))
+			];
+		}
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
+		{
+			var nodes = data.ToDictionary();
+
+			bool Flag(string key, bool current)
+			{
+				return nodes.TryGetValue(key, out var node) ? FieldLoader.GetValue<bool>(key, node.Value) : current;
+			}
+
+			fastCharge = Flag(FastChargeKey, fastCharge);
+			allTech = Flag(AllTechKey, allTech);
+			fastBuild = Flag(FastBuildKey, fastBuild);
+			disableShroud = Flag(DisableShroudKey, disableShroud);
+			pathDebug = Flag(PathDebugKey, pathDebug);
+			unlimitedPower = Flag(UnlimitedPowerKey, unlimitedPower);
+			buildAnywhere = Flag(BuildAnywhereKey, buildAnywhere);
 		}
 
 		public void ResolveOrder(Actor self, Order order)

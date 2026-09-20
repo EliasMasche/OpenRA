@@ -10,7 +10,9 @@
 #endregion
 
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using OpenRA.GameSaves;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Traits
@@ -34,7 +36,7 @@ namespace OpenRA.Mods.Common.Traits
 		public override object Create(ActorInitializer init) { return new PowerManager(init.Self, this); }
 	}
 
-	public class PowerManager : INotifyCreated, ITick, ISync, IResolveOrder
+	public class PowerManager : INotifyCreated, ITick, ISync, IResolveOrder, IWorldSaveState
 	{
 		[FluentReference("cheat", "player", "suffix")]
 		const string CheatUsed = "notification-cheat-used";
@@ -47,6 +49,8 @@ namespace OpenRA.Mods.Common.Traits
 		readonly DeveloperMode devMode;
 
 		readonly Dictionary<Actor, int> powerDrain = [];
+
+		readonly string sectionName;
 
 		[VerifySync]
 		public int PowerProvided { get; private set; }
@@ -73,6 +77,7 @@ namespace OpenRA.Mods.Common.Traits
 			devMode = self.Trait<DeveloperMode>();
 			wasHackEnabled = devMode.UnlimitedPower;
 			PlayLowPowerNotification = info.AdviceInterval > 0;
+			sectionName = "PowerManager/" + self.Owner.InternalName;
 		}
 
 		void INotifyCreated.Created(Actor self)
@@ -228,6 +233,48 @@ namespace OpenRA.Mods.Common.Traits
 					"player", self.Owner.ResolvedPlayerName,
 					"suffix", ""));
 			}
+		}
+
+		string IWorldSaveState.SectionName => sectionName;
+
+		void IWorldSaveState.SaveState(Actor self, Stream s, SnapshotWriter w)
+		{
+			var writer = new BinaryWriter(s);
+
+			writer.Write(PowerProvided);
+			writer.Write(PowerDrained);
+
+			var entries = powerDrain.OrderBy(kv => kv.Key.ActorID).ToList();
+			writer.Write(entries.Count);
+			foreach (var kv in entries)
+			{
+				writer.Write(kv.Key.ActorID);
+				writer.Write(kv.Value);
+			}
+		}
+
+		void IWorldSaveState.LoadState(Actor self, Stream s, SnapshotReader r)
+		{
+			var reader = new BinaryReader(s);
+
+			PowerProvided = reader.ReadInt32();
+			PowerDrained = reader.ReadInt32();
+
+			powerDrain.Clear();
+			var count = reader.ReadInt32();
+			for (var i = 0; i < count; i++)
+			{
+				var actorID = reader.ReadUInt32();
+				var amount = reader.ReadInt32();
+
+				var actor = self.World.GetActorById(actorID);
+				if (actor != null)
+					powerDrain[actor] = amount;
+			}
+
+			isLowPower = ExcessPower < 0;
+			wasLowPower = isLowPower;
+			UpdatePowerRequiringActors();
 		}
 	}
 }

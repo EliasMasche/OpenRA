@@ -13,6 +13,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Activities;
 using OpenRA.Primitives;
 using OpenRA.Traits;
@@ -89,8 +90,10 @@ namespace OpenRA.Mods.Common.Traits
 	}
 
 	public class Harvester : DockClientBase<HarvesterInfo>, IIssueOrder, IResolveOrder, IOrderVoice,
-		ISpeedModifier, ISync, INotifyCreated
+		ISpeedModifier, ISync, INotifyCreated, ISaveState
 	{
+		const string CurrentUnloadTicksKey = "CurrentUnloadTicks";
+
 		Mobile mobile;
 		readonly IResourceLayer resourceLayer;
 		readonly ResourceClaimLayer claimLayer;
@@ -117,7 +120,7 @@ namespace OpenRA.Mods.Common.Traits
 			mobile = self.TraitOrDefault<Mobile>();
 			UpdateCondition(self);
 
-			if (Info.SearchOnCreation && mobile != null)
+			if (Info.SearchOnCreation && mobile != null && !self.World.IsRestoringSnapshot)
 				self.QueueActivity(new FindAndDeliverResources(self));
 
 			base.Created(self);
@@ -289,6 +292,20 @@ namespace OpenRA.Mods.Common.Traits
 
 			if (conditionToken != Actor.InvalidConditionToken)
 				conditionToken = self.RevokeCondition(conditionToken);
+		}
+
+		TraitInfo ISaveState.SaveStateInfo => Info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
+		{
+			return [new(CurrentUnloadTicksKey, FieldSaver.FormatValue(currentUnloadTicks))];
+		}
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
+		{
+			var node = data.NodeWithKeyOrDefault(CurrentUnloadTicksKey);
+			if (node != null)
+				currentUnloadTicks = FieldLoader.GetValue<int>(CurrentUnloadTicksKey, node.Value.Value);
 		}
 
 		sealed class HarvestOrderTargeter : IOrderTargeter

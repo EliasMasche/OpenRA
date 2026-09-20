@@ -11,6 +11,7 @@
 
 using System.Collections.Frozen;
 using System.Collections.Generic;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Activities;
 using OpenRA.Mods.Common.Orders;
 using OpenRA.Primitives;
@@ -63,7 +64,7 @@ namespace OpenRA.Mods.Common.Traits
 	}
 
 	public class Passenger : IIssueOrder, IResolveOrder, IOrderVoice,
-		INotifyRemovedFromWorld, INotifyEnteredCargo, INotifyExitedCargo, INotifyKilled, IObservesVariables
+		INotifyRemovedFromWorld, INotifyEnteredCargo, INotifyExitedCargo, INotifyKilled, IObservesVariables, ISaveState, INotifyStateRestored
 	{
 		public readonly PassengerInfo Info;
 		public Actor Transport;
@@ -241,6 +242,24 @@ namespace OpenRA.Mods.Common.Traits
 		void RequireForceMoveConditionChanged(Actor self, IReadOnlyDictionary<string, int> conditions)
 		{
 			requireForceMove = Info.RequireForceMoveCondition.Evaluate(conditions);
+		}
+
+		TraitInfo ISaveState.SaveStateInfo => Info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
+		{
+			return [new("Transport", w.ActorRef(Transport))];
+		}
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
+		{
+			r.DeferActor(data.NodeWithKeyOrDefault("Transport").Value.Value, a => Transport = a);
+		}
+
+		void INotifyStateRestored.StateRestored(Actor self)
+		{
+			if (Transport != null)
+				((INotifyEnteredCargo)this).OnEnteredCargo(self, Transport);
 		}
 	}
 }

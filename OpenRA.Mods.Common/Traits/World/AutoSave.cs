@@ -14,6 +14,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using OpenRA.GameSaves;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Traits
@@ -86,11 +87,7 @@ namespace OpenRA.Mods.Common.Traits
 
 		static IEnumerable<FileSystemInfo> GetAutoSaveFiles()
 		{
-			var mod = Game.ModData.Manifest;
-
-			var saveFolderPath = Path.Combine(Platform.SupportDir, "Saves", mod.Id, mod.Metadata.Version);
-
-			var autoSaveDirectoryInfo = new DirectoryInfo(saveFolderPath);
+			var autoSaveDirectoryInfo = new DirectoryInfo(SavePaths.BaseSaveDirectory(Game.ModData.Manifest));
 
 			if (!autoSaveDirectoryInfo.Exists)
 				return [];

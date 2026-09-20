@@ -11,6 +11,7 @@
 
 using System.Collections.Generic;
 using OpenRA.Activities;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Traits;
 using OpenRA.Primitives;
 using OpenRA.Traits;
@@ -22,6 +23,13 @@ namespace OpenRA.Mods.Common.Activities
 	public abstract class Enter : Activity
 	{
 		enum EnterState { Approaching, Entering, Exiting, Finished }
+
+		protected const string TargetKey = "Target";
+		protected const string LastVisibleTargetKey = "LastVisibleTarget";
+		protected const string UseLastVisibleTargetKey = "UseLastVisibleTarget";
+		protected const string LastStateKey = "LastState";
+		protected const string TargetLineColorKey = "TargetLineColor";
+		protected const string CooldownKey = "Cooldown";
 
 		readonly IMove move;
 		readonly Color? targetLineColor;
@@ -39,6 +47,39 @@ namespace OpenRA.Mods.Common.Activities
 			this.targetLineColor = targetLineColor;
 			ChildHasPriority = false;
 			moveCooldownHelper = new MoveCooldownHelper(self.World, move as Mobile) { RetryIfDestinationBlocked = true };
+		}
+
+		protected Enter(Actor self, SnapshotReader r, MiniYaml yaml)
+		{
+			move = self.Trait<IMove>();
+			ChildHasPriority = false;
+			moveCooldownHelper = new MoveCooldownHelper(self.World, move as Mobile) { RetryIfDestinationBlocked = true };
+
+			var nodes = yaml.ToDictionary();
+
+			lastState = FieldLoader.GetValue<EnterState>(LastStateKey, nodes[LastStateKey].Value);
+			useLastVisibleTarget = FieldLoader.GetValue<bool>(UseLastVisibleTargetKey, nodes[UseLastVisibleTargetKey].Value);
+			moveCooldownHelper.LoadState(nodes[CooldownKey]);
+
+			var color = nodes[TargetLineColorKey].Value;
+			if (!string.IsNullOrEmpty(color))
+				targetLineColor = FieldLoader.GetValue<Color>(TargetLineColorKey, color);
+
+			r.DeferTarget(nodes[TargetKey].Value, t => target = t);
+			r.DeferTarget(nodes[LastVisibleTargetKey].Value, t => lastVisibleTarget = t);
+		}
+
+		public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+		{
+			return
+			[
+				new(TargetKey, w.TargetRef(target)),
+				new(LastVisibleTargetKey, w.TargetRef(lastVisibleTarget)),
+				new(UseLastVisibleTargetKey, FieldSaver.FormatValue(useLastVisibleTarget)),
+				new(LastStateKey, FieldSaver.FormatValue(lastState)),
+				new(TargetLineColorKey, targetLineColor.HasValue ? FieldSaver.FormatValue(targetLineColor.Value) : ""),
+				new(CooldownKey, new MiniYaml("", moveCooldownHelper.SaveState()))
+			];
 		}
 
 		/// <summary>

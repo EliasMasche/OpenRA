@@ -10,14 +10,18 @@
 #endregion
 
 using System.Collections.Generic;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Traits;
 using OpenRA.Primitives;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Activities
 {
+	[SaveableActivity]
 	public class MoveOnto : MoveAdjacentTo
 	{
+		protected const string OffsetKey = "Offset";
+
 		readonly WVec offset = WVec.Zero;
 
 		public MoveOnto(Actor self, in Target target, WVec? offset = null, WPos? initialTargetPosition = null, Color? targetLineColor = null)
@@ -25,6 +29,12 @@ namespace OpenRA.Mods.Common.Activities
 		{
 			if (offset.HasValue)
 				this.offset = offset.Value;
+		}
+
+		protected MoveOnto(Actor self, SnapshotReader r, MiniYaml yaml)
+			: base(self, r, yaml)
+		{
+			offset = FieldLoader.GetValue<WVec>(OffsetKey, yaml.NodeWithKeyOrDefault(OffsetKey).Value.Value);
 		}
 
 		protected override void SetVisibleTargetLocation(Actor self, Target target)
@@ -51,6 +61,13 @@ namespace OpenRA.Mods.Common.Activities
 				SearchCells[0] = lastVisibleTargetLocation;
 
 			return (false, Mobile.PathFinder.FindPathToTargetCells(self, self.Location, SearchCells, check));
+		}
+
+		public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+		{
+			var nodes = base.SaveState(self, w);
+			nodes.Add(new MiniYamlNode(OffsetKey, FieldSaver.FormatValue(offset)));
+			return nodes;
 		}
 	}
 }

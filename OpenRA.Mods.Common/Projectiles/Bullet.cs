@@ -15,11 +15,13 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Numerics;
 using OpenRA.GameRules;
+using OpenRA.GameSaves;
 using OpenRA.Graphics;
 using OpenRA.Mods.Common.Effects;
 using OpenRA.Mods.Common.Graphics;
 using OpenRA.Mods.Common.Traits;
 using OpenRA.Primitives;
+using OpenRA.Scripting;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Projectiles
@@ -143,20 +145,34 @@ namespace OpenRA.Mods.Common.Projectiles
 		public virtual IProjectile Create(ProjectileArgs args) { return new Bullet(this, args); }
 	}
 
-	public class Bullet : IProjectile, ISync
+	[SaveableEffect]
+	public class Bullet : IProjectile, ISync, ISaveableEffect, IProjectileScriptInfo
 	{
+		const string ArgsKey = "Args";
+		const string PosKey = "Pos";
+		const string LastPosKey = "LastPos";
+		const string TargetKey = "Target";
+		const string SourceKey = "Source";
+		const string AngleKey = "Angle";
+		const string SpeedKey = "Speed";
+		const string FacingKey = "Facing";
+		const string LengthKey = "Length";
+		const string TicksKey = "Ticks";
+		const string SmokeTicksKey = "SmokeTicks";
+		const string RemainingBouncesKey = "RemainingBounces";
+
 		readonly BulletInfo info;
 		protected readonly ProjectileArgs Args;
 		protected readonly Animation Animation;
 		readonly WAngle facing;
 		readonly WAngle angle;
 		readonly WDist speed;
-		readonly string trailPalette;
+		string trailPalette;
 
 		readonly Vector3 shadowColor;
 		readonly float shadowAlpha;
 
-		readonly ContrailRenderable contrail;
+		ContrailRenderable contrail;
 
 		[VerifySync]
 		protected WPos pos, lastPos, target, source;
@@ -209,7 +225,7 @@ namespace OpenRA.Mods.Common.Projectiles
 			{
 				var startcolor = Color.FromArgb(info.ContrailStartColorAlpha, info.ContrailStartColor);
 				var endcolor = Color.FromArgb(info.ContrailEndColorAlpha, info.ContrailEndColor ?? startcolor);
-				contrail = new ContrailRenderable(world, args.SourceActor,
+				contrail = new ContrailRenderable(world, args.SourceOwner,
 					startcolor, info.ContrailStartColorUsePlayerColor,
 					endcolor, info.ContrailEndColor == null ? info.ContrailStartColorUsePlayerColor : info.ContrailEndColorUsePlayerColor,
 					info.ContrailStartWidth,
@@ -219,7 +235,7 @@ namespace OpenRA.Mods.Common.Projectiles
 
 			trailPalette = info.TrailPalette;
 			if (info.TrailUsePlayerPalette)
-				trailPalette += args.SourceActor.Owner.InternalName;
+				trailPalette += args.SourceOwner.InternalName;
 
 			smokeTicks = info.TrailDelay;
 			remainingBounces = info.BounceCount;
@@ -227,6 +243,81 @@ namespace OpenRA.Mods.Common.Projectiles
 			var sColor = info.ShadowColor.ToVector4();
 			shadowColor = sColor.AsVector3();
 			shadowAlpha = sColor.W;
+		}
+
+		protected Bullet(World world, SnapshotReader r, MiniYaml yaml)
+		{
+			var nodes = yaml.ToDictionary();
+
+			Args = ProjectileArgsCodec.Load(nodes[ArgsKey], world, r);
+
+			info = (BulletInfo)Args.Weapon.Projectile;
+
+			angle = FieldLoader.GetValue<WAngle>(AngleKey, nodes[AngleKey].Value);
+			speed = FieldLoader.GetValue<WDist>(SpeedKey, nodes[SpeedKey].Value);
+			target = FieldLoader.GetValue<WPos>(TargetKey, nodes[TargetKey].Value);
+
+			pos = FieldLoader.GetValue<WPos>(PosKey, nodes[PosKey].Value);
+			lastPos = FieldLoader.GetValue<WPos>(LastPosKey, nodes[LastPosKey].Value);
+			source = FieldLoader.GetValue<WPos>(SourceKey, nodes[SourceKey].Value);
+			facing = FieldLoader.GetValue<WAngle>(FacingKey, nodes[FacingKey].Value);
+			length = FieldLoader.GetValue<int>(LengthKey, nodes[LengthKey].Value);
+			ticks = FieldLoader.GetValue<int>(TicksKey, nodes[TicksKey].Value);
+			smokeTicks = FieldLoader.GetValue<int>(SmokeTicksKey, nodes[SmokeTicksKey].Value);
+			remainingBounces = FieldLoader.GetValue<int>(RemainingBouncesKey, nodes[RemainingBouncesKey].Value);
+
+			if (!string.IsNullOrEmpty(info.Image))
+			{
+				Animation = new Animation(world, info.Image, new Func<WAngle>(GetEffectiveFacing));
+
+				Animation.PlayRepeating(info.Sequences[0]);
+			}
+
+			if (info.ContrailLength > 0)
+				contrail = CreateContrail(world, Args);
+
+			trailPalette = info.TrailPalette;
+			if (info.TrailUsePlayerPalette)
+				trailPalette += Args.SourceOwner.InternalName;
+
+			var restoredColor = info.ShadowColor.ToVector4();
+			shadowColor = restoredColor.AsVector3();
+			shadowAlpha = restoredColor.W;
+		}
+
+		ContrailRenderable CreateContrail(World world, ProjectileArgs args)
+		{
+			var startcolor = Color.FromArgb(info.ContrailStartColorAlpha, info.ContrailStartColor);
+			var endcolor = Color.FromArgb(info.ContrailEndColorAlpha, info.ContrailEndColor ?? startcolor);
+			return new ContrailRenderable(world, args.SourceOwner,
+				startcolor, info.ContrailStartColorUsePlayerColor,
+				endcolor, info.ContrailEndColor == null ? info.ContrailStartColorUsePlayerColor : info.ContrailEndColorUsePlayerColor,
+				info.ContrailStartWidth,
+				info.ContrailEndWidth ?? info.ContrailStartWidth,
+				info.ContrailLength, info.ContrailDelay, info.ContrailZOffset);
+		}
+
+		List<MiniYamlNode> ISaveableEffect.SaveState(World world, SnapshotWriter w)
+		{
+			var argNodes = ProjectileArgsCodec.Save(Args, world, w);
+			if (argNodes == null)
+				return null;
+
+			return
+			[
+				new(ArgsKey, new MiniYaml("", argNodes)),
+				new(PosKey, FieldSaver.FormatValue(pos)),
+				new(LastPosKey, FieldSaver.FormatValue(lastPos)),
+				new(TargetKey, FieldSaver.FormatValue(target)),
+				new(SourceKey, FieldSaver.FormatValue(source)),
+				new(AngleKey, FieldSaver.FormatValue(angle)),
+				new(SpeedKey, FieldSaver.FormatValue(speed)),
+				new(FacingKey, FieldSaver.FormatValue(facing)),
+				new(LengthKey, FieldSaver.FormatValue(length)),
+				new(TicksKey, FieldSaver.FormatValue(ticks)),
+				new(SmokeTicksKey, FieldSaver.FormatValue(smokeTicks)),
+				new(RemainingBouncesKey, FieldSaver.FormatValue(remainingBounces))
+			];
 		}
 
 		WAngle GetEffectiveFacing()
@@ -263,7 +354,7 @@ namespace OpenRA.Mods.Common.Projectiles
 		bool ShouldExplode(World world)
 		{
 			// Check for walls or other blocking obstacles
-			if (info.Blockable && BlocksProjectiles.AnyBlockingActorsBetween(world, Args.SourceActor.Owner, lastPos, pos, info.Width, out var blockedPos))
+			if (info.Blockable && BlocksProjectiles.AnyBlockingActorsBetween(world, Args.SourceOwner, lastPos, pos, info.Width, out var blockedPos))
 			{
 				pos = blockedPos;
 				return true;
@@ -293,7 +384,7 @@ namespace OpenRA.Mods.Common.Projectiles
 				if (info.InvalidBounceTerrain.Contains(world.Map.GetTerrainInfo(cell).Type))
 					return true;
 
-				if (AnyValidTargetsInRadius(world, pos, info.Width, Args.SourceActor, true))
+				if (AnyValidTargetsInRadius(world, pos, info.Width, Args.SourceOwner, true))
 					return true;
 
 				target += (pos - source) * info.BounceRangeModifier / 100;
@@ -316,7 +407,7 @@ namespace OpenRA.Mods.Common.Projectiles
 				return true;
 
 			// After first bounce, check for targets each tick
-			if (remainingBounces < info.BounceCount && AnyValidTargetsInRadius(world, pos, info.Width, Args.SourceActor, true))
+			if (remainingBounces < info.BounceCount && AnyValidTargetsInRadius(world, pos, info.Width, Args.SourceOwner, true))
 				return true;
 
 			return false;
@@ -339,12 +430,12 @@ namespace OpenRA.Mods.Common.Projectiles
 			if (Animation == null)
 				yield break;
 
-			var world = Args.SourceActor.World;
+			var world = Args.World;
 			if (!world.FogObscures(pos))
 			{
 				var paletteName = info.Palette;
 				if (paletteName != null && info.IsPlayerPalette)
-					paletteName += Args.SourceActor.Owner.InternalName;
+					paletteName += Args.SourceOwner.InternalName;
 
 				var palette = wr.Palette(paletteName);
 
@@ -376,14 +467,14 @@ namespace OpenRA.Mods.Common.Projectiles
 			Args.Weapon.Impact(Target.FromPos(pos), warheadArgs);
 		}
 
-		bool AnyValidTargetsInRadius(World world, WPos pos, WDist radius, Actor firedBy, bool checkTargetType)
+		bool AnyValidTargetsInRadius(World world, WPos pos, WDist radius, Player firedBy, bool checkTargetType)
 		{
 			foreach (var victim in world.FindActorsOnCircle(pos, radius))
 			{
 				if (checkTargetType && !Target.FromActor(victim).IsValidFor(firedBy))
 					continue;
 
-				if (victim != Args.GuidedTarget.Actor && !info.ValidBounceBlockerRelationships.HasRelationship(firedBy.Owner.RelationshipWith(victim.Owner)))
+				if (victim != Args.GuidedTarget.Actor && !info.ValidBounceBlockerRelationships.HasRelationship(firedBy.RelationshipWith(victim.Owner)))
 					continue;
 
 				// If the impact position is within any actor's HitShape, we have a direct hit
@@ -395,5 +486,11 @@ namespace OpenRA.Mods.Common.Projectiles
 
 			return false;
 		}
+
+		WPos IProjectileScriptInfo.Position => pos;
+		WPos IProjectileScriptInfo.TargetPosition => target;
+		ScriptProjectileInterface IProjectileScriptInfo.LuaInterface { get; set; }
+		Actor IProjectileScriptInfo.SourceActor => Args.SourceActor;
+		WeaponInfo IProjectileScriptInfo.Weapon => Args.Weapon;
 	}
 }

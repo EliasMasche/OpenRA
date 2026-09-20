@@ -12,10 +12,13 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
+using System.IO;
 using System.Linq;
 using OpenRA.Graphics;
 using OpenRA.Mods.Common.Scripting;
 using OpenRA.Mods.Common.Traits;
+using OpenRA.Network;
+using OpenRA.Server;
 using OpenRA.Widgets;
 
 namespace OpenRA.Mods.Common.Widgets.Logic
@@ -149,6 +152,7 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 		readonly Action onExit;
 		readonly World world;
 		readonly WorldRenderer worldRenderer;
+		readonly OrderManager orderManager;
 		readonly MenuPostProcessEffect mpe;
 		readonly bool isSinglePlayer;
 		readonly bool hasError;
@@ -159,12 +163,13 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 
 		[ObjectCreator.UseCtor]
 		public IngameMenuLogic(Widget widget, ModData modData, World world, Action onExit, WorldRenderer worldRenderer,
-			IngameInfoPanel initialPanel, Dictionary<string, MiniYaml> logicArgs)
+			IngameInfoPanel initialPanel, Dictionary<string, MiniYaml> logicArgs, OrderManager orderManager)
 		{
 			this.modData = modData;
 			this.world = world;
 			this.worldRenderer = worldRenderer;
 			this.onExit = onExit;
+			this.orderManager = orderManager;
 
 			var buttonHandlers = new Dictionary<string, Action>
 			{
@@ -402,13 +407,19 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 			};
 		}
 
+		bool CanSaveOrLoad()
+		{
+			return world.LobbyInfo.NonBotClients.Count() <= 1 || Game.IsHost;
+		}
+
 		void CreateLoadGameButton()
 		{
 			if (world.Type != WorldType.Regular || !world.LobbyInfo.GlobalSettings.EnableGameSaves || world.IsReplay)
 				return;
 
 			var button = AddButton("LOAD_GAME", LoadGameButton);
-			button.IsDisabled = () => leaving || !LoadGameBrowserLogic.IsLoadPanelEnabled(modData.Manifest);
+			button.IsDisabled = () => leaving || !CanSaveOrLoad()
+				|| !LoadGameBrowserLogic.IsLoadPanelEnabled(modData.Manifest);
 			button.OnClick = () =>
 			{
 				hideMenu = true;
@@ -416,8 +427,32 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 				{
 					{ "onExit", () => hideMenu = false },
 					{ "onStart", CloseMenu },
+					{ "loadAction", new Action<string, string>(RequestServerLoad) },
+					{ "sessionMapUid", world.Map.Uid },
 				});
 			};
+		}
+
+		void RequestServerLoad(string savePath, string mapUid)
+		{
+			_ = mapUid;
+
+			var localLoad = Game.CurrentServerType == ServerType.Local
+				&& world.LobbyInfo.NonBotClients.Count() <= 1;
+
+			byte[] payload;
+			try
+			{
+				payload = localLoad ? null : File.ReadAllBytes(savePath);
+			}
+			catch (Exception e)
+			{
+				Log.Write("debug", $"Failed to read save '{savePath}':");
+				Log.Write("debug", e);
+				return;
+			}
+
+			orderManager.UploadSnapshotThenLoad(payload, Path.GetFileName(savePath), localLoad);
 		}
 
 		void CreateSaveGameButton()
@@ -426,7 +461,8 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 				return;
 
 			var button = AddButton("SAVE_GAME", SaveGameButton);
-			button.IsDisabled = () => hasError || leaving || !world.Players.Any(p => p.Playable && p.WinState == WinState.Undefined);
+			button.IsDisabled = () => hasError || leaving || !CanSaveOrLoad()
+				|| !world.Players.Any(p => p.Playable && p.WinState == WinState.Undefined);
 			button.OnClick = () =>
 			{
 				hideMenu = true;

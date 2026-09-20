@@ -9,7 +9,9 @@
  */
 #endregion
 
+using System.Collections.Generic;
 using System.Linq;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Cnc.Traits;
 using OpenRA.Mods.Common.Activities;
 using OpenRA.Mods.Common.Traits;
@@ -18,8 +20,11 @@ using OpenRA.Traits;
 
 namespace OpenRA.Mods.Cnc.Activities
 {
+	[SaveableActivity]
 	sealed class Infiltrate : Enter
 	{
+		const string EnterActorKey = "EnterActor";
+
 		readonly Infiltrates infiltrates;
 		readonly INotifyInfiltration[] notifiers;
 		Actor enterActor;
@@ -29,6 +34,25 @@ namespace OpenRA.Mods.Cnc.Activities
 		{
 			this.infiltrates = infiltrates;
 			notifiers = self.TraitsImplementing<INotifyInfiltration>().ToArray();
+		}
+
+		internal Infiltrate(Actor self, SnapshotReader r, MiniYaml yaml)
+			: base(self, r, yaml)
+		{
+			notifiers = self.TraitsImplementing<INotifyInfiltration>().ToArray();
+			infiltrates = self.TraitsImplementing<Infiltrates>().FirstOrDefault();
+
+			r.DeferActor(yaml.NodeWithKeyOrDefault(EnterActorKey).Value.Value, a => enterActor = a);
+		}
+
+		public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+		{
+			var nodes = base.SaveState(self, w);
+			nodes.AddRange(
+			[
+				new(EnterActorKey, w.ActorRef(enterActor))
+			]);
+			return nodes;
 		}
 
 		protected override void TickInner(Actor self, in Target target, bool targetIsDeadOrHiddenActor)

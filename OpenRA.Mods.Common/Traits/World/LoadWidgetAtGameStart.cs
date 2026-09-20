@@ -37,10 +37,12 @@ namespace OpenRA.Mods.Common.Traits
 		public override object Create(ActorInitializer init) { return new LoadWidgetAtGameStart(this); }
 	}
 
-	public class LoadWidgetAtGameStart : IWorldLoaded, INotifyGameLoading, INotifyGameLoaded
+	public class LoadWidgetAtGameStart : IWorldLoaded, INotifyGameLoading, INotifyGameLoaded, IPostWorldLoaded
 	{
 		readonly LoadWidgetAtGameStartInfo info;
 		Widget root;
+
+		bool closed;
 
 		public LoadWidgetAtGameStart(LoadWidgetAtGameStartInfo info)
 		{
@@ -61,7 +63,12 @@ namespace OpenRA.Mods.Common.Traits
 
 		void IWorldLoaded.WorldLoaded(World world, WorldRenderer wr)
 		{
-			if (!world.IsLoadingGameSave && info.ClearRoot)
+			if (wr == null)
+				return;
+
+			var loadingSave = world.IsLoadingGameSave || world.IsRestoringSnapshot;
+
+			if (!loadingSave && info.ClearRoot)
 				Ui.ResetAll();
 
 			var widget = world.Type == WorldType.Shellmap ? info.ShellmapRoot :
@@ -70,12 +77,29 @@ namespace OpenRA.Mods.Common.Traits
 			root = Game.LoadWidget(world, widget, Ui.Root, []);
 
 			// The Lua API requires the UI to available, so hide it instead
-			if (world.IsLoadingGameSave)
+			if (loadingSave)
 				root.IsVisible = () => false;
 		}
 
 		void INotifyGameLoaded.GameLoaded(World world)
 		{
+			Close(world);
+		}
+
+		void IPostWorldLoaded.PostWorldLoaded(World world, WorldRenderer wr)
+		{
+			if (world.WasRestoredFromSnapshot)
+				Close(world);
+		}
+
+		void Close(World world)
+		{
+			if (root == null || closed)
+				return;
+
+			closed = true;
+			Game.Sound.DisableAllSounds = false;
+
 			Ui.CloseWindow();
 			root.IsVisible = () => true;
 

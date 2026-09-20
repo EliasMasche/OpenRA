@@ -1,4 +1,4 @@
-#region Copyright & License Information
+﻿#region Copyright & License Information
 /*
  * Copyright (c) The OpenRA Developers and Contributors
  * This file is part of OpenRA, which is free software. It is made
@@ -13,6 +13,7 @@ using System;
 using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Linq;
+using OpenRA.GameSaves;
 using OpenRA.Primitives;
 using OpenRA.Traits;
 
@@ -133,8 +134,24 @@ namespace OpenRA.Mods.Common.Traits
 		}
 	}
 
-	public class ProductionQueue : IResolveOrder, ITick, ITechTreeElement, INotifyOwnerChanged, INotifyKilled, INotifySold, ISync, INotifyTransform, INotifyCreated
+	public class ProductionQueue : IResolveOrder, ITick, ITechTreeElement, INotifyOwnerChanged, INotifyKilled,
+		INotifySold, ISync, INotifyTransform, INotifyCreated, ISaveState
 	{
+		const string ItemsKey = "Items";
+		const string EnabledKey = "Enabled";
+		const string FactionKey = "Faction";
+		const string ItemKey = "Item";
+		const string TotalCostKey = "TotalCost";
+		const string TotalTimeKey = "TotalTime";
+		const string RemainingTimeKey = "RemainingTime";
+		const string RemainingCostKey = "RemainingCost";
+		const string ResourcesPaidKey = "ResourcesPaid";
+		const string PausedKey = "Paused";
+		const string DoneKey = "Done";
+		const string StartedKey = "Started";
+		const string SlowdownKey = "Slowdown";
+		const string InfiniteKey = "Infinite";
+
 		public readonly ProductionQueueInfo Info;
 
 		// A list of things we could possibly build
@@ -493,38 +510,8 @@ namespace OpenRA.Mods.Common.Traits
 						if (Info.PayUpFront && cost > playerResources.GetCashAndResources())
 							return;
 
-						var notified = false;
-						BeginProduction(new ProductionItem(this, order.TargetString, cost, playerPower, () => self.World.AddFrameEndTask(_ =>
-						{
-							// Make sure the item hasn't been invalidated between the ProductionItem ticking and this FrameEndTask running
-							if (!Queue.Any(i => i.Done && i.Item == unit.Name))
-							{
-								notified = false;
-								return;
-							}
-
-							var isBuilding = unit.HasTraitInfo<BuildingInfo>();
-							if (isBuilding && !notified)
-							{
-								Game.Sound.PlayNotification(rules, self.Owner, "Speech", Info.ReadyAudio, self.Owner.Faction.InternalName);
-								TextNotificationsManager.AddTransientLine(self.Owner, Info.ReadyTextNotification);
-								notified = true;
-							}
-							else if (!isBuilding)
-							{
-								if (BuildUnit(unit))
-								{
-									Game.Sound.PlayNotification(rules, self.Owner, "Speech", Info.ReadyAudio, self.Owner.Faction.InternalName);
-									TextNotificationsManager.AddTransientLine(self.Owner, Info.ReadyTextNotification);
-								}
-								else if (!notified && time > 0)
-								{
-									Game.Sound.PlayNotification(rules, self.Owner, "Speech", Info.BlockedAudio, self.Owner.Faction.InternalName);
-									TextNotificationsManager.AddTransientLine(self.Owner, Info.BlockedTextNotification);
-									notified = true;
-								}
-							}
-						})), !order.Queued);
+						BeginProduction(new ProductionItem(this, order.TargetString, cost, playerPower,
+							CompletionAction(self, unit, time)), !order.Queued);
 					}
 
 					break;
@@ -536,6 +523,45 @@ namespace OpenRA.Mods.Common.Traits
 					CancelProduction(order.TargetString, order.ExtraData);
 					break;
 			}
+		}
+
+		protected virtual Action CompletionAction(Actor self, ActorInfo unit, int time)
+		{
+			var rules = self.World.Map.Rules;
+
+			var notified = false;
+
+			return () => self.World.AddFrameEndTask(_ =>
+			{
+				// Make sure the item hasn't been invalidated between the ProductionItem ticking and this FrameEndTask running
+				if (!Queue.Any(i => i.Done && i.Item == unit.Name))
+				{
+					notified = false;
+					return;
+				}
+
+				var isBuilding = unit.HasTraitInfo<BuildingInfo>();
+				if (isBuilding && !notified)
+				{
+					Game.Sound.PlayNotification(rules, self.Owner, "Speech", Info.ReadyAudio, self.Owner.Faction.InternalName);
+					TextNotificationsManager.AddTransientLine(self.Owner, Info.ReadyTextNotification);
+					notified = true;
+				}
+				else if (!isBuilding)
+				{
+					if (BuildUnit(unit))
+					{
+						Game.Sound.PlayNotification(rules, self.Owner, "Speech", Info.ReadyAudio, self.Owner.Faction.InternalName);
+						TextNotificationsManager.AddTransientLine(self.Owner, Info.ReadyTextNotification);
+					}
+					else if (!notified && time > 0)
+					{
+						Game.Sound.PlayNotification(rules, self.Owner, "Speech", Info.BlockedAudio, self.Owner.Faction.InternalName);
+						TextNotificationsManager.AddTransientLine(self.Owner, Info.BlockedTextNotification);
+						notified = true;
+					}
+				}
+			});
 		}
 
 		public virtual int GetBuildTime(ActorInfo unit, BuildableInfo bi)
@@ -707,6 +733,82 @@ namespace OpenRA.Mods.Common.Traits
 
 			return false;
 		}
+
+		TraitInfo ISaveState.SaveStateInfo => Info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
+		{
+			var state = new List<MiniYamlNode>
+			{
+				new(EnabledKey, FieldSaver.FormatValue(Enabled)),
+				new(FactionKey, Faction)
+			};
+
+			if (Queue.Count == 0)
+				return state;
+
+			var items = Queue.Select((item, i) => new MiniYamlNode(i.ToStringInvariant(), new MiniYaml("",
+			[
+				new MiniYamlNode(ItemKey, item.Item),
+				new MiniYamlNode(TotalCostKey, FieldSaver.FormatValue(item.TotalCost)),
+				new MiniYamlNode(TotalTimeKey, FieldSaver.FormatValue(item.TotalTime)),
+				new MiniYamlNode(RemainingTimeKey, FieldSaver.FormatValue(item.RemainingTime)),
+				new MiniYamlNode(RemainingCostKey, FieldSaver.FormatValue(item.RemainingCost)),
+				new MiniYamlNode(ResourcesPaidKey, FieldSaver.FormatValue(item.ResourcesPaid)),
+				new MiniYamlNode(PausedKey, FieldSaver.FormatValue(item.Paused)),
+				new MiniYamlNode(DoneKey, FieldSaver.FormatValue(item.Done)),
+				new MiniYamlNode(StartedKey, FieldSaver.FormatValue(item.Started)),
+				new MiniYamlNode(SlowdownKey, FieldSaver.FormatValue(item.Slowdown)),
+				new MiniYamlNode(InfiniteKey, FieldSaver.FormatValue(item.Infinite))
+			]))).ToList();
+
+			state.Add(new MiniYamlNode(ItemsKey, new MiniYaml("", items)));
+			return state;
+		}
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
+		{
+			var factionNode = data.NodeWithKeyOrDefault(FactionKey);
+			if (factionNode != null)
+			{
+				Faction = factionNode.Value.Value;
+				IsValidFaction = Info.Factions.Count == 0 || Info.Factions.Contains(Faction);
+			}
+
+			var enabledNode = data.NodeWithKeyOrDefault(EnabledKey);
+			if (enabledNode != null)
+				Enabled = FieldLoader.GetValue<bool>(EnabledKey, enabledNode.Value.Value);
+
+			var itemsNode = data.NodeWithKeyOrDefault(ItemsKey);
+			if (itemsNode == null)
+				return;
+
+			Queue.Clear();
+			foreach (var node in itemsNode.Value.Nodes)
+			{
+				var nodes = node.Value.ToDictionary();
+				var name = nodes[ItemKey].Value;
+
+				if (!self.World.Map.Rules.Actors.TryGetValue(name, out var unit))
+					continue;
+
+				var totalTime = FieldLoader.GetValue<int>(TotalTimeKey, nodes[TotalTimeKey].Value);
+
+				Queue.Add(new ProductionItem(this, name,
+					FieldLoader.GetValue<int>(TotalCostKey, nodes[TotalCostKey].Value),
+					playerPower,
+					CompletionAction(self, unit, totalTime),
+					totalTime,
+					FieldLoader.GetValue<int>(RemainingTimeKey, nodes[RemainingTimeKey].Value),
+					FieldLoader.GetValue<int>(RemainingCostKey, nodes[RemainingCostKey].Value),
+					FieldLoader.GetValue<int>(ResourcesPaidKey, nodes[ResourcesPaidKey].Value),
+					FieldLoader.GetValue<bool>(PausedKey, nodes[PausedKey].Value),
+					FieldLoader.GetValue<bool>(DoneKey, nodes[DoneKey].Value),
+					FieldLoader.GetValue<bool>(StartedKey, nodes[StartedKey].Value),
+					FieldLoader.GetValue<int>(SlowdownKey, nodes[SlowdownKey].Value),
+					FieldLoader.GetValue<bool>(InfiniteKey, nodes[InfiniteKey].Value)));
+			}
+		}
 	}
 
 	public class ProductionState
@@ -753,6 +855,21 @@ namespace OpenRA.Mods.Common.Traits
 			bi = ai.TraitInfo<BuildableInfo>();
 			BuildPaletteOrder = bi.BuildPaletteOrder;
 			Infinite = false;
+		}
+
+		public ProductionItem(ProductionQueue queue, string item, int cost, PowerManager pm, Action onComplete,
+			int totalTime, int remainingTime, int remainingCost, int resourcesPaid, bool paused, bool done, bool started, int slowdown, bool infinite)
+			: this(queue, item, cost, pm, onComplete)
+		{
+			TotalTime = totalTime;
+			RemainingTime = remainingTime;
+			RemainingCost = remainingCost;
+			ResourcesPaid = resourcesPaid;
+			Paused = paused;
+			Done = done;
+			Started = started;
+			Slowdown = slowdown;
+			Infinite = infinite;
 		}
 
 		public void Tick(PlayerResources pr)

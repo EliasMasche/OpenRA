@@ -68,6 +68,9 @@ namespace OpenRA.Mods.Common.Traits
 
 		public void WorldLoaded(World world, WorldRenderer wr)
 		{
+			if (world.IsRestoringSnapshot)
+				return;
+
 			foreach (var p in world.Players)
 				if (p.Playable)
 					SpawnUnitsForPlayer(world, p);

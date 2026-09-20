@@ -9,7 +9,9 @@
  */
 #endregion
 
+using System.Collections.Generic;
 using System.Collections.Immutable;
+using OpenRA.GameSaves;
 using OpenRA.Graphics;
 using OpenRA.Primitives;
 using OpenRA.Traits;
@@ -67,8 +69,11 @@ namespace OpenRA.Mods.Common.Traits.Render
 		}
 	}
 
-	public class WithDamageOverlay : ConditionalTrait<WithDamageOverlayInfo>, INotifyDamage, ITick
+	public class WithDamageOverlay : ConditionalTrait<WithDamageOverlayInfo>, INotifyDamage, ITick, ISaveState
 	{
+		const string DelayKey = "Delay";
+		const string LoopCountKey = "LoopCount";
+
 		readonly WithDamageOverlayInfo info;
 		readonly Animation anim;
 
@@ -160,6 +165,28 @@ namespace OpenRA.Mods.Common.Traits.Render
 				else
 					isPlayingAnimation = false;
 			}
+		}
+
+		TraitInfo ISaveState.SaveStateInfo => Info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
+		{
+			return
+			[
+				new(DelayKey, FieldSaver.FormatValue(delay)),
+				new(LoopCountKey, FieldSaver.FormatValue(loopCount))
+			];
+		}
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
+		{
+			var nodes = data.ToDictionary();
+
+			if (nodes.TryGetValue(DelayKey, out var d))
+				delay = FieldLoader.GetValue<int>(DelayKey, d.Value);
+
+			if (nodes.TryGetValue(LoopCountKey, out var l))
+				loopCount = FieldLoader.GetValue<int>(LoopCountKey, l.Value);
 		}
 	}
 }

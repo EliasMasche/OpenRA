@@ -11,22 +11,44 @@
 
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using OpenRA.Activities;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Traits;
 using OpenRA.Primitives;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Activities
 {
+	[SaveableActivity]
 	public class Move : Activity
 	{
+		public enum MoveSearch { Scriptable, Standard, Custom, ParentSupplied }
+
+		const string PathModeKey = "PathMode";
+		const string DestinationKey = "Destination";
+		const string NearEnoughKey = "NearEnough";
+		const string IgnoreActorKey = "IgnoreActor";
+		const string EvaluateNearestMovableCellKey = "EvaluateNearestMovableCell";
+		const string PathKey = "Path";
+		const string AlreadyAtDestinationKey = "AlreadyAtDestination";
+		const string HadNoPathKey = "HadNoPath";
+		const string StartTicksKey = "StartTicks";
+		const string CarryoverProgressKey = "CarryoverProgress";
+		const string LastMovePartCompletedTickKey = "LastMovePartCompletedTick";
+		const string HasWaitedKey = "HasWaited";
+		const string WaitTicksRemainingKey = "WaitTicksRemaining";
+		const string ActorFacingModifierKey = "ActorFacingModifier";
+
 		public WAngle ActorFacingModifier { get; private set; }
 		readonly Mobile mobile;
 		readonly WDist nearEnough;
-		readonly Func<BlockedByActor, (bool AlreadyAtDestination, List<CPos> Path)> getPath;
-		readonly Actor ignoreActor;
 		readonly Color? targetLineColor;
+		readonly MoveSearch pathMode;
+
+		Func<BlockedByActor, (bool AlreadyAtDestination, List<CPos> Path)> getPath;
+		Actor ignoreActor;
 
 		static readonly BlockedByActor[] PathSearchOrder =
 		[
@@ -59,18 +81,12 @@ namespace OpenRA.Mods.Common.Activities
 			// PERF: Because we can be sure that OccupiesSpace is Mobile here, we can save some performance by avoiding querying for the trait.
 			mobile = (Mobile)self.OccupiesSpace;
 
-			getPath = check =>
-			{
-				if (mobile.ToCell == destination)
-					return (true, PathFinder.NoPath);
-
-				return (false, mobile.PathFinder.FindPathToTargetCell(
-					self, [mobile.ToCell], destination, check, laneBias: false));
-			};
+			getPath = ScriptablePath(self, destination);
 
 			this.destination = destination;
 			this.targetLineColor = targetLineColor;
 			nearEnough = WDist.Zero;
+			pathMode = MoveSearch.Scriptable;
 		}
 
 		public Move(Actor self, CPos destination, WDist nearEnough, Actor ignoreActor = null, bool evaluateNearestMovableCell = false,
@@ -79,28 +95,20 @@ namespace OpenRA.Mods.Common.Activities
 			// PERF: Because we can be sure that OccupiesSpace is Mobile here, we can save some performance by avoiding querying for the trait.
 			mobile = (Mobile)self.OccupiesSpace;
 
-			getPath = check =>
-			{
-				if (!this.destination.HasValue)
-					return (false, PathFinder.NoPath);
-
-				if (mobile.ToCell == this.destination.Value)
-					return (true, PathFinder.NoPath);
-
-				return (false, mobile.PathFinder.FindPathToTargetCell(
-					self, [mobile.ToCell], this.destination.Value, check, ignoreActor: ignoreActor));
-			};
+			this.ignoreActor = ignoreActor;
+			getPath = StandardPath(self);
 
 			// Note: Will be recalculated from OnFirstRun if evaluateNearestMovableCell is true
 			this.destination = destination;
 
 			this.nearEnough = nearEnough;
-			this.ignoreActor = ignoreActor;
 			this.evaluateNearestMovableCell = evaluateNearestMovableCell;
 			this.targetLineColor = targetLineColor;
+			pathMode = MoveSearch.Standard;
 		}
 
-		public Move(Actor self, Func<BlockedByActor, (bool AlreadyAtDestination, List<CPos> Path)> getPath, Color? targetLineColor = null)
+		public Move(Actor self, Func<BlockedByActor, (bool AlreadyAtDestination, List<CPos> Path)> getPath, Color? targetLineColor = null,
+			bool parentSupplied = false)
 		{
 			// PERF: Because we can be sure that OccupiesSpace is Mobile here, we can save some performance by avoiding querying for the trait.
 			mobile = (Mobile)self.OccupiesSpace;
@@ -110,6 +118,83 @@ namespace OpenRA.Mods.Common.Activities
 			destination = null;
 			nearEnough = WDist.Zero;
 			this.targetLineColor = targetLineColor;
+			pathMode = parentSupplied ? MoveSearch.ParentSupplied : MoveSearch.Custom;
+		}
+
+		internal void RestorePathFunc(Func<BlockedByActor, (bool AlreadyAtDestination, List<CPos> Path)> getPath)
+		{
+			ArgumentNullException.ThrowIfNull(getPath);
+
+			if (pathMode != MoveSearch.ParentSupplied)
+				throw new InvalidOperationException($"A {pathMode} move does not take its path from its parent.");
+
+			this.getPath = getPath;
+		}
+
+		protected Move(Actor self, SnapshotReader r, MiniYaml yaml)
+		{
+			mobile = (Mobile)self.OccupiesSpace;
+
+			var nodes = yaml.ToDictionary();
+			pathMode = FieldLoader.GetValue<MoveSearch>(PathModeKey, nodes[PathModeKey].Value);
+
+			var savedDestination = nodes[DestinationKey].Value;
+			if (!string.IsNullOrEmpty(savedDestination))
+				destination = FieldLoader.GetValue<CPos>(DestinationKey, savedDestination);
+
+			nearEnough = FieldLoader.GetValue<WDist>(NearEnoughKey, nodes[NearEnoughKey].Value);
+			evaluateNearestMovableCell = FieldLoader.GetValue<bool>(EvaluateNearestMovableCellKey, nodes[EvaluateNearestMovableCellKey].Value);
+			alreadyAtDestination = FieldLoader.GetValue<bool>(AlreadyAtDestinationKey, nodes[AlreadyAtDestinationKey].Value);
+			hadNoPath = FieldLoader.GetValue<bool>(HadNoPathKey, nodes[HadNoPathKey].Value);
+			startTicks = FieldLoader.GetValue<int>(StartTicksKey, nodes[StartTicksKey].Value);
+			carryoverProgress = FieldLoader.GetValue<int>(CarryoverProgressKey, nodes[CarryoverProgressKey].Value);
+			lastMovePartCompletedTick = FieldLoader.GetValue<int>(LastMovePartCompletedTickKey, nodes[LastMovePartCompletedTickKey].Value);
+			hasWaited = FieldLoader.GetValue<bool>(HasWaitedKey, nodes[HasWaitedKey].Value);
+			waitTicksRemaining = FieldLoader.GetValue<int>(WaitTicksRemainingKey, nodes[WaitTicksRemainingKey].Value);
+			ActorFacingModifier = FieldLoader.GetValue<WAngle>(ActorFacingModifierKey, nodes[ActorFacingModifierKey].Value);
+
+			var savedPath = nodes[PathKey].Value;
+			if (!string.IsNullOrEmpty(savedPath))
+				path = FieldLoader.GetValue<CPos[]>(PathKey, savedPath).ToList();
+
+			r.DeferActor(nodes[IgnoreActorKey].Value, a => ignoreActor = a);
+
+			if (pathMode == MoveSearch.Scriptable && !destination.HasValue)
+				throw new InvalidDataException("A saved scriptable move has no destination.");
+
+			getPath = pathMode switch
+			{
+				MoveSearch.Scriptable => ScriptablePath(self, destination.Value),
+				MoveSearch.ParentSupplied => null,
+				_ => StandardPath(self)
+			};
+		}
+
+		Func<BlockedByActor, (bool AlreadyAtDestination, List<CPos> Path)> ScriptablePath(Actor self, CPos destination)
+		{
+			return check =>
+			{
+				if (mobile.ToCell == destination)
+					return (true, PathFinder.NoPath);
+
+				return (false, mobile.PathFinder.FindPathToTargetCell(
+					self, [mobile.ToCell], destination, check, laneBias: false));
+			};
+		}
+
+		Func<BlockedByActor, (bool AlreadyAtDestination, List<CPos> Path)> StandardPath(Actor self)
+		{
+			return check =>
+			{
+				if (!destination.HasValue)
+					return (false, PathFinder.NoPath);
+
+				if (mobile.ToCell == destination.Value)
+					return (true, PathFinder.NoPath);
+
+				return (false, mobile.PathFinder.FindPathToTargetCell(
+					self, [mobile.ToCell], destination.Value, check, ignoreActor: ignoreActor));
+			};
 		}
 
 		(bool AlreadyAtDestination, List<CPos> Path) EvalPath(BlockedByActor check)
@@ -248,7 +333,7 @@ namespace OpenRA.Mods.Common.Activities
 
 		((CPos Cell, SubCell SubCell)? Next, bool ShouldTryAgain) PopPath(Actor self)
 		{
-			if (path.Count == 0)
+			if (path == null || path.Count == 0)
 				return (null, false);
 
 			var nextCell = path[^1];
@@ -406,9 +491,45 @@ namespace OpenRA.Mods.Common.Activities
 				yield return new TargetLineNode(Target.FromCell(self.World, destination.Value), targetLineColor.Value);
 		}
 
-		abstract class MovePart : Activity
+		public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
 		{
-			protected readonly Move Move;
+			if (pathMode == MoveSearch.Custom)
+				return null;
+
+			return
+			[
+				new(PathModeKey, FieldSaver.FormatValue(pathMode)),
+				new(DestinationKey, destination.HasValue ? FieldSaver.FormatValue(destination.Value) : ""),
+				new(NearEnoughKey, FieldSaver.FormatValue(nearEnough)),
+				new(IgnoreActorKey, w.ActorRef(ignoreActor)),
+				new(EvaluateNearestMovableCellKey, FieldSaver.FormatValue(evaluateNearestMovableCell)),
+				new(PathKey, path != null ? FieldSaver.FormatValue(path) : ""),
+				new(AlreadyAtDestinationKey, FieldSaver.FormatValue(alreadyAtDestination)),
+				new(HadNoPathKey, FieldSaver.FormatValue(hadNoPath)),
+				new(StartTicksKey, FieldSaver.FormatValue(startTicks)),
+				new(CarryoverProgressKey, FieldSaver.FormatValue(carryoverProgress)),
+				new(LastMovePartCompletedTickKey, FieldSaver.FormatValue(lastMovePartCompletedTick)),
+				new(HasWaitedKey, FieldSaver.FormatValue(hasWaited)),
+				new(WaitTicksRemainingKey, FieldSaver.FormatValue(waitTicksRemaining)),
+				new(ActorFacingModifierKey, FieldSaver.FormatValue(ActorFacingModifier))
+			];
+		}
+
+		abstract class MovePart : Activity, IActivityReferences
+		{
+			protected const string ParentKey = "Parent";
+			protected const string FromKey = "From";
+			protected const string ToKey = "To";
+			protected const string FromFacingKey = "FromFacing";
+			protected const string ToFacingKey = "ToFacing";
+			protected const string FromTerrainOrientationKey = "FromTerrainOrientation";
+			protected const string ToTerrainOrientationKey = "ToTerrainOrientation";
+			protected const string TerrainOrientationMarginKey = "TerrainOrientationMargin";
+			protected const string ProgressKey = "Progress";
+			protected const string ShouldArcKey = "ShouldArc";
+			protected const string MovingOnGroundLayerKey = "MovingOnGroundLayer";
+
+			protected Move Move { get; private set; }
 			protected readonly WPos From, To;
 			protected readonly WAngle FromFacing, ToFacing;
 			protected readonly WRot? FromTerrainOrientation, ToTerrainOrientation;
@@ -421,14 +542,33 @@ namespace OpenRA.Mods.Common.Activities
 			protected readonly int Distance;
 			protected readonly bool MovingOnGroundLayer;
 			protected readonly bool TurnsWhileMoving;
+
+			protected readonly bool ShouldArc;
 			readonly int terrainOrientationMargin;
 			protected int progress;
 
 			protected MovePart(Move move, WPos from, WPos to, WAngle fromFacing, WAngle toFacing,
 				WRot? fromTerrainOrientation, WRot? toTerrainOrientation, int terrainOrientationMargin,
 				int carryoverProgress, bool shouldArc, bool movingOnGroundLayer)
+				: this(move.mobile, from, to, fromFacing, toFacing, fromTerrainOrientation, toTerrainOrientation,
+					  terrainOrientationMargin, carryoverProgress, shouldArc, movingOnGroundLayer)
 			{
 				Move = move;
+			}
+
+			protected MovePart(Actor self, SnapshotReader _, MiniYaml yaml)
+				: this((Mobile)self.OccupiesSpace,
+					  Read<WPos>(yaml, FromKey), Read<WPos>(yaml, ToKey),
+					  Read<WAngle>(yaml, FromFacingKey), Read<WAngle>(yaml, ToFacingKey),
+					  ReadNullable<WRot>(yaml, FromTerrainOrientationKey), ReadNullable<WRot>(yaml, ToTerrainOrientationKey),
+					  Read<int>(yaml, TerrainOrientationMarginKey), Read<int>(yaml, ProgressKey),
+					  Read<bool>(yaml, ShouldArcKey), Read<bool>(yaml, MovingOnGroundLayerKey))
+			{ }
+
+			MovePart(Mobile mobile, WPos from, WPos to, WAngle fromFacing, WAngle toFacing,
+				WRot? fromTerrainOrientation, WRot? toTerrainOrientation, int terrainOrientationMargin,
+				int carryoverProgress, bool shouldArc, bool movingOnGroundLayer)
+			{
 				From = from;
 				To = to;
 				FromFacing = fromFacing;
@@ -437,12 +577,14 @@ namespace OpenRA.Mods.Common.Activities
 				ToTerrainOrientation = toTerrainOrientation;
 				progress = carryoverProgress;
 				Distance = (to - from).Length;
+
 				this.terrainOrientationMargin = Math.Min(terrainOrientationMargin, Distance / 2);
 				MovingOnGroundLayer = movingOnGroundLayer;
+				ShouldArc = shouldArc;
 
-				IsInterruptible = false; // See comments in Move.Cancel()
+				IsInterruptible = false;
 
-				TurnsWhileMoving = move.mobile.Info.TurnsWhileMoving;
+				TurnsWhileMoving = mobile.Info.TurnsWhileMoving;
 
 				// Calculate an elliptical arc that joins from and to
 				if (shouldArc)
@@ -542,8 +684,51 @@ namespace OpenRA.Mods.Common.Activities
 			{
 				return Move.GetTargets(self);
 			}
+
+			IEnumerable<(string Key, Activity Activity)> IActivityReferences.SaveReferences()
+			{
+				yield return (ParentKey, Move);
+			}
+
+			void IActivityReferences.LoadReference(string key, Activity activity)
+			{
+				if (key == ParentKey)
+					Move = (Move)activity;
+			}
+
+			public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+			{
+				return
+				[
+					new(FromKey, FieldSaver.FormatValue(From)),
+					new(ToKey, FieldSaver.FormatValue(To)),
+					new(FromFacingKey, FieldSaver.FormatValue(FromFacing)),
+					new(ToFacingKey, FieldSaver.FormatValue(ToFacing)),
+					new(FromTerrainOrientationKey, FromTerrainOrientation.HasValue ? FieldSaver.FormatValue(FromTerrainOrientation.Value) : ""),
+					new(ToTerrainOrientationKey, ToTerrainOrientation.HasValue ? FieldSaver.FormatValue(ToTerrainOrientation.Value) : ""),
+					new(TerrainOrientationMarginKey, FieldSaver.FormatValue(terrainOrientationMargin)),
+					new(ProgressKey, FieldSaver.FormatValue(progress)),
+					new(ShouldArcKey, FieldSaver.FormatValue(ShouldArc)),
+					new(MovingOnGroundLayerKey, FieldSaver.FormatValue(MovingOnGroundLayer))
+				];
+			}
+
+			protected static T Read<T>(MiniYaml yaml, string key)
+			{
+				return FieldLoader.GetValue<T>(key, yaml.NodeWithKeyOrDefault(key)?.Value.Value);
+			}
+
+			protected static T? ReadNullable<T>(MiniYaml yaml, string key) where T : struct
+			{
+				var value = yaml.NodeWithKeyOrDefault(key)?.Value.Value;
+				if (string.IsNullOrEmpty(value))
+					return null;
+
+				return FieldLoader.GetValue<T>(key, value);
+			}
 		}
 
+		[SaveableActivity]
 		sealed class MoveFirstHalf : MovePart
 		{
 			public MoveFirstHalf(
@@ -553,6 +738,9 @@ namespace OpenRA.Mods.Common.Activities
 					  move, from, to, fromFacing, toFacing,
 					  fromTerrainOrientation, toTerrainOrientation, terrainOrientationMargin, carryoverProgress, shouldArc, movingOnGroundLayer)
 			{ }
+
+			internal MoveFirstHalf(Actor self, SnapshotReader r, MiniYaml yaml)
+				: base(self, r, yaml) { }
 
 			bool IsTurn(Actor self, Mobile mobile, CPos nextCell, Map map)
 			{
@@ -631,6 +819,7 @@ namespace OpenRA.Mods.Common.Activities
 			}
 		}
 
+		[SaveableActivity]
 		sealed class MoveSecondHalf : MovePart
 		{
 			public MoveSecondHalf(
@@ -640,6 +829,9 @@ namespace OpenRA.Mods.Common.Activities
 					  move, from, to, fromFacing, toFacing,
 					  fromTerrainOrientation, toTerrainOrientation, terrainOrientationMargin, carryoverProgress, shouldArc, movingOnGroundLayer)
 			{ }
+
+			internal MoveSecondHalf(Actor self, SnapshotReader r, MiniYaml yaml)
+				: base(self, r, yaml) { }
 
 			protected override MovePart OnComplete(Actor self, Mobile mobile, Move parent)
 			{

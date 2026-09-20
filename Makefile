@@ -107,6 +107,28 @@ endif
 	@echo
 	@echo "Checking for incorrect conditional trait interface overrides..."
 	@./utility.sh all --check-conditional-trait-interface-overrides
+	@echo
+	@echo "Checking that saveable activities can be restored..."
+	@./utility.sh all --check-activity-restore
+	@echo
+	@echo "Checking that saveable effects can be restored..."
+	@./utility.sh ra --check-effect-restore
+	@./utility.sh cnc --check-effect-restore
+	@./utility.sh d2k --check-effect-restore
+	@echo
+	@echo "Checking that synced state feeds a save path..."
+	@./utility.sh all --check-sync-restore
+	@echo
+	@echo "Checking that a snapshot restores to the world it was saved from..."
+	@./utility.sh ra --verify-snapshot mods/ra/maps/agenda.oramap 60
+	@./utility.sh ra --verify-snapshot mods/ra/maps/snapshot-stress 40
+	@./utility.sh cnc --verify-snapshot mods/cnc/maps/snapshot-stress 40
+	@./utility.sh d2k --verify-snapshot mods/d2k/maps/snapshot-stress 40
+	@./utility.sh ts --verify-snapshot mods/ts/maps/snapshot-stress 40
+	@echo
+	@echo "Checking that state only an order can set survives a restore..."
+	@./utility.sh ra --verify-snapshot mods/ra/maps/agenda.oramap 20 --orders=DevFastBuild
+	@./utility.sh ra --verify-snapshot mods/ra/maps/agenda.oramap 20 --orders=DevAll
 
 check-scripts:
 	@echo

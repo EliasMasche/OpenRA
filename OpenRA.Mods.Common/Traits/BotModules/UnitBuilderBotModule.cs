@@ -13,6 +13,7 @@ using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
+using OpenRA.GameSaves;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Traits
@@ -48,7 +49,7 @@ namespace OpenRA.Mods.Common.Traits
 	}
 
 	public class UnitBuilderBotModule : ConditionalTrait<UnitBuilderBotModuleInfo>,
-		IBotTick, IBotNotifyIdleBaseUnits, IBotRequestUnitProduction, IGameSaveTraitData, INotifyActorDisposing
+		IBotTick, IBotNotifyIdleBaseUnits, IBotRequestUnitProduction, ISaveState, INotifyActorDisposing
 	{
 		public const int FeedbackTime = 30; // ticks; = a bit over 1s. must be >= netlag.
 
@@ -234,7 +235,9 @@ namespace OpenRA.Mods.Common.Traits
 			return true;
 		}
 
-		List<MiniYamlNode> IGameSaveTraitData.IssueTraitData(Actor self)
+		TraitInfo ISaveState.SaveStateInfo => Info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
 		{
 			if (IsTraitDisabled)
 				return null;
@@ -246,7 +249,7 @@ namespace OpenRA.Mods.Common.Traits
 			];
 		}
 
-		void IGameSaveTraitData.ResolveTraitData(Actor self, MiniYaml data)
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
 		{
 			if (self.World.IsReplay)
 				return;

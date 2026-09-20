@@ -10,14 +10,19 @@
 #endregion
 
 using System.Collections.Generic;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Traits;
 using OpenRA.Primitives;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Activities
 {
+	[SaveableActivity]
 	public class MoveWithinRange : MoveAdjacentTo
 	{
+		const string MinRangeKey = "MinRange";
+		const string MaxRangeKey = "MaxRange";
+
 		readonly WDist maxRange;
 		readonly WDist minRange;
 		readonly Map map;
@@ -30,6 +35,18 @@ namespace OpenRA.Mods.Common.Activities
 		{
 			this.minRange = minRange;
 			this.maxRange = maxRange;
+			map = self.World.Map;
+			maxCells = (maxRange.Length + 1023) / 1024;
+			minCells = minRange.Length / 1024;
+		}
+
+		internal MoveWithinRange(Actor self, SnapshotReader r, MiniYaml yaml)
+			: base(self, r, yaml)
+		{
+			var nodes = yaml.ToDictionary();
+			minRange = FieldLoader.GetValue<WDist>(MinRangeKey, nodes[MinRangeKey].Value);
+			maxRange = FieldLoader.GetValue<WDist>(MaxRangeKey, nodes[MaxRangeKey].Value);
+
 			map = self.World.Map;
 			maxCells = (maxRange.Length + 1023) / 1024;
 			minCells = minRange.Length / 1024;
@@ -73,6 +90,14 @@ namespace OpenRA.Mods.Common.Activities
 		bool AtCorrectRange(WPos origin)
 		{
 			return Target.IsInRange(origin, maxRange) && !Target.IsInRange(origin, minRange);
+		}
+
+		public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+		{
+			var nodes = base.SaveState(self, w);
+			nodes.Add(new MiniYamlNode(MinRangeKey, FieldSaver.FormatValue(minRange)));
+			nodes.Add(new MiniYamlNode(MaxRangeKey, FieldSaver.FormatValue(maxRange)));
+			return nodes;
 		}
 	}
 }

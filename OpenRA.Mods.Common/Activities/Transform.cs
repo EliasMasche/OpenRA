@@ -12,6 +12,7 @@
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using OpenRA.Activities;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Traits;
 using OpenRA.Mods.Common.Traits.Render;
 using OpenRA.Primitives;
@@ -19,9 +20,10 @@ using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Activities
 {
+	[SaveableActivity]
 	public class Transform : Activity
 	{
-		public readonly string ToActor;
+		public string ToActor;
 		public CVec Offset = CVec.Zero;
 		public WAngle Facing = new(384);
 		public ImmutableArray<string> Sounds = [];
@@ -34,6 +36,39 @@ namespace OpenRA.Mods.Common.Activities
 		public Transform(string toActor)
 		{
 			ToActor = toActor;
+		}
+
+		internal Transform(Actor _1, SnapshotReader _2, MiniYaml yaml)
+		{
+			var n = yaml.ToDictionary();
+			ToActor = n["ToActor"].Value;
+			Offset = FieldLoader.GetValue<CVec>("Offset", n["Offset"].Value);
+			Facing = FieldLoader.GetValue<WAngle>("Facing", n["Facing"].Value);
+			Sounds = FieldLoader.GetValue<string[]>("Sounds", n["Sounds"].Value).ToImmutableArray();
+			Notification = n["Notification"].Value;
+			TextNotification = n["TextNotification"].Value;
+			ForceHealthPercentage = FieldLoader.GetValue<int>("ForceHealthPercentage", n["ForceHealthPercentage"].Value);
+			SkipMakeAnims = FieldLoader.GetValue<bool>("SkipMakeAnims", n["SkipMakeAnims"].Value);
+			Faction = n["Faction"].Value;
+		}
+
+		public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+		{
+			if (!IsInterruptible)
+				return null;
+
+			return
+			[
+				new("ToActor", ToActor),
+				new("Offset", FieldSaver.FormatValue(Offset)),
+				new("Facing", FieldSaver.FormatValue(Facing)),
+				new("Sounds", FieldSaver.FormatValue(Sounds)),
+				new("Notification", Notification ?? ""),
+				new("TextNotification", TextNotification ?? ""),
+				new("ForceHealthPercentage", FieldSaver.FormatValue(ForceHealthPercentage)),
+				new("SkipMakeAnims", FieldSaver.FormatValue(SkipMakeAnims)),
+				new("Faction", Faction ?? "")
+			];
 		}
 
 		protected override void OnFirstRun(Actor self)
@@ -162,17 +197,45 @@ namespace OpenRA.Mods.Common.Activities
 		}
 	}
 
+	[SaveableActivity]
 	sealed class IssueOrderAfterTransform : Activity
 	{
+		const string OrderStringKey = "OrderString";
+		const string TargetKey = "Target";
+		const string TargetLineColorKey = "TargetLineColor";
+
 		readonly string orderString;
-		readonly Target target;
 		readonly Color? targetLineColor;
+
+		Target target;
 
 		public IssueOrderAfterTransform(string orderString, in Target target, Color? targetLineColor = null)
 		{
 			this.orderString = orderString;
 			this.target = target;
 			this.targetLineColor = targetLineColor;
+		}
+
+		internal IssueOrderAfterTransform(Actor _, SnapshotReader r, MiniYaml yaml)
+		{
+			var nodes = yaml.ToDictionary();
+			orderString = nodes[OrderStringKey].Value;
+
+			var color = nodes[TargetLineColorKey].Value;
+			if (!string.IsNullOrEmpty(color))
+				targetLineColor = FieldLoader.GetValue<Color>(TargetLineColorKey, color);
+
+			r.DeferTarget(nodes[TargetKey].Value, t => target = t);
+		}
+
+		public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+		{
+			return
+			[
+				new(OrderStringKey, orderString),
+				new(TargetKey, w.TargetRef(target)),
+				new(TargetLineColorKey, targetLineColor.HasValue ? FieldSaver.FormatValue(targetLineColor.Value) : "")
+			];
 		}
 
 		public Order IssueOrderForTransformedActor(Actor newActor)

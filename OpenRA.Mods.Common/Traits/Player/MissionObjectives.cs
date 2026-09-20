@@ -12,6 +12,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using OpenRA.GameSaves;
 using OpenRA.Graphics;
 using OpenRA.Traits;
 
@@ -72,8 +73,15 @@ namespace OpenRA.Mods.Common.Traits
 		public override object Create(ActorInitializer init) { return new MissionObjectives(init.Self.Owner, this); }
 	}
 
-	public class MissionObjectives : INotifyWinStateChanged, ISync, IResolveOrder, IWorldLoaded
+	public class MissionObjectives : INotifyWinStateChanged, ISync, IResolveOrder, IWorldLoaded, ISaveState
 	{
+		const string ObjectivesKey = "Objectives";
+		const string WinStateCooperativeKey = "WinStateCooperative";
+		const string DescriptionKey = "Description";
+		const string TypeKey = "Type";
+		const string RequiredKey = "Required";
+		const string StateKey = "State";
+
 		public readonly MissionObjectivesInfo Info;
 		readonly List<MissionObjective> objectives = [];
 		readonly Player player;
@@ -261,6 +269,61 @@ namespace OpenRA.Mods.Common.Traits
 		{
 			if (order.OrderString == "Surrender")
 				ForceDefeat(self.Owner);
+		}
+
+		TraitInfo ISaveState.SaveStateInfo => Info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
+		{
+			if (objectives.Count == 0 && WinStateCooperative == WinState.Undefined)
+				return null;
+
+			var nodes = new List<MiniYamlNode>
+			{
+				new(WinStateCooperativeKey, FieldSaver.FormatValue(WinStateCooperative))
+			};
+
+			nodes.Add(new MiniYamlNode(ObjectivesKey, new MiniYaml("", objectives
+				.Select((o, i) => new MiniYamlNode(i.ToStringInvariant(), new MiniYaml("",
+				[
+					new MiniYamlNode(DescriptionKey, o.Description),
+					new MiniYamlNode(TypeKey, o.Type),
+					new MiniYamlNode(RequiredKey, FieldSaver.FormatValue(o.Required)),
+					new MiniYamlNode(StateKey, FieldSaver.FormatValue(o.State))
+				])))
+				.ToList())));
+
+			return nodes;
+		}
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
+		{
+			var nodes = data.ToDictionary();
+
+			if (nodes.TryGetValue(WinStateCooperativeKey, out var cooperative))
+				WinStateCooperative = FieldLoader.GetValue<WinState>(WinStateCooperativeKey, cooperative.Value);
+
+			if (!nodes.TryGetValue(ObjectivesKey, out var saved))
+				return;
+
+			objectives.Clear();
+
+			foreach (var node in saved.Nodes)
+			{
+				var fields = node.Value.ToDictionary();
+				var objective = new MissionObjective(
+					fields[DescriptionKey].Value,
+					fields[TypeKey].Value,
+					FieldLoader.GetValue<bool>(RequiredKey, fields[RequiredKey].Value))
+				{
+					State = FieldLoader.GetValue<ObjectiveState>(StateKey, fields[StateKey].Value)
+				};
+
+				objectives.Add(objective);
+			}
+
+			if (objectives.Count > 0)
+				self.Owner.HasObjectives = true;
 		}
 	}
 

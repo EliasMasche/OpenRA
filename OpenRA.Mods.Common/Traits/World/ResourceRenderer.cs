@@ -138,6 +138,9 @@ namespace OpenRA.Mods.Common.Traits
 
 		protected virtual void WorldLoaded(World w, WorldRenderer wr)
 		{
+			if (wr == null)
+				return;
+
 			foreach (var kv in Variants)
 			{
 				var resourceVariants = kv.Value;
@@ -259,7 +262,7 @@ namespace OpenRA.Mods.Common.Traits
 				return;
 
 			shadowLayer?.Dispose();
-			spriteLayer.Dispose();
+			spriteLayer?.Dispose();
 
 			ResourceLayer.CellChanged -= AddDirtyCell;
 

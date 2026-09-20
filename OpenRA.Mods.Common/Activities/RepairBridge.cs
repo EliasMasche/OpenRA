@@ -9,14 +9,19 @@
  */
 #endregion
 
+using System.Collections.Generic;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Traits;
 using OpenRA.Primitives;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Activities
 {
+	[SaveableActivity]
 	sealed class RepairBridge : Enter
 	{
+		const string EnterActorKey = "EnterActor";
+
 		readonly EnterBehaviour enterBehaviour;
 		readonly string speechNotification;
 		readonly string textNotification;
@@ -31,6 +36,35 @@ namespace OpenRA.Mods.Common.Activities
 			this.enterBehaviour = enterBehaviour;
 			this.speechNotification = speechNotification;
 			this.textNotification = textNotification;
+		}
+
+		internal RepairBridge(Actor self, SnapshotReader r, MiniYaml yaml)
+			: base(self, r, yaml)
+		{
+			var n = yaml.ToDictionary();
+			enterBehaviour = FieldLoader.GetValue<EnterBehaviour>("EnterBehaviour", n["EnterBehaviour"].Value);
+			speechNotification = n["SpeechNotification"].Value;
+			textNotification = n["TextNotification"].Value;
+
+			r.DeferActor(yaml.NodeWithKeyOrDefault(EnterActorKey).Value.Value, a =>
+			{
+				enterActor = a;
+				enterHut = a?.TraitOrDefault<BridgeHut>();
+				enterLegacyHut = a?.TraitOrDefault<LegacyBridgeHut>();
+			});
+		}
+
+		public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+		{
+			var nodes = base.SaveState(self, w);
+			nodes.AddRange(
+			[
+				new(EnterActorKey, w.ActorRef(enterActor)),
+				new("EnterBehaviour", FieldSaver.FormatValue(enterBehaviour)),
+				new("SpeechNotification", speechNotification),
+				new("TextNotification", textNotification)
+			]);
+			return nodes;
 		}
 
 		bool CanEnterHut()

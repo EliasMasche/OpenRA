@@ -56,11 +56,40 @@ namespace OpenRA.Mods.Common.Traits
 					bridgeTypes.Add(template.Template, (bridge, template.Health));
 			}
 
+			if (w.IsRestoringSnapshot)
+				return;
+
 			// Take all templates to overlay from the map
 			foreach (var cell in w.Map.AllCells.Where(cell => bridgeTypes.ContainsKey(w.Map.Tiles[cell].Type)))
 				ConvertBridgeToActor(w, cell);
 
 			// Link adjacent (long)-bridges so that artwork is updated correctly
+			foreach (var p in w.ActorsWithTrait<Bridge>())
+				p.Trait.LinkNeighbouringBridges(this);
+		}
+
+		public void RestoreBridge(World w, Bridge bridge)
+		{
+			var origin = bridge.Actor.Location;
+
+			var tile = bridge.Template;
+			if (!terrainInfo.Templates.TryGetValue(tile, out var template))
+				return;
+
+			var mapTiles = w.Map.Tiles;
+			var subTiles = new Dictionary<CPos, byte>();
+			for (byte ind = 0; ind < template.Size.X * template.Size.Y; ind++)
+			{
+				var subtile = new CPos(origin.X + ind % template.Size.X, origin.Y + ind / template.Size.X);
+				if (!mapTiles.Contains(subtile))
+					continue;
+
+				subTiles.Add(subtile, ind);
+				bridges[subtile] = bridge;
+			}
+
+			bridge.Restore(tile, subTiles);
+
 			foreach (var p in w.ActorsWithTrait<Bridge>())
 				p.Trait.LinkNeighbouringBridges(this);
 		}

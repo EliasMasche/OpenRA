@@ -1,4 +1,4 @@
-#region Copyright & License Information
+﻿#region Copyright & License Information
 /*
  * Copyright (c) The OpenRA Developers and Contributors
  * This file is part of OpenRA, which is free software. It is made
@@ -14,6 +14,7 @@ using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Activities;
 using OpenRA.Mods.Common.Orders;
 using OpenRA.Primitives;
@@ -94,8 +95,10 @@ namespace OpenRA.Mods.Common.Traits
 
 	public class Cargo : ConditionalTrait<CargoInfo>, IIssueOrder, IResolveOrder, IOrderVoice,
 		INotifyOwnerChanged, INotifySold, INotifyActorDisposing, IIssueDeployOrder,
-		INotifyCreated, INotifyKilled, ITransformActorInitModifier
+		INotifyCreated, INotifyKilled, ITransformActorInitModifier, ISaveState, INotifyStateRestored
 	{
+		const string PassengersKey = "Passengers";
+
 		readonly Actor self;
 		readonly List<Actor> cargo = [];
 		readonly HashSet<Actor> reserves = [];
@@ -142,7 +145,7 @@ namespace OpenRA.Mods.Common.Traits
 
 				totalWeight = cargo.Sum(GetWeight);
 			}
-			else
+			else if (!init.Contains<RestoringInit>())
 			{
 				foreach (var u in info.InitialUnits)
 				{
@@ -487,6 +490,58 @@ namespace OpenRA.Mods.Common.Traits
 		void ITransformActorInitModifier.ModifyTransformActorInit(Actor self, TypeDictionary init)
 		{
 			init.Add(new RuntimeCargoInit(Info, Passengers.ToArray()));
+		}
+
+		TraitInfo ISaveState.SaveStateInfo => Info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
+		{
+			if (cargo.Count == 0)
+				return null;
+
+			return [new(PassengersKey, cargo.Select(w.ActorRef).JoinWith(", "))];
+		}
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
+		{
+			var node = data.NodeWithKeyOrDefault(PassengersKey);
+			if (node == null || string.IsNullOrEmpty(node.Value.Value))
+				return;
+
+			cargo.Clear();
+			totalWeight = 0;
+
+			foreach (var reference in node.Value.Value.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+			{
+				r.DeferActor(reference, a =>
+				{
+					if (a == null)
+						return;
+
+					cargo.Add(a);
+					totalWeight += GetWeight(a);
+				});
+			}
+		}
+
+		void INotifyStateRestored.StateRestored(Actor self)
+		{
+			while (loadedTokens.Count > 0)
+				self.RevokeCondition(loadedTokens.Pop());
+
+			foreach (var tokens in passengerTokens.Values)
+				while (tokens.Count > 0)
+					self.RevokeCondition(tokens.Pop());
+
+			if (cargo.Count == 0)
+				return;
+
+			foreach (var c in cargo)
+				if (Info.PassengerConditions.TryGetValue(c.Info.Name, out var passengerCondition))
+					passengerTokens.GetOrAdd(c.Info.Name).Push(self.GrantCondition(passengerCondition));
+
+			if (!string.IsNullOrEmpty(Info.LoadedCondition))
+				loadedTokens.Push(self.GrantCondition(Info.LoadedCondition));
 		}
 	}
 

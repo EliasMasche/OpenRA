@@ -151,7 +151,7 @@ namespace OpenRA.Mods.Common.Traits
 				var move = newUnit.TraitOrDefault<IMove>();
 				if (move != null)
 					foreach (var cell in exitLocations)
-						newUnit.QueueActivity(new AttackMoveActivity(newUnit, () => move.MoveTo(cell, 1, evaluateNearestMovableCell: true, targetLineColor: Color.OrangeRed)));
+						newUnit.QueueActivity(new AttackMoveActivity(newUnit, MoveSpec.ToCellAt(cell, 1, evaluateNearestMovableCell: true, targetLineColor: Color.OrangeRed)));
 
 				if (!self.IsDead)
 					foreach (var t in self.TraitsImplementing<INotifyProduction>())

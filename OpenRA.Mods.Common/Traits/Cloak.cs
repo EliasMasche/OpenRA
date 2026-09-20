@@ -1,4 +1,4 @@
-#region Copyright & License Information
+﻿#region Copyright & License Information
 /*
  * Copyright (c) The OpenRA Developers and Contributors
  * This file is part of OpenRA, which is free software. It is made
@@ -13,6 +13,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
+using OpenRA.GameSaves;
 using OpenRA.Graphics;
 using OpenRA.Mods.Common.Effects;
 using OpenRA.Primitives;
@@ -113,8 +114,11 @@ namespace OpenRA.Mods.Common.Traits
 
 	public class Cloak : PausableConditionalTrait<CloakInfo>,
 		IRenderModifier, INotifyDamage, INotifyUnloadCargo, INotifyLoadCargo, INotifyDemolition, INotifyInfiltration,
-		INotifyAttack, ITick, IVisibilityModifier, IRadarColorModifier, INotifyDockClient, INotifyDockHost, INotifySupportPower, ISync
+		INotifyAttack, ITick, IVisibilityModifier, IRadarColorModifier, INotifyDockClient, INotifyDockHost, INotifySupportPower, ISync,
+		ISaveState, INotifyStateRestored
 	{
+		const string RemainingTimeKey = "RemainingTime";
+
 		readonly Vector3 cloakedColor;
 		readonly float cloakedColorAlpha;
 
@@ -372,6 +376,31 @@ namespace OpenRA.Mods.Common.Traits
 		{
 			if (Info.UncloakOn.HasFlag(UncloakType.SupportPower))
 				Uncloak();
+		}
+
+		TraitInfo ISaveState.SaveStateInfo => Info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
+		{
+			return [new(RemainingTimeKey, FieldSaver.FormatValue(remainingTime))];
+		}
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
+		{
+			var node = data.NodeWithKeyOrDefault(RemainingTimeKey);
+			if (node != null)
+				remainingTime = FieldLoader.GetValue<int>(RemainingTimeKey, node.Value.Value);
+
+			firstTick = false;
+		}
+
+		void INotifyStateRestored.StateRestored(Actor self)
+		{
+			wasCloaked = Cloaked;
+			if (Cloaked && cloakedToken == Actor.InvalidConditionToken)
+				cloakedToken = self.GrantCondition(Info.CloakedCondition);
+			else if (!Cloaked && cloakedToken != Actor.InvalidConditionToken)
+				cloakedToken = self.RevokeCondition(cloakedToken);
 		}
 	}
 }

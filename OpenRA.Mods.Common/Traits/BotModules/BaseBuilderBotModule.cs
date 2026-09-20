@@ -14,6 +14,7 @@ using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
+using OpenRA.GameSaves;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Traits
@@ -165,7 +166,7 @@ namespace OpenRA.Mods.Common.Traits
 		public override object Create(ActorInitializer init) { return new BaseBuilderBotModule(init.Self, this); }
 	}
 
-	public class BaseBuilderBotModule : ConditionalTrait<BaseBuilderBotModuleInfo>, IGameSaveTraitData,
+	public class BaseBuilderBotModule : ConditionalTrait<BaseBuilderBotModuleInfo>, ISaveState,
 		IBotTick, IBotPositionsUpdated, IBotRespondToAttack, IBotRequestPauseUnitProduction, IBotSuggestRefineryProduction, INotifyActorDisposing
 	{
 		public CPos GetRandomBaseCenter()
@@ -501,7 +502,9 @@ namespace OpenRA.Mods.Common.Traits
 		bool HasMinimalRefineryCount() =>
 			AIUtils.CountActorByCommonName(RefineryBuildings) >= Info.InititalMinimumRefineryCount;
 
-		List<MiniYamlNode> IGameSaveTraitData.IssueTraitData(Actor self)
+		TraitInfo ISaveState.SaveStateInfo => Info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
 		{
 			if (IsTraitDisabled)
 				return null;
@@ -509,7 +512,8 @@ namespace OpenRA.Mods.Common.Traits
 			return
 			[
 				new("InitialBaseCenter", FieldSaver.FormatValue(initialBaseCenter)),
-				new("DefenseCenter", FieldSaver.FormatValue(DefenseCenter))
+
+				new("DefenseCenter", DefenseCenter.HasValue ? FieldSaver.FormatValue(DefenseCenter.Value) : "")
 			];
 		}
 
@@ -544,7 +548,7 @@ namespace OpenRA.Mods.Common.Traits
 			}
 		}
 
-		void IGameSaveTraitData.ResolveTraitData(Actor self, MiniYaml data)
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
 		{
 			if (self.World.IsReplay)
 				return;
@@ -554,7 +558,7 @@ namespace OpenRA.Mods.Common.Traits
 				initialBaseCenter = FieldLoader.GetValue<CPos>("InitialBaseCenter", initialBaseCenterNode.Value.Value);
 
 			var defenseCenterNode = data.NodeWithKeyOrDefault("DefenseCenter");
-			if (defenseCenterNode != null)
+			if (defenseCenterNode != null && !string.IsNullOrEmpty(defenseCenterNode.Value.Value))
 				DefenseCenter = FieldLoader.GetValue<CPos>("DefenseCenter", defenseCenterNode.Value.Value);
 		}
 

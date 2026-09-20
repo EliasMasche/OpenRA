@@ -1,4 +1,5 @@
-﻿using OpenRA.Activities;
+﻿using System.Collections.Generic;
+using OpenRA.Activities;
 using OpenRA.Mods.Common.Traits;
 
 namespace OpenRA.Mods.Common.Activities
@@ -25,6 +26,10 @@ namespace OpenRA.Mods.Common.Activities
 		/// Defaults to (20, 31).
 		/// </summary>
 		public (int MinTicksInclusive, int MaxTicksExclusive) Cooldown { get; set; } = (20, 31);
+
+		const string WasMovingKey = "WasMoving";
+		const string HasRunCooldownKey = "HasRunCooldown";
+		const string CooldownTicksKey = "CooldownTicks";
 
 		readonly World world;
 		readonly Mobile mobile;
@@ -101,6 +106,27 @@ namespace OpenRA.Mods.Common.Activities
 
 				return false;
 			}
+		}
+
+		public List<MiniYamlNode> SaveState()
+		{
+			return
+			[
+				new(WasMovingKey, FieldSaver.FormatValue(wasMoving)),
+				new(HasRunCooldownKey, FieldSaver.FormatValue(hasRunCooldown)),
+				new(CooldownTicksKey, FieldSaver.FormatValue(cooldownTicks))
+			];
+		}
+
+		public void LoadState(MiniYaml yaml)
+		{
+			if (yaml == null)
+				return;
+
+			var nodes = yaml.ToDictionary();
+			wasMoving = FieldLoader.GetValue<bool>(WasMovingKey, nodes[WasMovingKey].Value);
+			hasRunCooldown = FieldLoader.GetValue<bool>(HasRunCooldownKey, nodes[HasRunCooldownKey].Value);
+			cooldownTicks = FieldLoader.GetValue<int>(CooldownTicksKey, nodes[CooldownTicksKey].Value);
 		}
 	}
 }

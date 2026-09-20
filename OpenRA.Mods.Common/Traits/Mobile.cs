@@ -1,4 +1,4 @@
-#region Copyright & License Information
+﻿#region Copyright & License Information
 /*
  * Copyright (c) The OpenRA Developers and Contributors
  * This file is part of OpenRA, which is free software. It is made
@@ -14,6 +14,7 @@ using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Linq;
 using OpenRA.Activities;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Activities;
 using OpenRA.Mods.Common.Pathfinder;
 using OpenRA.Primitives;
@@ -170,8 +171,9 @@ namespace OpenRA.Mods.Common.Traits
 		}
 	}
 
-	public class Mobile : PausableConditionalTrait<MobileInfo>, IIssueOrder, IResolveOrder, IOrderVoice, IPositionable, IMove, ITick, ICreationActivity,
-		IFacing, IDeathActorInitModifier, INotifyAddedToWorld, INotifyRemovedFromWorld, INotifyBlockingMove, IActorPreviewInitModifier, INotifyBecomingIdle, ISync
+	public class Mobile : PausableConditionalTrait<MobileInfo>, IIssueOrder, IResolveOrder, IOrderVoice, IPositionable, IMove, ITick,
+		ICreationActivity, ISaveState, IFacing, IDeathActorInitModifier, INotifyAddedToWorld, INotifyRemovedFromWorld, INotifyBlockingMove,
+		IActorPreviewInitModifier, INotifyBecomingIdle, ISync
 	{
 		readonly Actor self;
 		readonly Lazy<IEnumerable<int>> speedModifiers;
@@ -206,6 +208,12 @@ namespace OpenRA.Mods.Common.Traits
 		WRot orientation;
 		WPos oldPos;
 		public SubCell FromSubCell, ToSubCell;
+
+		const string FromCellKey = "FromCell";
+		const string ToCellKey = "ToCell";
+		const string FromSubCellKey = "FromSubCell";
+		const string ToSubCellKey = "ToSubCell";
+		const string FacingKey = "Facing";
 
 		INotifyCustomLayerChanged[] notifyCustomLayerChanged;
 		INotifyCenterPositionChanged[] notifyCenterPositionChanged;
@@ -654,8 +662,12 @@ namespace OpenRA.Mods.Common.Traits
 			return new ReturnToCellActivity(self);
 		}
 
+		[SaveableActivity]
 		public class ReturnToCellActivity : Activity
 		{
+			const string DelayKey = "Delay";
+			const string RecalculateSubCellKey = "RecalculateSubCell";
+
 			readonly Mobile mobile;
 			readonly bool recalculateSubCell;
 
@@ -670,6 +682,25 @@ namespace OpenRA.Mods.Common.Traits
 				IsInterruptible = false;
 				this.delay = delay;
 				this.recalculateSubCell = recalculateSubCell;
+			}
+
+			internal ReturnToCellActivity(Actor self, SnapshotReader _, MiniYaml yaml)
+			{
+				mobile = self.Trait<Mobile>();
+				IsInterruptible = false;
+
+				var nodes = yaml.ToDictionary();
+				delay = FieldLoader.GetValue<int>(DelayKey, nodes[DelayKey].Value);
+				recalculateSubCell = FieldLoader.GetValue<bool>(RecalculateSubCellKey, nodes[RecalculateSubCellKey].Value);
+			}
+
+			public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+			{
+				return
+				[
+					new(DelayKey, FieldSaver.FormatValue(delay)),
+					new(RecalculateSubCellKey, FieldSaver.FormatValue(recalculateSubCell))
+				];
 			}
 
 			protected override void OnFirstRun(Actor self)
@@ -811,7 +842,10 @@ namespace OpenRA.Mods.Common.Traits
 			CrushAction(self, (notifyCrushed) => notifyCrushed.WarnCrush);
 		}
 
-		public Activity MoveTo(Func<BlockedByActor, (bool AlreadyAtDestination, List<CPos> Path)> pathFunc) { return new Move(self, pathFunc); }
+		public Activity MoveTo(Func<BlockedByActor, (bool AlreadyAtDestination, List<CPos> Path)> pathFunc, bool parentSupplied = false)
+		{
+			return new Move(self, pathFunc, parentSupplied: parentSupplied);
+		}
 
 		Activity LocalMove(Actor self, WPos fromPos, WPos toPos, CPos cell)
 		{
@@ -988,14 +1022,12 @@ namespace OpenRA.Mods.Common.Traits
 
 		public class LeaveProductionActivity : Activity
 		{
-			readonly Mobile mobile;
 			readonly int delay;
 			readonly CPos[] rallyPoint;
 			readonly ReturnToCellActivity returnToCell;
 
 			public LeaveProductionActivity(Actor self, int delay, CPos[] rallyPoint, ReturnToCellActivity returnToCell)
 			{
-				mobile = self.Trait<Mobile>();
 				this.delay = delay;
 				this.rallyPoint = rallyPoint;
 				this.returnToCell = returnToCell;
@@ -1011,7 +1043,7 @@ namespace OpenRA.Mods.Common.Traits
 
 				if (rallyPoint != null)
 					foreach (var cell in rallyPoint)
-						QueueChild(new AttackMoveActivity(self, () => mobile.MoveTo(cell, 1, evaluateNearestMovableCell: true, targetLineColor: Color.OrangeRed)));
+						QueueChild(new AttackMoveActivity(self, MoveSpec.ToCellAt(cell, 1, evaluateNearestMovableCell: true, targetLineColor: Color.OrangeRed)));
 			}
 
 			public override IEnumerable<Target> GetTargets(Actor self)
@@ -1039,6 +1071,36 @@ namespace OpenRA.Mods.Common.Traits
 					returnToCellOnCreation ? new ReturnToCellActivity(self, creationActivityDelay, returnToCellOnCreationRecalculateSubCell) : null);
 
 			return null;
+		}
+
+		TraitInfo ISaveState.SaveStateInfo => Info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
+		{
+			return
+			[
+				new(FromCellKey, FieldSaver.FormatValue(FromCell)),
+				new(ToCellKey, FieldSaver.FormatValue(ToCell)),
+				new(FromSubCellKey, ((int)FromSubCell).ToStringInvariant()),
+				new(ToSubCellKey, ((int)ToSubCell).ToStringInvariant()),
+				new(FacingKey, FieldSaver.FormatValue(Facing))
+			];
+		}
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
+		{
+			var nodes = data.ToDictionary();
+			if (nodes.TryGetValue(FacingKey, out var f))
+				Facing = FieldLoader.GetValue<WAngle>(FacingKey, f.Value);
+
+			if (!nodes.TryGetValue(FromCellKey, out var from) || !nodes.TryGetValue(ToCellKey, out var to))
+				return;
+
+			SetLocation(
+				FieldLoader.GetValue<CPos>(FromCellKey, from.Value),
+				(SubCell)FieldLoader.GetValue<int>(FromSubCellKey, nodes[FromSubCellKey].Value),
+				FieldLoader.GetValue<CPos>(ToCellKey, to.Value),
+				(SubCell)FieldLoader.GetValue<int>(ToSubCellKey, nodes[ToSubCellKey].Value));
 		}
 
 		sealed class MoveOrderTargeter : IOrderTargeter

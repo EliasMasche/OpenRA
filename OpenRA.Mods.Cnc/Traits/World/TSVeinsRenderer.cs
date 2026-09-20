@@ -198,6 +198,9 @@ namespace OpenRA.Mods.Cnc.Traits
 			foreach (var a in w.Actors)
 				ActorAddedToWorld(a);
 
+			if (wr == null)
+				return;
+
 			veinPalette = wr.Palette(info.Palette);
 			var first = veinSequence.GetSprite(0);
 			var emptySprite = new Sprite(first.Sheet, Rectangle.Empty, TextureChannel.Alpha);

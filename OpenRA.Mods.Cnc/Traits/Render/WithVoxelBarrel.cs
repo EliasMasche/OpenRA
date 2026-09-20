@@ -79,6 +79,10 @@ namespace OpenRA.Mods.Cnc.Traits.Render
 				.First(tt => tt.Name == armament.Info.Turret);
 
 			var rv = self.Trait<RenderVoxels>();
+
+			if (rv.Renderer.ModelCache == null)
+				return;
+
 			rv.Add(new ModelAnimation(rv.Renderer.ModelCache.GetModelSequence(rv.Image, Info.Sequence),
 				BarrelOffset, BarrelRotation,
 				() => IsTraitDisabled, () => 0, info.ShowShadow));

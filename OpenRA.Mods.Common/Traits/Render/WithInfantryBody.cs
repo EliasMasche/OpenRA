@@ -12,6 +12,7 @@
 using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Collections.Immutable;
+using OpenRA.GameSaves;
 using OpenRA.Graphics;
 using OpenRA.Mods.Common.Graphics;
 using OpenRA.Traits;
@@ -67,8 +68,12 @@ namespace OpenRA.Mods.Common.Traits.Render
 		}
 	}
 
-	public class WithInfantryBody : ConditionalTrait<WithInfantryBodyInfo>, ITick, INotifyAttack, INotifyIdle
+	public class WithInfantryBody : ConditionalTrait<WithInfantryBodyInfo>, ITick, INotifyAttack, INotifyIdle, ISaveState
 	{
+		const string StateKey = "State";
+		const string IdleDelayKey = "IdleDelay";
+		const string IdleSequenceKey = "IdleSequence";
+
 		readonly IMove move;
 		protected readonly Animation DefaultAnimation;
 
@@ -193,6 +198,32 @@ namespace OpenRA.Mods.Common.Traits.Render
 				PlayStandAnimation(self);
 
 			dirty = false;
+		}
+
+		TraitInfo ISaveState.SaveStateInfo => Info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
+		{
+			return
+			[
+				new(StateKey, FieldSaver.FormatValue(state)),
+				new(IdleDelayKey, FieldSaver.FormatValue(idleDelay)),
+				new(IdleSequenceKey, idleSequence ?? "")
+			];
+		}
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
+		{
+			var nodes = data.ToDictionary();
+
+			if (nodes.TryGetValue(StateKey, out var st))
+				state = FieldLoader.GetValue<AnimationState>(StateKey, st.Value);
+
+			if (nodes.TryGetValue(IdleDelayKey, out var d))
+				idleDelay = FieldLoader.GetValue<int>(IdleDelayKey, d.Value);
+
+			if (nodes.TryGetValue(IdleSequenceKey, out var seq) && !string.IsNullOrEmpty(seq.Value))
+				idleSequence = seq.Value;
 		}
 
 		void INotifyIdle.TickIdle(Actor self)

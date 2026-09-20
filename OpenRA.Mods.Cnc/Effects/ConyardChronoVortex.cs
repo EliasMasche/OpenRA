@@ -9,9 +9,9 @@
  */
 #endregion
 
-using System;
 using System.Collections.Generic;
 using OpenRA.Effects;
+using OpenRA.GameSaves;
 using OpenRA.Graphics;
 using OpenRA.Mods.Cnc.Graphics;
 using OpenRA.Mods.Cnc.Traits;
@@ -19,25 +19,65 @@ using OpenRA.Primitives;
 
 namespace OpenRA.Mods.Cnc.Effects
 {
-	sealed class ConyardChronoVortex : IEffect, ISpatiallyPartitionable
+	[SaveableEffect]
+	sealed class ConyardChronoVortex : IEffect, ISpatiallyPartitionable, ISaveableEffect, IRequiresRestoredReferences
 	{
+		const string LauncherKey = "Launcher";
+		const string CenterKey = "Center";
+		const string PosKey = "Pos";
+		const string AngleKey = "Angle";
+		const string LoopsKey = "Loops";
+		const string FrameKey = "Frame";
+
 		static readonly Size Size = new(64, 64);
 		static readonly WVec Offset = new(171, 0, 0);
 		readonly ChronoVortexRenderer renderer;
 		readonly WPos center;
-		readonly Action onCompletion;
+
+		Actor launcher;
 		WPos pos;
 		WAngle angle;
 		int loops = 3;
 		int frame;
 
-		public ConyardChronoVortex(Actor launcher, Action onCompletion)
+		public ConyardChronoVortex(Actor launcher)
 		{
-			this.onCompletion = onCompletion;
+			this.launcher = launcher;
 			renderer = launcher.World.WorldActor.Trait<ChronoVortexRenderer>();
 			center = launcher.CenterPosition;
 			pos = center + Offset.Rotate(WRot.FromYaw(angle));
 			launcher.World.ScreenMap.Add(this, pos, Size);
+		}
+
+		internal ConyardChronoVortex(World world, SnapshotReader r, MiniYaml yaml)
+		{
+			var nodes = yaml.ToDictionary();
+
+			renderer = world.WorldActor.Trait<ChronoVortexRenderer>();
+			center = FieldLoader.GetValue<WPos>(CenterKey, nodes[CenterKey].Value);
+			pos = FieldLoader.GetValue<WPos>(PosKey, nodes[PosKey].Value);
+			angle = FieldLoader.GetValue<WAngle>(AngleKey, nodes[AngleKey].Value);
+			loops = FieldLoader.GetValue<int>(LoopsKey, nodes[LoopsKey].Value);
+			frame = FieldLoader.GetValue<int>(FrameKey, nodes[FrameKey].Value);
+
+			r.DeferActor(nodes[LauncherKey].Value, a => launcher = a);
+
+			world.ScreenMap.Add(this, pos, Size);
+		}
+
+		bool IRequiresRestoredReferences.ReferencesRestored => launcher != null;
+
+		List<MiniYamlNode> ISaveableEffect.SaveState(World world, SnapshotWriter w)
+		{
+			return
+			[
+				new(LauncherKey, w.ActorRef(launcher)),
+				new(CenterKey, FieldSaver.FormatValue(center)),
+				new(PosKey, FieldSaver.FormatValue(pos)),
+				new(AngleKey, FieldSaver.FormatValue(angle)),
+				new(LoopsKey, FieldSaver.FormatValue(loops)),
+				new(FrameKey, FieldSaver.FormatValue(frame))
+			];
 		}
 
 		public void Tick(World world)
@@ -52,7 +92,14 @@ namespace OpenRA.Mods.Cnc.Effects
 			pos = center + Offset.Rotate(WRot.FromYaw(angle));
 			world.ScreenMap.Update(this, pos, Size);
 			if (frame == 48)
-				world.AddFrameEndTask(w => { w.Remove(this); w.ScreenMap.Remove(this); onCompletion(); });
+			{
+				world.AddFrameEndTask(w =>
+				{
+					w.Remove(this);
+					w.ScreenMap.Remove(this);
+					launcher.TraitOrDefault<ConyardChronoReturn>()?.VortexCompleted();
+				});
+			}
 		}
 
 		public IEnumerable<IRenderable> Render(WorldRenderer wr)

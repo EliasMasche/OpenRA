@@ -54,21 +54,21 @@ namespace OpenRA.Mods.Common.Warheads
 		static readonly BitSet<TargetableType> TargetTypeAir = new("Air");
 
 		/// <summary>Checks if there are any actors at impact position and if the warhead is valid against any of them.</summary>
-		ImpactActorType ActorTypeAtImpact(World world, WPos pos, Actor firedBy)
+		ImpactActorType ActorTypeAtImpact(World world, WPos pos, Player firedBy, Actor firedByActor)
 		{
 			var anyInvalidActor = false;
 
 			// Check whether the impact position overlaps with an actor's hitshape
 			foreach (var victim in world.FindActorsOnCircle(pos, WDist.Zero))
 			{
-				if (!AffectsParent && victim == firedBy)
+				if (!AffectsParent && firedByActor != null && victim == firedByActor)
 					continue;
 
 				var activeShapes = victim.TraitsImplementing<HitShape>().Where(t => !t.IsTraitDisabled);
 				if (!activeShapes.Any(s => s.DistanceFromEdge(victim, pos).Length <= 0))
 					continue;
 
-				if (IsValidAgainst(victim, firedBy))
+				if (IsValidAgainst(victim, firedBy, firedByActor))
 					return ImpactActorType.Valid;
 
 				anyInvalidActor = true;
@@ -79,9 +79,9 @@ namespace OpenRA.Mods.Common.Warheads
 
 		// ActorTypeAtImpact already checks AffectsParent beforehand, to avoid parent HitShape look-ups
 		// (and to prevent returning ImpactActorType.Invalid on AffectsParent=false)
-		public override bool IsValidAgainst(Actor victim, Actor firedBy)
+		public override bool IsValidAgainst(Actor victim, Player firedBy, Actor firedByActor = null)
 		{
-			var relationship = firedBy.Owner.RelationshipWith(victim.Owner);
+			var relationship = firedBy.RelationshipWith(victim.Owner);
 			if (!ValidRelationships.HasRelationship(relationship))
 				return false;
 
@@ -97,10 +97,10 @@ namespace OpenRA.Mods.Common.Warheads
 			if (target.Type == TargetType.Invalid)
 				return;
 
-			var firedBy = args.SourceActor;
+			var firedBy = args.SourceOwner;
 			var pos = target.CenterPosition;
-			var world = firedBy.World;
-			var actorAtImpact = ImpactActors ? ActorTypeAtImpact(world, pos, firedBy) : ImpactActorType.None;
+			var world = args.World;
+			var actorAtImpact = ImpactActors ? ActorTypeAtImpact(world, pos, firedBy, args.SourceActor) : ImpactActorType.None;
 
 			// Ignore the impact if there are only invalid actors within range
 			if (actorAtImpact == ImpactActorType.Invalid)
@@ -124,8 +124,9 @@ namespace OpenRA.Mods.Common.Warheads
 				}
 
 				var palette = ExplosionPalette;
-				if (UsePlayerPalette)
-					palette += firedBy.Owner.InternalName;
+
+				if (UsePlayerPalette && firedBy != null)
+					palette += firedBy.InternalName;
 
 				world.AddFrameEndTask(w => w.Add(new SpriteEffect(pos, w, Image, explosion, palette)));
 			}

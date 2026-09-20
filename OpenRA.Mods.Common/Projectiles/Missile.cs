@@ -14,11 +14,13 @@ using System.Collections.Immutable;
 using System.Linq;
 using System.Numerics;
 using OpenRA.GameRules;
+using OpenRA.GameSaves;
 using OpenRA.Graphics;
 using OpenRA.Mods.Common.Effects;
 using OpenRA.Mods.Common.Graphics;
 using OpenRA.Mods.Common.Traits;
 using OpenRA.Primitives;
+using OpenRA.Scripting;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Projectiles
@@ -190,8 +192,29 @@ namespace OpenRA.Mods.Common.Projectiles
 	}
 
 	// TODO: double check square roots!!!
-	public class Missile : IProjectile, ISync
+	[SaveableEffect]
+	public class Missile : IProjectile, ISync, ISaveableEffect, IProjectileScriptInfo
 	{
+		const string ArgsKey = "Args";
+		const string TicksKey = "Ticks";
+		const string TicksToNextSmokeKey = "TicksToNextSmoke";
+		const string StateKey = "State";
+		const string TargetPassedByKey = "TargetPassedBy";
+		const string LockOnKey = "LockOn";
+		const string AllowPassByKey = "AllowPassBy";
+		const string TargetPositionKey = "TargetPosition";
+		const string OffsetKey = "Offset";
+		const string TarVelKey = "TarVel";
+		const string PredVelKey = "PredVel";
+		const string PosKey = "Pos";
+		const string VelocityKey = "Velocity";
+		const string SpeedKey = "Speed";
+		const string LoopRadiusKey = "LoopRadius";
+		const string DistanceCoveredKey = "DistanceCovered";
+		const string RenderFacingKey = "RenderFacing";
+		const string HFacingKey = "HFacing";
+		const string VFacingKey = "VFacing";
+
 		enum States
 		{
 			Freefall,
@@ -216,11 +239,13 @@ namespace OpenRA.Mods.Common.Projectiles
 		int ticks;
 
 		int ticksToNextSmoke;
-		readonly ContrailRenderable contrail;
-		readonly string trailPalette;
+
+		ContrailRenderable contrail;
+		string trailPalette;
 
 		States state;
 		bool targetPassedBy;
+
 		readonly bool lockOn;
 		bool allowPassBy; // TODO: use this also with high minimum launch angle settings
 
@@ -267,7 +292,7 @@ namespace OpenRA.Mods.Common.Projectiles
 			// Make sure the projectile on being spawned is approximately looking at the correct direction.
 			renderFacing = args.Facing;
 
-			var world = args.SourceActor.World;
+			var world = args.World;
 
 			if (world.SharedRandom.Next(100) <= info.LockOnProbability)
 				lockOn = true;
@@ -292,24 +317,113 @@ namespace OpenRA.Mods.Common.Projectiles
 			}
 
 			if (info.ContrailLength > 0)
-			{
-				var startcolor = Color.FromArgb(info.ContrailStartColorAlpha, info.ContrailStartColor);
-				var endcolor = Color.FromArgb(info.ContrailEndColorAlpha, info.ContrailEndColor ?? startcolor);
-				contrail = new ContrailRenderable(world, args.SourceActor,
-					startcolor, info.ContrailStartColorUsePlayerColor,
-					endcolor, info.ContrailEndColor == null ? info.ContrailStartColorUsePlayerColor : info.ContrailEndColorUsePlayerColor,
-					info.ContrailStartWidth,
-					info.ContrailEndWidth ?? info.ContrailStartWidth,
-					info.ContrailLength, info.ContrailDelay, info.ContrailZOffset);
-			}
+				contrail = CreateContrail(world, args);
 
 			trailPalette = info.TrailPalette;
 			if (info.TrailUsePlayerPalette)
-				trailPalette += args.SourceActor.Owner.InternalName;
+				trailPalette += args.SourceOwner.InternalName;
 
 			var sColor = info.ShadowColor.ToVector4();
 			shadowColor = sColor.AsVector3();
 			shadowAlpha = sColor.W;
+		}
+
+		ContrailRenderable CreateContrail(World world, ProjectileArgs args)
+		{
+			var startcolor = Color.FromArgb(info.ContrailStartColorAlpha, info.ContrailStartColor);
+			var endcolor = Color.FromArgb(info.ContrailEndColorAlpha, info.ContrailEndColor ?? startcolor);
+			return new ContrailRenderable(world, args.SourceOwner,
+				startcolor, info.ContrailStartColorUsePlayerColor,
+				endcolor, info.ContrailEndColor == null ? info.ContrailStartColorUsePlayerColor : info.ContrailEndColorUsePlayerColor,
+				info.ContrailStartWidth,
+				info.ContrailEndWidth ?? info.ContrailStartWidth,
+				info.ContrailLength, info.ContrailDelay, info.ContrailZOffset);
+		}
+
+		internal Missile(World world, SnapshotReader r, MiniYaml yaml)
+		{
+			var nodes = yaml.ToDictionary();
+
+			args = ProjectileArgsCodec.Load(nodes[ArgsKey], world, r);
+
+			info = (MissileInfo)args.Weapon.Projectile;
+
+			gravity = new WVec(0, 0, -info.Gravity);
+			minLaunchSpeed = info.MinimumLaunchSpeed.Length > -1 ? info.MinimumLaunchSpeed.Length : info.Speed.Length;
+			maxLaunchSpeed = info.MaximumLaunchSpeed.Length > -1 ? info.MaximumLaunchSpeed.Length : info.Speed.Length;
+			maxSpeed = info.Speed.Length;
+			minLaunchAngle = info.MinimumLaunchAngle;
+			maxLaunchAngle = info.MaximumLaunchAngle;
+
+			var limit = info.RangeLimit != WDist.Zero ? info.RangeLimit : args.Weapon.Range;
+			rangeLimit = new WDist(Util.ApplyPercentageModifiers(limit.Length, args.RangeModifiers));
+
+			ticks = FieldLoader.GetValue<int>(TicksKey, nodes[TicksKey].Value);
+			ticksToNextSmoke = FieldLoader.GetValue<int>(TicksToNextSmokeKey, nodes[TicksToNextSmokeKey].Value);
+			state = FieldLoader.GetValue<States>(StateKey, nodes[StateKey].Value);
+			targetPassedBy = FieldLoader.GetValue<bool>(TargetPassedByKey, nodes[TargetPassedByKey].Value);
+			lockOn = FieldLoader.GetValue<bool>(LockOnKey, nodes[LockOnKey].Value);
+			allowPassBy = FieldLoader.GetValue<bool>(AllowPassByKey, nodes[AllowPassByKey].Value);
+			targetPosition = FieldLoader.GetValue<WPos>(TargetPositionKey, nodes[TargetPositionKey].Value);
+			offset = FieldLoader.GetValue<WVec>(OffsetKey, nodes[OffsetKey].Value);
+			tarVel = FieldLoader.GetValue<WVec>(TarVelKey, nodes[TarVelKey].Value);
+			predVel = FieldLoader.GetValue<WVec>(PredVelKey, nodes[PredVelKey].Value);
+			pos = FieldLoader.GetValue<WPos>(PosKey, nodes[PosKey].Value);
+			velocity = FieldLoader.GetValue<WVec>(VelocityKey, nodes[VelocityKey].Value);
+			speed = FieldLoader.GetValue<int>(SpeedKey, nodes[SpeedKey].Value);
+			loopRadius = FieldLoader.GetValue<int>(LoopRadiusKey, nodes[LoopRadiusKey].Value);
+			distanceCovered = FieldLoader.GetValue<WDist>(DistanceCoveredKey, nodes[DistanceCoveredKey].Value);
+			renderFacing = FieldLoader.GetValue<WAngle>(RenderFacingKey, nodes[RenderFacingKey].Value);
+			hFacing = FieldLoader.GetValue<int>(HFacingKey, nodes[HFacingKey].Value);
+			vFacing = FieldLoader.GetValue<int>(VFacingKey, nodes[VFacingKey].Value);
+
+			if (!string.IsNullOrEmpty(info.Image))
+			{
+				anim = new Animation(world, info.Image, () => renderFacing);
+
+				anim.PlayRepeating(info.Sequences[0]);
+			}
+
+			if (info.ContrailLength > 0)
+				contrail = CreateContrail(world, args);
+
+			trailPalette = info.TrailPalette;
+			if (info.TrailUsePlayerPalette)
+				trailPalette += args.SourceOwner.InternalName;
+
+			var restoredColor = info.ShadowColor.ToVector4();
+			shadowColor = restoredColor.AsVector3();
+			shadowAlpha = restoredColor.W;
+		}
+
+		List<MiniYamlNode> ISaveableEffect.SaveState(World world, SnapshotWriter w)
+		{
+			var argNodes = ProjectileArgsCodec.Save(args, world, w);
+			if (argNodes == null)
+				return null;
+
+			return
+			[
+				new(ArgsKey, new MiniYaml("", argNodes)),
+				new(TicksKey, FieldSaver.FormatValue(ticks)),
+				new(TicksToNextSmokeKey, FieldSaver.FormatValue(ticksToNextSmoke)),
+				new(StateKey, FieldSaver.FormatValue(state)),
+				new(TargetPassedByKey, FieldSaver.FormatValue(targetPassedBy)),
+				new(LockOnKey, FieldSaver.FormatValue(lockOn)),
+				new(AllowPassByKey, FieldSaver.FormatValue(allowPassBy)),
+				new(TargetPositionKey, FieldSaver.FormatValue(targetPosition)),
+				new(OffsetKey, FieldSaver.FormatValue(offset)),
+				new(TarVelKey, FieldSaver.FormatValue(tarVel)),
+				new(PredVelKey, FieldSaver.FormatValue(predVel)),
+				new(PosKey, FieldSaver.FormatValue(pos)),
+				new(VelocityKey, FieldSaver.FormatValue(velocity)),
+				new(SpeedKey, FieldSaver.FormatValue(speed)),
+				new(LoopRadiusKey, FieldSaver.FormatValue(loopRadius)),
+				new(DistanceCoveredKey, FieldSaver.FormatValue(distanceCovered)),
+				new(RenderFacingKey, FieldSaver.FormatValue(renderFacing)),
+				new(HFacingKey, FieldSaver.FormatValue(hFacing)),
+				new(VFacingKey, FieldSaver.FormatValue(vFacing))
+			];
 		}
 
 		static int LoopRadius(int speed, int rot)
@@ -474,7 +588,7 @@ namespace OpenRA.Mods.Common.Projectiles
 			if ((tp.Actor.CenterPosition - pos).HorizontalLengthSquared > tp.Trait.Range.LengthSquared)
 				return false;
 
-			if (!tp.Trait.DeflectionStances.HasRelationship(tp.Actor.Owner.RelationshipWith(args.SourceActor.Owner)))
+			if (!tp.Trait.DeflectionStances.HasRelationship(tp.Actor.Owner.RelationshipWith(args.SourceOwner)))
 				return false;
 
 			return tp.Actor.World.SharedRandom.Next(100) < tp.Trait.Chance;
@@ -822,7 +936,7 @@ namespace OpenRA.Mods.Common.Projectiles
 				desiredHFacing = hFacing + world.SharedRandom.Next(-info.JammedDiversionRange, info.JammedDiversionRange + 1);
 				desiredVFacing = vFacing + world.SharedRandom.Next(-info.JammedDiversionRange, info.JammedDiversionRange + 1);
 			}
-			else if (!args.GuidedTarget.IsValidFor(args.SourceActor))
+			else if (!args.GuidedTarget.IsValidFor(args.SourceOwner))
 				desiredHFacing = hFacing;
 
 			// Compute new direction the projectile will be facing
@@ -862,7 +976,7 @@ namespace OpenRA.Mods.Common.Projectiles
 
 			// Check if target position should be updated (actor visible & locked on)
 			var newTarPos = targetPosition;
-			if (args.GuidedTarget.IsValidFor(args.SourceActor) && lockOn)
+			if (args.GuidedTarget.IsValidFor(args.SourceOwner) && lockOn)
 				newTarPos = (args.Weapon.TargetActorCenter ? args.GuidedTarget.CenterPosition : args.GuidedTarget.Positions.ClosestToIgnoringPath(args.Source))
 					+ new WVec(WDist.Zero, WDist.Zero, info.AirburstAltitude);
 
@@ -895,7 +1009,7 @@ namespace OpenRA.Mods.Common.Projectiles
 
 			// Check for walls or other blocking obstacles
 			var shouldExplode = false;
-			if (info.Blockable && BlocksProjectiles.AnyBlockingActorsBetween(world, args.SourceActor.Owner, lastPos, pos, info.Width, out var blockedPos))
+			if (info.Blockable && BlocksProjectiles.AnyBlockingActorsBetween(world, args.SourceOwner, lastPos, pos, info.Width, out var blockedPos))
 			{
 				pos = blockedPos;
 				shouldExplode = true;
@@ -910,8 +1024,7 @@ namespace OpenRA.Mods.Common.Projectiles
 				ticksToNextSmoke = info.TrailInterval;
 			}
 
-			if (info.ContrailLength > 0)
-				contrail.Update(pos);
+			contrail?.Update(pos);
 
 			distanceCovered += new WDist(speed);
 			var cell = world.Map.CellContaining(pos);
@@ -929,7 +1042,7 @@ namespace OpenRA.Mods.Common.Projectiles
 
 		void Explode(World world)
 		{
-			if (info.ContrailLength > 0)
+			if (contrail != null)
 				world.AddFrameEndTask(w => w.Add(new ContrailFader(pos, contrail)));
 
 			world.AddFrameEndTask(w => w.Remove(this));
@@ -949,18 +1062,18 @@ namespace OpenRA.Mods.Common.Projectiles
 
 		public IEnumerable<IRenderable> Render(WorldRenderer wr)
 		{
-			if (info.ContrailLength > 0)
+			if (contrail != null)
 				yield return contrail;
 
 			if (anim == null)
 				yield break;
 
-			var world = args.SourceActor.World;
+			var world = args.World;
 			if (!world.FogObscures(pos))
 			{
 				var paletteName = info.Palette;
 				if (paletteName != null && info.IsPlayerPalette)
-					paletteName += args.SourceActor.Owner.InternalName;
+					paletteName += args.SourceOwner.InternalName;
 
 				var palette = wr.Palette(paletteName);
 
@@ -978,5 +1091,11 @@ namespace OpenRA.Mods.Common.Projectiles
 					yield return r;
 			}
 		}
+
+		WPos IProjectileScriptInfo.Position => pos;
+		WPos IProjectileScriptInfo.TargetPosition => targetPosition;
+		ScriptProjectileInterface IProjectileScriptInfo.LuaInterface { get; set; }
+		Actor IProjectileScriptInfo.SourceActor => args.SourceActor;
+		WeaponInfo IProjectileScriptInfo.Weapon => args.Weapon;
 	}
 }

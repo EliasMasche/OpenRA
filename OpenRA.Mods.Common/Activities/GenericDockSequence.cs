@@ -13,6 +13,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using OpenRA.Activities;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Traits;
 using OpenRA.Mods.Common.Traits.Render;
 using OpenRA.Primitives;
@@ -20,24 +21,25 @@ using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Activities
 {
+	[SaveableActivity]
 	public class GenericDockSequence : Activity
 	{
 		protected enum DockingState { Wait, Drag, Dock, Loop, Undock, Complete }
 
-		protected readonly Actor DockHostActor;
-		protected readonly IDockHost DockHost;
-		protected readonly WithDockingOverlay DockHostSpriteOverlay;
-		protected readonly DockClientManager DockClient;
-		protected readonly IDockClientBody DockClientBody;
-		protected readonly bool IsDragRequired;
-		protected readonly int DragLength;
-		protected readonly WPos StartDrag;
-		protected readonly WPos EndDrag;
+		protected Actor DockHostActor { get; private set; }
+		protected IDockHost DockHost { get; private set; }
+		protected WithDockingOverlay DockHostSpriteOverlay { get; private set; }
+		protected DockClientManager DockClient { get; }
+		protected IDockClientBody DockClientBody { get; }
+		protected bool IsDragRequired { get; }
+		protected int DragLength { get; }
+		protected WPos StartDrag { get; }
+		protected WPos EndDrag { get; }
 
 		protected DockingState dockingState;
 
 		readonly INotifyDockClient[] notifyDockClients;
-		readonly INotifyDockHost[] notifyDockHosts;
+		INotifyDockHost[] notifyDockHosts;
 
 		bool dockInitiated = false;
 
@@ -61,6 +63,55 @@ namespace OpenRA.Mods.Common.Activities
 			EndDrag = hostActor.CenterPosition + dragOffset;
 
 			QueueChild(new Wait(dockWait));
+		}
+
+		internal GenericDockSequence(Actor self, SnapshotReader r, MiniYaml yaml)
+		{
+			DockClient = self.Trait<DockClientManager>();
+			DockClientBody = self.TraitOrDefault<IDockClientBody>();
+			notifyDockClients = self.TraitsImplementing<INotifyDockClient>().ToArray();
+
+			var n = yaml.ToDictionary();
+			dockingState = FieldLoader.GetValue<DockingState>("DockingState", n["DockingState"].Value);
+			dockInitiated = FieldLoader.GetValue<bool>("DockInitiated", n["DockInitiated"].Value);
+			IsDragRequired = FieldLoader.GetValue<bool>("IsDragRequired", n["IsDragRequired"].Value);
+			DragLength = FieldLoader.GetValue<int>("DragLength", n["DragLength"].Value);
+			StartDrag = FieldLoader.GetValue<WPos>("StartDrag", n["StartDrag"].Value);
+			EndDrag = FieldLoader.GetValue<WPos>("EndDrag", n["EndDrag"].Value);
+
+			r.DeferActor(n["DockHostActor"].Value, a =>
+			{
+				if (a == null)
+					return;
+
+				DockHostActor = a;
+				DockHost = a.TraitsImplementing<IDockHost>().FirstOrDefault();
+				DockHostSpriteOverlay = a.TraitOrDefault<WithDockingOverlay>();
+				notifyDockHosts = a.TraitsImplementing<INotifyDockHost>().ToArray();
+			});
+
+			r.DeferCompleted(() =>
+			{
+				if (dockInitiated && DockHostActor != null && DockHost != null)
+					NotifyDockStarted(self);
+			});
+		}
+
+		public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+		{
+			if (dockingState == DockingState.Wait)
+				return null;
+
+			return
+			[
+				new("DockHostActor", w.ActorRef(DockHostActor)),
+				new("DockingState", FieldSaver.FormatValue(dockingState)),
+				new("DockInitiated", FieldSaver.FormatValue(dockInitiated)),
+				new("IsDragRequired", FieldSaver.FormatValue(IsDragRequired)),
+				new("DragLength", FieldSaver.FormatValue(DragLength)),
+				new("StartDrag", FieldSaver.FormatValue(StartDrag)),
+				new("EndDrag", FieldSaver.FormatValue(EndDrag))
+			];
 		}
 
 		public override bool Tick(Actor self)
@@ -88,9 +139,7 @@ namespace OpenRA.Mods.Common.Activities
 					{
 						dockInitiated = true;
 						PlayDockAnimations(self);
-						DockHost.OnDockStarted(DockHostActor, self, DockClient);
-						DockClient.OnDockStarted(self, DockHostActor, DockHost);
-						NotifyDocked(self);
+						NotifyDockStarted(self);
 					}
 					else
 						dockingState = DockingState.Undock;
@@ -182,6 +231,13 @@ namespace OpenRA.Mods.Common.Activities
 			}
 			else
 				after();
+		}
+
+		void NotifyDockStarted(Actor self)
+		{
+			DockHost.OnDockStarted(DockHostActor, self, DockClient);
+			DockClient.OnDockStarted(self, DockHostActor, DockHost);
+			NotifyDocked(self);
 		}
 
 		void NotifyDocked(Actor self)

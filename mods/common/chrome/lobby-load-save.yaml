@@ -1,0 +1,63 @@
+Background@LOBBY_LOAD_SAVE_PANEL:
+	Logic: LobbyLoadSaveLogic
+	X: (WINDOW_WIDTH - WIDTH) / 2
+	Y: (WINDOW_HEIGHT - HEIGHT) / 2
+	Width: 500
+	Height: 420
+	Children:
+		Label@TITLE:
+			Y: 16
+			Width: PARENT_WIDTH
+			Height: 25
+			Text: label-lobby-load-save-panel-title
+			Align: Center
+			Font: Bold
+		ScrollPanel@SAVE_LIST:
+			X: 20
+			Y: 50
+			Width: PARENT_WIDTH - 40
+			Height: PARENT_HEIGHT - 125
+			TopBottomSpacing: 2
+			ItemSpacing: 2
+			Children:
+				ScrollItem@SAVE_TEMPLATE:
+					Width: PARENT_WIDTH - 27
+					Height: 40
+					X: 2
+					Visible: false
+					Children:
+						Label@TITLE:
+							X: 10
+							Y: 3
+							Width: PARENT_WIDTH - 20
+							Height: 20
+							Font: Bold
+						Label@DETAILS:
+							X: 10
+							Y: 20
+							Width: PARENT_WIDTH - 20
+							Height: 17
+							Font: TinyBold
+		Label@STATUS_LABEL:
+			X: 20
+			Y: PARENT_HEIGHT - 60
+			Width: PARENT_WIDTH - 40
+			Height: 25
+			Align: Center
+			Font: TinyBold
+		Button@LOAD_BUTTON:
+			Key: return
+			X: PARENT_WIDTH - 140 - 130
+			Y: PARENT_HEIGHT - 45
+			Width: 120
+			Height: 25
+			Text: button-lobby-load-save-load
+			Font: Bold
+		Button@BACK_BUTTON:
+			Key: escape
+			X: PARENT_WIDTH - 140
+			Y: PARENT_HEIGHT - 45
+			Width: 120
+			Height: 25
+			Text: button-back
+			Font: Bold

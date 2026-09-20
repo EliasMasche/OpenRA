@@ -11,24 +11,31 @@
 
 using System.Collections.Generic;
 using System.Linq;
+using OpenRA.GameSaves;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Traits
 {
 	public class SelectionInfo : TraitInfo
 	{
-		public override object Create(ActorInitializer init) { return new Selection(); }
+		public override object Create(ActorInitializer init) { return new Selection(this); }
 	}
 
 	[TraitLocation(SystemActors.World | SystemActors.EditorWorld)]
-	public class Selection : ISelection, INotifyCreated, INotifyOwnerChanged, ITick, IGameSaveTraitData
+	public class Selection : ISelection, INotifyCreated, INotifyOwnerChanged, ITick, ISaveState
 	{
 		public int Hash { get; private set; }
 		public IReadOnlyCollection<Actor> Actors => actors;
 
+		readonly SelectionInfo info;
 		readonly HashSet<Actor> actors = [];
 		readonly List<Actor> rolloverActors = [];
 		World world;
+
+		public Selection(SelectionInfo info)
+		{
+			this.info = info;
+		}
 
 		INotifySelection[] worldNotifySelection;
 
@@ -176,7 +183,9 @@ namespace OpenRA.Mods.Common.Traits
 			}
 		}
 
-		List<MiniYamlNode> IGameSaveTraitData.IssueTraitData(Actor self)
+		TraitInfo ISaveState.SaveStateInfo => info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
 		{
 			return
 			[
@@ -184,15 +193,21 @@ namespace OpenRA.Mods.Common.Traits
 			];
 		}
 
-		void IGameSaveTraitData.ResolveTraitData(Actor self, MiniYaml data)
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
 		{
 			var selectionNode = data.NodeWithKeyOrDefault("Selection");
-			if (selectionNode != null)
-			{
-				var selected = FieldLoader.GetValue<uint[]>("Selection", selectionNode.Value.Value)
-					.Select(self.World.GetActorById).Where(a => a != null);
-				Combine(self.World, selected, false, false);
-			}
+			if (selectionNode == null)
+				return;
+
+			var selected = new List<Actor>();
+			foreach (var actorID in FieldLoader.GetValue<uint[]>("Selection", selectionNode.Value.Value))
+				r.DeferActor(SnapshotRefs.FormatActorID(actorID), a =>
+				{
+					if (a != null)
+						selected.Add(a);
+				});
+
+			r.DeferCompleted(() => Combine(self.World, selected, false, false));
 		}
 	}
 }

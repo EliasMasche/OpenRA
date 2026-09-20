@@ -9,13 +9,20 @@
  */
 #endregion
 
+using System.Collections.Generic;
 using OpenRA.Activities;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Traits;
 
 namespace OpenRA.Mods.Common.Activities
 {
+	[SaveableActivity]
 	public class FlyForward : Activity
 	{
+		const string FlyTicksKey = "FlyTicks";
+		const string RemainingDistanceKey = "RemainingDistance";
+		const string TicksKey = "Ticks";
+
 		readonly Aircraft aircraft;
 		readonly WDist cruiseAltitude;
 		readonly int flyTicks;
@@ -38,6 +45,25 @@ namespace OpenRA.Mods.Common.Activities
 			: this(self)
 		{
 			remainingDistance = distance.Length;
+		}
+
+		internal FlyForward(Actor self, SnapshotReader _, MiniYaml yaml)
+			: this(self)
+		{
+			var nodes = yaml.ToDictionary();
+			flyTicks = FieldLoader.GetValue<int>(FlyTicksKey, nodes[FlyTicksKey].Value);
+			remainingDistance = FieldLoader.GetValue<int>(RemainingDistanceKey, nodes[RemainingDistanceKey].Value);
+			ticks = FieldLoader.GetValue<int>(TicksKey, nodes[TicksKey].Value);
+		}
+
+		public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+		{
+			return
+			[
+				new(FlyTicksKey, FieldSaver.FormatValue(flyTicks)),
+				new(RemainingDistanceKey, FieldSaver.FormatValue(remainingDistance)),
+				new(TicksKey, FieldSaver.FormatValue(ticks))
+			];
 		}
 
 		public override bool Tick(Actor self)

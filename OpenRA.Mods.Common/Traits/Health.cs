@@ -1,4 +1,4 @@
-#region Copyright & License Information
+﻿#region Copyright & License Information
 /*
  * Copyright (c) The OpenRA Developers and Contributors
  * This file is part of OpenRA, which is free software. It is made
@@ -11,6 +11,7 @@
 
 using System.Collections.Generic;
 using System.Linq;
+using OpenRA.GameSaves;
 using OpenRA.Primitives;
 using OpenRA.Traits;
 
@@ -49,8 +50,11 @@ namespace OpenRA.Mods.Common.Traits
 		}
 	}
 
-	public class Health : IHealth, ISync, ITick, INotifyCreated, INotifyOwnerChanged
+	public class Health : IHealth, ISync, ITick, INotifyCreated, INotifyOwnerChanged, ISaveState
 	{
+		const string HPKey = "HP";
+		const string DisplayHPKey = "DisplayHP";
+
 		public readonly HealthInfo Info;
 		INotifyDamageStateChanged[] notifyDamageStateChanged;
 		INotifyDamage[] notifyDamage;
@@ -236,6 +240,28 @@ namespace OpenRA.Mods.Common.Traits
 				DisplayHP = HP;
 			else
 				DisplayHP = (2 * DisplayHP + HP) / 3;
+		}
+
+		TraitInfo ISaveState.SaveStateInfo => Info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
+		{
+			return
+			[
+				new(HPKey, FieldSaver.FormatValue(HP)),
+				new(DisplayHPKey, FieldSaver.FormatValue(DisplayHP))
+			];
+		}
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
+		{
+			var nodes = data.ToDictionary();
+			if (nodes.TryGetValue(HPKey, out var hp))
+				HP = Exts.Clamp(FieldLoader.GetValue<int>(HPKey, hp.Value), 0, MaxHP);
+
+			DisplayHP = nodes.TryGetValue(DisplayHPKey, out var displayHP)
+				? Exts.Clamp(FieldLoader.GetValue<int>(DisplayHPKey, displayHP.Value), 0, MaxHP)
+				: HP;
 		}
 	}
 

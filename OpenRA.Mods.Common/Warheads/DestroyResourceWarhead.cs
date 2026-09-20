@@ -34,9 +34,9 @@ namespace OpenRA.Mods.Common.Warheads
 			if (target.Type == TargetType.Invalid)
 				return;
 
-			var firedBy = args.SourceActor;
 			var pos = target.CenterPosition;
-			var world = firedBy.World;
+
+			var world = args.World;
 			var dat = world.Map.DistanceAboveTerrain(pos);
 			if (dat > AirThreshold)
 				return;

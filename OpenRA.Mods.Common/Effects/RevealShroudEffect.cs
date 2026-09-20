@@ -12,13 +12,23 @@
 using System.Collections.Generic;
 using System.Linq;
 using OpenRA.Effects;
+using OpenRA.GameSaves;
 using OpenRA.Graphics;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Effects
 {
-	public class RevealShroudEffect : IEffect
+	[SaveableEffect]
+	public class RevealShroudEffect : IEffect, ISaveableEffect, IRequiresRestoredReferences
 	{
+		const string PosKey = "Pos";
+		const string PlayerKey = "Player";
+		const string SourceTypeKey = "SourceType";
+		const string RevealRadiusKey = "RevealRadius";
+		const string ValidStancesKey = "ValidStances";
+		const string DurationKey = "Duration";
+		const string TicksKey = "Ticks";
+
 		static readonly PPos[] NoCells = [];
 
 		readonly WPos pos;
@@ -39,6 +49,42 @@ namespace OpenRA.Mods.Common.Effects
 			sourceType = type;
 			this.duration = duration;
 			ticks = -delay;
+		}
+
+		internal RevealShroudEffect(World world, SnapshotReader r, MiniYaml yaml)
+		{
+			var nodes = yaml.ToDictionary();
+
+			pos = FieldLoader.GetValue<WPos>(PosKey, nodes[PosKey].Value);
+			player = r.ResolvePlayer(nodes[PlayerKey].Value);
+			sourceType = FieldLoader.GetValue<Shroud.SourceType>(SourceTypeKey, nodes[SourceTypeKey].Value);
+			revealRadius = FieldLoader.GetValue<WDist>(RevealRadiusKey, nodes[RevealRadiusKey].Value);
+			validStances = FieldLoader.GetValue<PlayerRelationship>(ValidStancesKey, nodes[ValidStancesKey].Value);
+			duration = FieldLoader.GetValue<int>(DurationKey, nodes[DurationKey].Value);
+			ticks = FieldLoader.GetValue<int>(TicksKey, nodes[TicksKey].Value);
+
+			if (player != null && ticks > 0 && ticks < duration)
+			{
+				var cells = ProjectedCells(world);
+				foreach (var p in world.Players)
+					AddCellsToPlayerShroud(p, cells);
+			}
+		}
+
+		bool IRequiresRestoredReferences.ReferencesRestored => player != null;
+
+		List<MiniYamlNode> ISaveableEffect.SaveState(World world, SnapshotWriter w)
+		{
+			return
+			[
+				new(PosKey, FieldSaver.FormatValue(pos)),
+				new(PlayerKey, w.PlayerRef(player)),
+				new(SourceTypeKey, FieldSaver.FormatValue(sourceType)),
+				new(RevealRadiusKey, FieldSaver.FormatValue(revealRadius)),
+				new(ValidStancesKey, FieldSaver.FormatValue(validStances)),
+				new(DurationKey, FieldSaver.FormatValue(duration)),
+				new(TicksKey, FieldSaver.FormatValue(ticks))
+			];
 		}
 
 		void AddCellsToPlayerShroud(Player p, PPos[] uv)

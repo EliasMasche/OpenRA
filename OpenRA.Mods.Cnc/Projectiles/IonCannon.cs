@@ -11,16 +11,28 @@
 
 using System.Collections.Generic;
 using OpenRA.GameRules;
+using OpenRA.GameSaves;
 using OpenRA.Graphics;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Cnc.Effects
 {
-	public class IonCannon : IProjectile
+	[SaveableEffect]
+	public class IonCannon : IProjectile, ISaveableEffect, IRequiresRestoredReferences
 	{
-		readonly Target target;
+		const string FiredByKey = "FiredBy";
+		const string WeaponKey = "Weapon";
+		const string TargetKey = "Target";
+		const string EffectKey = "Effect";
+		const string PaletteKey = "Palette";
+		const string AnimationKey = "Animation";
+		const string WeaponDelayKey = "WeaponDelay";
+		const string ImpactedKey = "Impacted";
+
+		Target target;
 		readonly Animation anim;
 		readonly Player firedBy;
+		readonly string effect;
 		readonly string palette;
 		readonly WeaponInfo weapon;
 
@@ -32,6 +44,7 @@ namespace OpenRA.Mods.Cnc.Effects
 			this.target = target;
 			this.firedBy = firedBy;
 			this.weapon = weapon;
+			this.effect = effect;
 			this.palette = palette;
 			weaponDelay = delay;
 			anim = new Animation(world, effect);
@@ -39,6 +52,47 @@ namespace OpenRA.Mods.Cnc.Effects
 
 			if (weapon.Report != null && weapon.Report.Length > 0)
 				Game.Sound.Play(SoundType.World, weapon.Report, world, launchPos);
+		}
+
+		internal IonCannon(World world, SnapshotReader r, MiniYaml yaml)
+		{
+			var nodes = yaml.ToDictionary();
+
+			weapon = WeaponRefs.ResolveWeapon(world, nodes[WeaponKey].Value);
+			effect = nodes[EffectKey].Value;
+			palette = nodes[PaletteKey].Value;
+			weaponDelay = FieldLoader.GetValue<int>(WeaponDelayKey, nodes[WeaponDelayKey].Value);
+			impacted = FieldLoader.GetValue<bool>(ImpactedKey, nodes[ImpactedKey].Value);
+			firedBy = r.ResolvePlayer(nodes[FiredByKey].Value);
+
+			target = Target.Invalid;
+			r.DeferTarget(nodes[TargetKey].Value, t => target = t);
+
+			var state = AnimationCodec.Load(nodes[AnimationKey]);
+			anim = new Animation(world, effect);
+			anim.ResumeThen(state.Sequence, () => Finish(world), state);
+		}
+
+		bool IRequiresRestoredReferences.ReferencesRestored => firedBy != null;
+
+		List<MiniYamlNode> ISaveableEffect.SaveState(World world, SnapshotWriter w)
+		{
+			var weaponKey = WeaponRefs.WeaponKeyOf(world, weapon);
+			var animation = AnimationCodec.Save(anim);
+			if (weaponKey == null || animation == null)
+				return null;
+
+			return
+			[
+				new(FiredByKey, w.PlayerRef(firedBy)),
+				new(WeaponKey, weaponKey),
+				new(TargetKey, w.TargetRef(target)),
+				new(EffectKey, effect ?? ""),
+				new(PaletteKey, palette ?? ""),
+				new(AnimationKey, new MiniYaml("", animation)),
+				new(WeaponDelayKey, FieldSaver.FormatValue(weaponDelay)),
+				new(ImpactedKey, FieldSaver.FormatValue(impacted))
+			];
 		}
 
 		public void Tick(World world)
@@ -51,7 +105,10 @@ namespace OpenRA.Mods.Cnc.Effects
 				{
 					Weapon = weapon,
 					Source = target.CenterPosition,
-					SourceActor = firedBy.PlayerActor,
+					World = world,
+
+					SourceOwner = firedBy,
+					SourceActor = firedBy?.PlayerActor,
 					WeaponTarget = target
 				};
 

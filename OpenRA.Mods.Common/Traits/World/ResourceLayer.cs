@@ -12,7 +12,9 @@
 using System;
 using System.Collections.Frozen;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using OpenRA.GameSaves;
 using OpenRA.Graphics;
 using OpenRA.Traits;
 
@@ -97,7 +99,7 @@ namespace OpenRA.Mods.Common.Traits
 		public override object Create(ActorInitializer init) { return new ResourceLayer(init.Self, this); }
 	}
 
-	public class ResourceLayer : IResourceLayer, IWorldLoaded
+	public class ResourceLayer : IResourceLayer, IWorldLoaded, IWorldSaveState
 	{
 		readonly ResourceLayerInfo info;
 		readonly World world;
@@ -160,6 +162,54 @@ namespace OpenRA.Mods.Common.Traits
 				// HACK: it's too disruptive to fix.
 				var density = (byte)Math.Max(int2.Lerp(0, resourceInfo.MaxDensity, adjacent, 9), 1);
 				Content[cell] = new ResourceLayerContents(resource.Type, density);
+			}
+		}
+
+		string IWorldSaveState.SectionName => "ResourceLayer";
+
+		void IWorldSaveState.SaveState(Actor self, Stream s, SnapshotWriter w)
+		{
+			var indexByType = ResourceTypesByIndex.ToDictionary(kv => kv.Value, kv => kv.Key);
+			var writer = new BinaryWriter(s);
+
+			writer.Write(Map.MapSize.Width);
+			writer.Write(Map.MapSize.Height);
+
+			foreach (var cell in Map.AllCells)
+			{
+				var contents = Content[cell];
+				var index = contents.Type != null && indexByType.TryGetValue(contents.Type, out var i) ? i : byte.MaxValue;
+				writer.Write(index);
+				writer.Write(contents.Density);
+			}
+		}
+
+		void IWorldSaveState.LoadState(Actor self, Stream s, SnapshotReader r)
+		{
+			var reader = new BinaryReader(s);
+
+			var width = reader.ReadInt32();
+			var height = reader.ReadInt32();
+			if (width != Map.MapSize.Width || height != Map.MapSize.Height)
+				throw new InvalidDataException(
+					$"Snapshot holds a {width}x{height} resource layer, but this map is {Map.MapSize.Width}x{Map.MapSize.Height}.");
+
+			resCells = 0;
+			foreach (var cell in Map.AllCells)
+			{
+				var index = reader.ReadByte();
+				var density = reader.ReadByte();
+
+				if (index == byte.MaxValue || !ResourceTypesByIndex.TryGetValue(index, out var type))
+				{
+					Content[cell] = ResourceLayerContents.Empty;
+					continue;
+				}
+
+				Content[cell] = new ResourceLayerContents(type, density);
+				++resCells;
+
+				CellChanged?.Invoke(cell, type);
 			}
 		}
 

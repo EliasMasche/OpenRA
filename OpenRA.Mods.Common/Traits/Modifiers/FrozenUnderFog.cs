@@ -11,6 +11,7 @@
 
 using System.Collections.Generic;
 using System.Linq;
+using OpenRA.GameSaves;
 using OpenRA.Graphics;
 using OpenRA.Primitives;
 using OpenRA.Traits;
@@ -27,8 +28,10 @@ namespace OpenRA.Mods.Common.Traits
 	}
 
 	public class FrozenUnderFog : ICreatesFrozenActors, IRenderModifier, IDefaultVisibility,
-		ITickRender, ISync, INotifyCreated, INotifyOwnerChanged, INotifyActorDisposing
+		ITickRender, ISync, INotifyCreated, INotifyOwnerChanged, INotifyActorDisposing, ISaveState
 	{
+		const string VisibilityHashKey = "VisibilityHash";
+
 		[VerifySync]
 		public int VisibilityHash;
 
@@ -112,6 +115,11 @@ namespace OpenRA.Mods.Common.Traits
 			frozen.RefreshHidden();
 		}
 
+		void ICreatesFrozenActors.OnVisibilityRestored(FrozenActor frozen)
+		{
+			frozenStates[frozen.Viewer].IsVisible = !frozen.Visible;
+		}
+
 		bool IsVisibleInner(Player byPlayer)
 		{
 			// If fog is disabled visibility is determined by shroud
@@ -183,6 +191,23 @@ namespace OpenRA.Mods.Common.Traits
 			// Invalidate the frozen actor (which exists if this actor was captured from an enemy)
 			// for the current owner
 			frozenStates[self.Owner].FrozenActor.Invalidate();
+		}
+
+		TraitInfo ISaveState.SaveStateInfo => info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
+		{
+			if (VisibilityHash == 0)
+				return null;
+
+			return [new(VisibilityHashKey, FieldSaver.FormatValue(VisibilityHash))];
+		}
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
+		{
+			var node = data.NodeWithKeyOrDefault(VisibilityHashKey);
+			if (node != null)
+				VisibilityHash = FieldLoader.GetValue<int>(VisibilityHashKey, node.Value.Value);
 		}
 	}
 

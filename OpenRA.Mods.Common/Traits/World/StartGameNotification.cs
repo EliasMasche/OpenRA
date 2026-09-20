@@ -48,11 +48,18 @@ namespace OpenRA.Mods.Common.Traits
 
 		void IPostWorldLoaded.PostWorldLoaded(World world, WorldRenderer wr)
 		{
-			if (!world.IsLoadingGameSave)
+			if (world.IsLoadingGameSave)
+				return;
+
+			if (world.LoadMode != WorldLoadMode.Normal)
 			{
-				Game.Sound.PlayNotification(world.Map.Rules, null, "Speech", info.Notification, world.RenderPlayer?.Faction.InternalName);
-				TextNotificationsManager.AddTransientLine(null, info.TextNotification);
+				Game.Sound.PlayNotification(world.Map.Rules, null, "Speech", info.LoadedNotification, world.RenderPlayer?.Faction.InternalName);
+				TextNotificationsManager.AddTransientLine(null, info.LoadedTextNotification);
+				return;
 			}
+
+			Game.Sound.PlayNotification(world.Map.Rules, null, "Speech", info.Notification, world.RenderPlayer?.Faction.InternalName);
+			TextNotificationsManager.AddTransientLine(null, info.TextNotification);
 		}
 
 		void INotifyGameLoaded.GameLoaded(World world)
@@ -66,13 +73,13 @@ namespace OpenRA.Mods.Common.Traits
 
 		void INotifyGameSaved.GameSaved(World world, bool isAutosave)
 		{
-			if (!world.IsReplay)
-			{
-				if (!isAutosave)
-					Game.Sound.PlayNotification(world.Map.Rules, null, "Speech", info.SavedNotification, world.RenderPlayer?.Faction.InternalName);
+			if (world.IsReplay)
+				return;
 
-				TextNotificationsManager.AddTransientLine(null, info.SavedTextNotification);
-			}
+			if (!isAutosave)
+				Game.Sound.PlayNotification(world.Map.Rules, null, "Speech", info.SavedNotification, world.RenderPlayer?.Faction.InternalName);
+
+			TextNotificationsManager.AddTransientLine(null, info.SavedTextNotification);
 		}
 	}
 }

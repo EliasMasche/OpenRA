@@ -1,4 +1,4 @@
-#region Copyright & License Information
+﻿#region Copyright & License Information
 /*
  * Copyright (c) The OpenRA Developers and Contributors
  * This file is part of OpenRA, which is free software. It is made
@@ -48,7 +48,8 @@ namespace OpenRA.Mods.Common.Traits.Render
 			this.info = info;
 			var self = init.Self;
 			wsbs = self.TraitsImplementing<WithSpriteBody>().Where(w => info.BodyNames.Contains(w.Info.Name)).ToArray();
-			skipMakeAnimation = init.Contains<SkipMakeAnimsInit>(info);
+
+			skipMakeAnimation = init.Contains<SkipMakeAnimsInit>(info) || init.Contains<RestoringInit>();
 		}
 
 		void INotifyCreated.Created(Actor self)

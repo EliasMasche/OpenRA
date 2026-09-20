@@ -11,6 +11,7 @@
 
 using System.Collections.Generic;
 using System.Linq;
+using OpenRA.GameSaves;
 using OpenRA.Graphics;
 using OpenRA.Mods.Cnc.Activities;
 using OpenRA.Mods.Common.Graphics;
@@ -78,8 +79,11 @@ namespace OpenRA.Mods.Cnc.Traits
 		public override object Create(ActorInitializer init) { return new PortableChrono(init.Self, this); }
 	}
 
-	sealed class PortableChrono : PausableConditionalTrait<PortableChronoInfo>, IIssueOrder, IResolveOrder, ITick, ISelectionBar, IOrderVoice, ISync
+	sealed class PortableChrono : PausableConditionalTrait<PortableChronoInfo>, IIssueOrder, IResolveOrder, ITick, ISelectionBar, IOrderVoice, ISync,
+		ISaveState
 	{
+		const string ChargeTickKey = "ChargeTick";
+
 		readonly IMove move;
 		[VerifySync]
 		int chargeTick = 0;
@@ -174,6 +178,20 @@ namespace OpenRA.Mods.Cnc.Traits
 		protected override void TraitDisabled(Actor self)
 		{
 			chargeTick = 0;
+		}
+
+		TraitInfo ISaveState.SaveStateInfo => Info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
+		{
+			return [new(ChargeTickKey, FieldSaver.FormatValue(chargeTick))];
+		}
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
+		{
+			var node = data.NodeWithKeyOrDefault(ChargeTickKey);
+			if (node != null)
+				chargeTick = FieldLoader.GetValue<int>(ChargeTickKey, node.Value.Value);
 		}
 	}
 

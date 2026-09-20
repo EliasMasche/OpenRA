@@ -1,4 +1,4 @@
-#region Copyright & License Information
+﻿#region Copyright & License Information
 /*
  * Copyright (c) The OpenRA Developers and Contributors
  * This file is part of OpenRA, which is free software. It is made
@@ -11,6 +11,7 @@
 
 using System.Collections.Generic;
 using System.Collections.Immutable;
+using OpenRA.GameSaves;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Traits
@@ -47,8 +48,11 @@ namespace OpenRA.Mods.Common.Traits
 		public override object Create(ActorInitializer init) { return new AmmoPool(this); }
 	}
 
-	public class AmmoPool : INotifyCreated, INotifyAttack, ISync
+	public class AmmoPool : INotifyCreated, INotifyAttack, ISync, ISaveState
 	{
+		const string AmmoKey = "Ammo";
+		const string RemainingTicksKey = "RemainingTicks";
+
 		public readonly AmmoPoolInfo Info;
 		readonly Stack<int> tokens = [];
 
@@ -114,6 +118,29 @@ namespace OpenRA.Mods.Common.Traits
 
 			while (CurrentAmmoCount < tokens.Count && tokens.Count > 0)
 				self.RevokeCondition(tokens.Pop());
+		}
+
+		TraitInfo ISaveState.SaveStateInfo => Info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
+		{
+			return
+			[
+				new(AmmoKey, FieldSaver.FormatValue(CurrentAmmoCount)),
+				new(RemainingTicksKey, FieldSaver.FormatValue(RemainingTicks))
+			];
+		}
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
+		{
+			var nodes = data.ToDictionary();
+			if (nodes.TryGetValue(AmmoKey, out var ammo))
+				CurrentAmmoCount = FieldLoader.GetValue<int>(AmmoKey, ammo.Value).Clamp(0, Info.Ammo);
+
+			if (nodes.TryGetValue(RemainingTicksKey, out var ticks))
+				RemainingTicks = FieldLoader.GetValue<int>(RemainingTicksKey, ticks.Value);
+
+			UpdateCondition(self);
 		}
 	}
 }

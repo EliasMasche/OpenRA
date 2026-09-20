@@ -40,6 +40,9 @@ namespace OpenRA.Mods.Common.Traits
 
 		void INotifyCreated.Created(Actor self)
 		{
+			if (self.World.IsRestoringSnapshot)
+				return;
+
 			if (!self.Owner.PlayerActor.Trait<TechTree>().HasPrerequisites(info.Prerequisites))
 				return;
 

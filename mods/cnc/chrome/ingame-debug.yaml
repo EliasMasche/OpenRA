@@ -1,5 +1,5 @@
 Container@DEBUG_PANEL:
-	Logic: DebugMenuLogic
+	Logic: DebugMenuLogic, SaveLoadDebugLogic
 	Width: PARENT_WIDTH
 	Height: PARENT_HEIGHT
 	Children:
@@ -295,6 +295,87 @@ Container@DEBUG_PANEL:
 							Text: checkbox-debug-panel-show-screenmap
 							TooltipTemplate: BUTTON_TOOLTIP
 							TooltipContainer: TOOLTIP_CONTAINER
+				Background@SAVELOAD_HEADER:
+					X: 5
+					Width: PARENT_WIDTH - 24 - 10
+					Height: 13
+					Background: separator
+					ClickThrough: True
+					Children:
+						Label@LABEL:
+							Width: PARENT_WIDTH
+							Height: PARENT_HEIGHT
+							Font: TinyBold
+							Align: Center
+							Text: label-debug-panel-saveload-title
+				Container@ROW:
+					Width: PARENT_WIDTH - 17
+					Height: 20
+					Children:
+						Label@SYNC_HASH_TITLE:
+							X: 15
+							Width: 70
+							Height: 20
+							Font: Regular
+							Text: label-debug-panel-sync-hash-title
+						Label@SYNC_HASH:
+							X: 85
+							Width: 110
+							Height: 20
+							Font: Bold
+						Label@WORLD_TICK_TITLE:
+							X: 205
+							Width: 35
+							Height: 20
+							Font: Regular
+							Text: label-debug-panel-world-tick-title
+						Label@WORLD_TICK:
+							X: 240
+							Width: 70
+							Height: 20
+							Font: Bold
+						Label@SAVE_FORMAT_TITLE:
+							X: 320
+							Width: 50
+							Height: 20
+							Font: Regular
+							Text: label-debug-panel-save-format-title
+						Label@SAVE_FORMAT:
+							X: 370
+							Width: 130
+							Height: 20
+							Font: Bold
+				Container@ROW:
+					Width: PARENT_WIDTH - 17
+					Height: 30
+					Children:
+						Button@SAVE_SNAPSHOT:
+							X: 15
+							Width: 151
+							Height: 30
+							Font: Bold
+							Text: button-debug-panel-save-snapshot
+						Button@CAPTURE_DIFF:
+							X: 177
+							Width: 151
+							Height: 30
+							Font: Bold
+							Text: button-debug-panel-capture-diff
+						Button@COMPARE_DIFF:
+							X: 339
+							Width: 151
+							Height: 30
+							Font: Bold
+							Text: button-debug-panel-compare-diff
+				Container@ROW:
+					Width: PARENT_WIDTH - 17
+					Height: 20
+					Children:
+						Label@DIFF_RESULT:
+							X: 15
+							Width: PARENT_WIDTH - 30
+							Height: 20
+							Font: Regular
 				Container@SPACER:
 					Width: PARENT_WIDTH - 17
 					Height: 1

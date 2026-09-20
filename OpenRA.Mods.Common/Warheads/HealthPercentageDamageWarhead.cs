@@ -18,11 +18,11 @@ namespace OpenRA.Mods.Common.Warheads
 	[Desc("Apply damage based on the target's health.")]
 	public class HealthPercentageDamageWarhead : TargetDamageWarhead
 	{
-		protected override void InflictDamage(Actor victim, Actor firedBy, HitShape shape, WarheadArgs args)
+		protected override void InflictDamage(Actor victim, Player firedBy, Actor firedByActor, HitShape shape, WarheadArgs args)
 		{
 			var healthInfo = victim.Info.TraitInfo<HealthInfo>();
 			var damage = Util.ApplyPercentageModifiers(healthInfo.HP, args.DamageModifiers.Append(Damage, DamageVersus(victim, shape, args)));
-			victim.InflictDamage(firedBy, new Damage(damage, DamageTypes));
+			victim.InflictDamage(firedByActor, new Damage(damage, DamageTypes));
 		}
 	}
 }

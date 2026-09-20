@@ -1,4 +1,4 @@
-#region Copyright & License Information
+﻿#region Copyright & License Information
 /*
  * Copyright (c) The OpenRA Developers and Contributors
  * This file is part of OpenRA, which is free software. It is made
@@ -10,6 +10,8 @@
 #endregion
 
 using System;
+using System.Collections.Generic;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Activities;
 using OpenRA.Primitives;
 using OpenRA.Traits;
@@ -19,15 +21,21 @@ namespace OpenRA.Mods.Common.Traits
 	[Desc("Reserve landing places for aircraft.")]
 	sealed class ReservableInfo : TraitInfo<Reservable> { }
 
-	public class Reservable : ITick, INotifyOwnerChanged, INotifySold, INotifyActorDisposing, INotifyCreated
+	public class Reservable : ITick, INotifyOwnerChanged, INotifySold, INotifyActorDisposing, INotifyCreated,
+		ISaveState, INotifyStateRestored
 	{
+		const string ReservedForKey = "ReservedFor";
+
 		Actor reservedFor;
 		Aircraft reservedForAircraft;
 		RallyPoint rallyPoint;
+		ReservableInfo info;
 
 		void INotifyCreated.Created(Actor self)
 		{
 			rallyPoint = self.TraitOrDefault<RallyPoint>();
+
+			info = self.Info.TraitInfo<ReservableInfo>();
 		}
 
 		void ITick.Tick(Actor self)
@@ -83,11 +91,9 @@ namespace OpenRA.Mods.Common.Traits
 			{
 				if (reservedForAircraft.GetActorBelow() == self)
 				{
-					// HACK: Cache this in a local var, such that the inner activity of AttackMoveActivity can access the trait easily after reservedForAircraft was nulled
-					var aircraft = reservedForAircraft;
 					if (rallyPoint != null && rallyPoint.Path.Count > 0)
 						foreach (var cell in rallyPoint.Path)
-							reservedFor.QueueActivity(new AttackMoveActivity(reservedFor, () => aircraft.MoveTo(cell, 1, targetLineColor: Color.OrangeRed)));
+							reservedFor.QueueActivity(new AttackMoveActivity(reservedFor, MoveSpec.ToCellAt(cell, 1, targetLineColor: Color.OrangeRed)));
 					else
 						reservedFor.QueueActivity(new TakeOff(reservedFor));
 				}
@@ -102,5 +108,34 @@ namespace OpenRA.Mods.Common.Traits
 
 		void INotifySold.Selling(Actor self) { UnReserve(self); }
 		void INotifySold.Sold(Actor self) { UnReserve(self); }
+
+		TraitInfo ISaveState.SaveStateInfo => info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
+		{
+			if (reservedFor == null)
+				return null;
+
+			return [new(ReservedForKey, w.ActorRef(reservedFor))];
+		}
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
+		{
+			var node = data.NodeWithKeyOrDefault(ReservedForKey);
+			if (node == null)
+				return;
+
+			r.DeferActor(node.Value.Value, a => reservedFor = a);
+		}
+
+		void INotifyStateRestored.StateRestored(Actor self)
+		{
+			if (reservedFor == null)
+				return;
+
+			reservedForAircraft = reservedFor.TraitOrDefault<Aircraft>();
+			if (reservedForAircraft == null)
+				reservedFor = null;
+		}
 	}
 }

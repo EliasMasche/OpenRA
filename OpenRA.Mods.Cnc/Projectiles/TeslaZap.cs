@@ -11,6 +11,7 @@
 
 using System.Collections.Generic;
 using OpenRA.GameRules;
+using OpenRA.GameSaves;
 using OpenRA.Graphics;
 using OpenRA.Mods.Cnc.Graphics;
 using OpenRA.Traits;
@@ -55,8 +56,14 @@ namespace OpenRA.Mods.Cnc.Projectiles
 		public IProjectile Create(ProjectileArgs args) { return new TeslaZap(this, args); }
 	}
 
-	public class TeslaZap : IProjectile, ISync
+	[SaveableEffect]
+	public class TeslaZap : IProjectile, ISync, ISaveableEffect
 	{
+		const string ArgsKey = "Args";
+		const string TargetKey = "Target";
+		const string TicksUntilRemoveKey = "TicksUntilRemove";
+		const string DamageDurationKey = "DamageDuration";
+
 		readonly ProjectileArgs args;
 		readonly TeslaZapInfo info;
 		TeslaZapRenderable zap;
@@ -73,6 +80,34 @@ namespace OpenRA.Mods.Cnc.Projectiles
 			ticksUntilRemove = info.Duration;
 			damageDuration = info.DamageDuration > info.Duration ? info.Duration : info.DamageDuration;
 			target = args.PassiveTarget;
+		}
+
+		internal TeslaZap(World world, SnapshotReader r, MiniYaml yaml)
+		{
+			var nodes = yaml.ToDictionary();
+
+			args = ProjectileArgsCodec.Load(nodes[ArgsKey], world, r);
+
+			info = (TeslaZapInfo)args.Weapon.Projectile;
+
+			target = FieldLoader.GetValue<WPos>(TargetKey, nodes[TargetKey].Value);
+			ticksUntilRemove = FieldLoader.GetValue<int>(TicksUntilRemoveKey, nodes[TicksUntilRemoveKey].Value);
+			damageDuration = FieldLoader.GetValue<int>(DamageDurationKey, nodes[DamageDurationKey].Value);
+		}
+
+		List<MiniYamlNode> ISaveableEffect.SaveState(World world, SnapshotWriter w)
+		{
+			var argNodes = ProjectileArgsCodec.Save(args, world, w);
+			if (argNodes == null)
+				return null;
+
+			return
+			[
+				new(ArgsKey, new MiniYaml("", argNodes)),
+				new(TargetKey, FieldSaver.FormatValue(target)),
+				new(TicksUntilRemoveKey, FieldSaver.FormatValue(ticksUntilRemove)),
+				new(DamageDurationKey, FieldSaver.FormatValue(damageDuration))
+			];
 		}
 
 		public void Tick(World world)

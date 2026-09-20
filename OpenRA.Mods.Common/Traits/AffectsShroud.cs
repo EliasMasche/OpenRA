@@ -11,6 +11,7 @@
 
 using System.Collections.Generic;
 using System.Linq;
+using OpenRA.GameSaves;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Traits
@@ -33,7 +34,7 @@ namespace OpenRA.Mods.Common.Traits
 	}
 
 	public abstract class AffectsShroud : ConditionalTrait<AffectsShroudInfo>, ISync, INotifyAddedToWorld,
-		INotifyRemovedFromWorld, INotifyMoving, INotifyCenterPositionChanged, ITick
+		INotifyRemovedFromWorld, INotifyMoving, INotifyCenterPositionChanged, ITick, ISaveState, INotifyStateRestored
 	{
 		static readonly PPos[] NoCells = [];
 
@@ -169,6 +170,19 @@ namespace OpenRA.Mods.Common.Traits
 
 				UpdateShroudCells(self);
 			}
+		}
+
+		TraitInfo ISaveState.SaveStateInfo => Info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w) { return null; }
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r) { }
+
+		void INotifyStateRestored.StateRestored(Actor self)
+		{
+			CachedTraitDisabled = IsTraitDisabled;
+
+			cachedRange = Range;
 		}
 	}
 }

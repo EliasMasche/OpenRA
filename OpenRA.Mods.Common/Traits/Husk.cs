@@ -1,4 +1,4 @@
-#region Copyright & License Information
+﻿#region Copyright & License Information
 /*
  * Copyright (c) The OpenRA Developers and Contributors
  * This file is part of OpenRA, which is free software. It is made
@@ -112,7 +112,8 @@ namespace OpenRA.Mods.Common.Traits
 
 		void INotifyCreated.Created(Actor self)
 		{
-			self.QueueActivity(new DragAndCrush(self, info.LocomotorInfo, dragSpeed, finalPosition));
+			if (!self.World.IsRestoringSnapshot)
+				self.QueueActivity(new DragAndCrush(self, info.LocomotorInfo, dragSpeed, finalPosition));
 			notifyCenterPositionChanged = self.TraitsImplementing<INotifyCenterPositionChanged>().ToArray();
 		}
 

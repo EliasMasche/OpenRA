@@ -12,6 +12,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using OpenRA.Activities;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Activities;
 using OpenRA.Support;
 using OpenRA.Traits;
@@ -149,10 +150,11 @@ namespace OpenRA.Mods.Common.Traits
 			}
 		}
 
+		[SaveableActivity]
 		sealed class FerryUnit : Activity
 		{
-			readonly Actor cargo;
-			readonly AutoCarryable carryable;
+			Actor cargo;
+			AutoCarryable carryable;
 			readonly AutoCarryall carryall;
 
 			public FerryUnit(Actor self, Actor cargo)
@@ -160,6 +162,22 @@ namespace OpenRA.Mods.Common.Traits
 				this.cargo = cargo;
 				carryable = cargo.Trait<AutoCarryable>();
 				carryall = self.Trait<AutoCarryall>();
+			}
+
+			internal FerryUnit(Actor self, SnapshotReader r, MiniYaml yaml)
+			{
+				carryall = self.Trait<AutoCarryall>();
+
+				r.DeferActor(yaml.NodeWithKeyOrDefault("Cargo").Value.Value, a =>
+				{
+					cargo = a;
+					carryable = a?.TraitOrDefault<AutoCarryable>();
+				});
+			}
+
+			public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+			{
+				return [new("Cargo", w.ActorRef(cargo))];
 			}
 
 			protected override void OnFirstRun(Actor self)

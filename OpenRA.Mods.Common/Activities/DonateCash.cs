@@ -9,6 +9,8 @@
  */
 #endregion
 
+using System.Collections.Generic;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Effects;
 using OpenRA.Mods.Common.Traits;
 using OpenRA.Primitives;
@@ -16,6 +18,7 @@ using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Activities
 {
+	[SaveableActivity]
 	sealed class DonateCash : Enter
 	{
 		readonly int payload;
@@ -26,6 +29,25 @@ namespace OpenRA.Mods.Common.Activities
 		{
 			this.payload = payload;
 			this.playerExperience = playerExperience;
+		}
+
+		internal DonateCash(Actor self, SnapshotReader r, MiniYaml yaml)
+			: base(self, r, yaml)
+		{
+			var n = yaml.ToDictionary();
+			payload = FieldLoader.GetValue<int>("Payload", n["Payload"].Value);
+			playerExperience = FieldLoader.GetValue<int>("PlayerExperience", n["PlayerExperience"].Value);
+		}
+
+		public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+		{
+			var nodes = base.SaveState(self, w);
+			nodes.AddRange(
+			[
+				new("Payload", FieldSaver.FormatValue(payload)),
+				new("PlayerExperience", FieldSaver.FormatValue(playerExperience))
+			]);
+			return nodes;
 		}
 
 		protected override void OnEnterComplete(Actor self, Actor targetActor)

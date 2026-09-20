@@ -9,6 +9,8 @@
  */
 #endregion
 
+using System.Collections.Generic;
+using OpenRA.GameSaves;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Traits
@@ -46,8 +48,10 @@ namespace OpenRA.Mods.Common.Traits
 		public override object Create(ActorInitializer init) { return new ToggleConditionOnOrder(this); }
 	}
 
-	public class ToggleConditionOnOrder : PausableConditionalTrait<ToggleConditionOnOrderInfo>, IResolveOrder, ISync
+	public class ToggleConditionOnOrder : PausableConditionalTrait<ToggleConditionOnOrderInfo>, IResolveOrder, ISync, ISaveState
 	{
+		const string EnabledKey = "Enabled";
+
 		int conditionToken = Actor.InvalidConditionToken;
 
 		// If the trait is paused this may be true with no condition granted
@@ -112,6 +116,25 @@ namespace OpenRA.Mods.Common.Traits
 		{
 			// Unpausing the trait restores the previous state
 			SetCondition(self, enabled);
+		}
+
+		TraitInfo ISaveState.SaveStateInfo => Info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
+		{
+			return [new(EnabledKey, FieldSaver.FormatValue(enabled))];
+		}
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
+		{
+			var node = data.NodeWithKeyOrDefault(EnabledKey);
+			if (node == null)
+				return;
+
+			enabled = FieldLoader.GetValue<bool>(EnabledKey, node.Value.Value);
+
+			if (enabled && !IsTraitDisabled && !IsTraitPaused)
+				SetCondition(self, true);
 		}
 	}
 }

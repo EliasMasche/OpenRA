@@ -11,7 +11,10 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Eluant;
+using OpenRA.GameSaves;
+using OpenRA.Mods.Common.Scripting.Snapshot;
 using OpenRA.Mods.Common.Traits;
 using OpenRA.Primitives;
 using OpenRA.Scripting;
@@ -30,13 +33,15 @@ namespace OpenRA.Mods.Common.Scripting
 	[Desc("Allows map scripts to attach triggers to this actor via the Triggers global.")]
 	public class ScriptTriggersInfo : TraitInfo
 	{
-		public override object Create(ActorInitializer init) { return new ScriptTriggers(init.World, init.Self); }
+		public override object Create(ActorInitializer init) { return new ScriptTriggers(this, init.World, init.Self); }
 	}
 
 	public sealed class ScriptTriggers : INotifyIdle, INotifyDamage, INotifyKilled, INotifyProduction, INotifyBuildingPlaced, INotifyOtherProduction,
 		INotifyObjectivesUpdated, INotifyCapture, INotifyInfiltrated, INotifyAddedToWorld, INotifyRemovedFromWorld, INotifyDiscovered, INotifyActorDisposing,
-		INotifyPassengerEntered, INotifyPassengerExited, INotifySold, INotifyWinStateChanged, INotifyTimeLimit
+		INotifyPassengerEntered, INotifyPassengerExited, INotifySold, INotifyWinStateChanged, INotifyTimeLimit,
+		ISaveState, ILuaHandleHolder
 	{
+		readonly ScriptTriggersInfo info;
 		readonly World world;
 		readonly Actor self;
 
@@ -48,6 +53,8 @@ namespace OpenRA.Mods.Common.Scripting
 		public event Action<Actor, Actor> OnOtherProducedInternal = (a, b) => { };
 
 		readonly List<Triggerable>[] triggerables = Exts.MakeArray(Enum.GetValues<Trigger>().Length, _ => new List<Triggerable>());
+
+		readonly List<(Trigger Trigger, int HandleID)> savedHandles = [];
 
 		readonly struct Triggerable : IDisposable
 		{
@@ -68,8 +75,9 @@ namespace OpenRA.Mods.Common.Scripting
 			}
 		}
 
-		public ScriptTriggers(World world, Actor self)
+		public ScriptTriggers(ScriptTriggersInfo info, World world, Actor self)
 		{
+			this.info = info;
 			this.world = world;
 			this.self = self;
 		}
@@ -555,6 +563,50 @@ namespace OpenRA.Mods.Common.Scripting
 		void INotifyActorDisposing.Disposing(Actor self)
 		{
 			ClearAll();
+		}
+
+		TraitInfo ISaveState.SaveStateInfo => info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
+		{
+			var nodes = new List<MiniYamlNode>();
+
+			foreach (var trigger in Enum.GetValues<Trigger>())
+			{
+				var registered = Triggerables(trigger);
+				if (registered.Count == 0)
+					continue;
+
+				var ids = registered.Select(t => t.Context.RegisterHandle(t.Function).ToStringInvariant());
+				nodes.Add(new MiniYamlNode(trigger.ToString(), ids.JoinWith(",")));
+			}
+
+			return nodes.Count > 0 ? nodes : null;
+		}
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
+		{
+			foreach (var node in data.Nodes)
+			{
+				if (!Enum.TryParse<Trigger>(node.Key, out var trigger))
+					continue;
+
+				foreach (var id in node.Value.Value.Split(',', StringSplitOptions.RemoveEmptyEntries))
+					savedHandles.Add((trigger, Exts.ParseInt32Invariant(id)));
+			}
+
+			if (savedHandles.Count == 0)
+				return;
+
+			self.World.WorldActor.Trait<LuaScript>().RegisterHandleHolder(this);
+		}
+
+		void ILuaHandleHolder.ResolveHandles(ScriptContext context)
+		{
+			foreach (var (trigger, id) in savedHandles)
+				Triggerables(trigger).Add(new Triggerable(context.ResolveHandle(id), context, self));
+
+			savedHandles.Clear();
 		}
 	}
 }

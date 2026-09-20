@@ -64,9 +64,12 @@ namespace OpenRA.Mods.Common.Traits.Render
 		{
 			self = init.Self;
 
-			var anim = new Animation(self.World, info.Image);
-			anim.Play(info.Sequence);
-			sprite = anim.Image;
+			if (self.World.Map.Sequences.SpritesLoaded)
+			{
+				var anim = new Animation(self.World, info.Image);
+				anim.Play(info.Sequence);
+				sprite = anim.Image;
+			}
 
 			this.info = info;
 

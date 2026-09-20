@@ -12,6 +12,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using OpenRA.GameSaves;
 using OpenRA.Graphics;
 using OpenRA.Primitives;
 using OpenRA.Traits;
@@ -62,8 +63,11 @@ namespace OpenRA.Mods.Common.Traits.Render
 		}
 	}
 
-	public class Hovers : ConditionalTrait<HoversInfo>, IRenderModifier, ITick, ISync
+	public class Hovers : ConditionalTrait<HoversInfo>, IRenderModifier, ITick, ISync, ISaveState
 	{
+		const string WorldVisualOffsetKey = "WorldVisualOffset";
+		const string TicksKey = "Ticks";
+
 		readonly HoversInfo info;
 		readonly int stepPercentage;
 		readonly int fallTickHeight;
@@ -111,6 +115,27 @@ namespace OpenRA.Mods.Common.Traits.Render
 		IEnumerable<IRenderable> IRenderModifier.ModifyRender(Actor self, WorldRenderer wr, IEnumerable<IRenderable> r)
 		{
 			return r.Select(a => a.OffsetBy(WorldVisualOffset));
+		}
+
+		TraitInfo ISaveState.SaveStateInfo => Info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
+		{
+			return
+			[
+				new(WorldVisualOffsetKey, FieldSaver.FormatValue(WorldVisualOffset)),
+				new(TicksKey, FieldSaver.FormatValue(ticks))
+			];
+		}
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
+		{
+			var nodes = data.ToDictionary();
+			if (nodes.TryGetValue(WorldVisualOffsetKey, out var offset))
+				WorldVisualOffset = FieldLoader.GetValue<WVec>(WorldVisualOffsetKey, offset.Value);
+
+			if (nodes.TryGetValue(TicksKey, out var t))
+				ticks = FieldLoader.GetValue<int>(TicksKey, t.Value);
 		}
 
 		IEnumerable<Rectangle> IRenderModifier.ModifyScreenBounds(Actor self, WorldRenderer wr, IEnumerable<Rectangle> bounds)

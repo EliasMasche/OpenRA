@@ -44,7 +44,11 @@ namespace OpenRA.Mods.Common.Warheads
 		public override void DoImpact(in Target target, WarheadArgs args)
 		{
 			var targetActor = target.Actor;
-			var firedBy = args.SourceActor;
+			var firedBy = args.SourceOwner;
+
+			if (firedBy == null)
+				return;
+
 			var victims = Radius == WDist.Zero && targetActor != null ? [targetActor] : firedBy.World.FindActorsInCircle(target.CenterPosition, Radius);
 
 			foreach (var victim in victims)

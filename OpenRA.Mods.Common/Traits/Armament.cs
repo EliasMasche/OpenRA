@@ -14,6 +14,7 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
 using OpenRA.GameRules;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Traits.Render;
 using OpenRA.Traits;
 
@@ -110,8 +111,18 @@ namespace OpenRA.Mods.Common.Traits
 		}
 	}
 
-	public class Armament : PausableConditionalTrait<ArmamentInfo>, ITick
+	public class Armament : PausableConditionalTrait<ArmamentInfo>, ITick, ISaveState, IProvidesProjectileSource
 	{
+		const string TicksSinceLastShotKey = "TicksSinceLastShot";
+		const string CurrentBarrelKey = "CurrentBarrel";
+		const string RecoilKey = "Recoil";
+		const string FireDelayKey = "FireDelay";
+		const string BurstKey = "Burst";
+		const string PendingShotsKey = "PendingShots";
+		const string TicksKey = "Ticks";
+		const string BarrelKey = "Barrel";
+		const string TargetKey = "Target";
+
 		public readonly WeaponInfo Weapon;
 		public readonly Barrel[] Barrels;
 		Turreted turret;
@@ -133,6 +144,8 @@ namespace OpenRA.Mods.Common.Traits
 		readonly int barrelCount;
 
 		readonly List<(int Ticks, int Burst, Action<int> Func)> delayedActions = [];
+
+		readonly List<(int Ticks, int Burst, int Barrel, Target Target)> pendingShots = [];
 
 		public WDist Recoil;
 		public int FireDelay { get; protected set; }
@@ -233,6 +246,15 @@ namespace OpenRA.Mods.Common.Traits
 			}
 
 			delayedActions.RemoveAll(a => a.Ticks <= 0);
+
+			for (var i = 0; i < pendingShots.Count; i++)
+			{
+				var shot = pendingShots[i];
+				shot.Ticks--;
+				pendingShots[i] = shot;
+			}
+
+			pendingShots.RemoveAll(s => s.Ticks <= 0);
 		}
 
 		void ITick.Tick(Actor self)
@@ -298,6 +320,11 @@ namespace OpenRA.Mods.Common.Traits
 			foreach (var (notifyActor, notify) in notifyAttacks)
 				notify.PreparingAttack(notifyActor, target, this, barrel);
 
+			BuildAndScheduleShot(self, target, barrel);
+		}
+
+		void BuildAndScheduleShot(Actor self, in Target target, Barrel barrel)
+		{
 			WPos MuzzlePosition() => self.CenterPosition + MuzzleOffset(self, barrel);
 			WAngle MuzzleFacing() => MuzzleOrientation(self, barrel).Yaw;
 			var muzzleOrientation = WRot.FromYaw(MuzzleFacing());
@@ -333,13 +360,21 @@ namespace OpenRA.Mods.Common.Traits
 
 				Source = MuzzlePosition(),
 				CurrentSource = MuzzlePosition,
+				World = self.World,
 				SourceActor = self,
+				SourceOwner = self.Owner,
 				PassiveTarget = passiveTarget,
-				GuidedTarget = target
+				GuidedTarget = target,
+
+				SourceProvider = new ArmamentProjectileSource(self, this, barrel)
 			};
 
 			// Lambdas can't use 'in' variables, so capture a copy for later
 			var delayedTarget = target;
+
+			if (Info.FireDelay > 0)
+				pendingShots.Add((Info.FireDelay, Burst, Array.IndexOf(Barrels, barrel), delayedTarget));
+
 			ScheduleDelayedAction(Info.FireDelay, Burst, (burst) =>
 			{
 				if (args.Weapon.Projectile != null)
@@ -428,5 +463,100 @@ namespace OpenRA.Mods.Common.Traits
 		}
 
 		public Actor Actor { get; }
+
+		string IProvidesProjectileSource.InstanceName => Info.InstanceName;
+
+		IProjectileSource IProvidesProjectileSource.ProvideProjectileSource(Actor self, int barrel)
+		{
+			if (barrel < 0 || barrel >= Barrels.Length)
+				return null;
+
+			return new ArmamentProjectileSource(self, this, Barrels[barrel]);
+		}
+
+		TraitInfo ISaveState.SaveStateInfo => Info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
+		{
+			var nodes = new List<MiniYamlNode>
+			{
+				new(TicksSinceLastShotKey, FieldSaver.FormatValue(ticksSinceLastShot)),
+				new(CurrentBarrelKey, FieldSaver.FormatValue(currentBarrel)),
+				new(RecoilKey, FieldSaver.FormatValue(Recoil)),
+				new(FireDelayKey, FieldSaver.FormatValue(FireDelay)),
+				new(BurstKey, FieldSaver.FormatValue(Burst))
+			};
+
+			if (pendingShots.Count > 0)
+			{
+				var shots = pendingShots.Select((shot, i) => new MiniYamlNode(i.ToStringInvariant(), new MiniYaml("",
+				[
+					new MiniYamlNode(TicksKey, FieldSaver.FormatValue(shot.Ticks)),
+					new MiniYamlNode(BurstKey, FieldSaver.FormatValue(shot.Burst)),
+					new MiniYamlNode(BarrelKey, FieldSaver.FormatValue(shot.Barrel)),
+					new MiniYamlNode(TargetKey, w.TargetRef(shot.Target))
+				]))).ToList();
+
+				nodes.Add(new MiniYamlNode(PendingShotsKey, new MiniYaml("", shots)));
+			}
+
+			return nodes;
+		}
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
+		{
+			var nodes = data.ToDictionary();
+			if (nodes.TryGetValue(TicksSinceLastShotKey, out var ticks))
+				ticksSinceLastShot = FieldLoader.GetValue<int>(TicksSinceLastShotKey, ticks.Value);
+
+			if (nodes.TryGetValue(CurrentBarrelKey, out var barrel))
+				currentBarrel = FieldLoader.GetValue<int>(CurrentBarrelKey, barrel.Value);
+
+			if (nodes.TryGetValue(RecoilKey, out var recoil))
+				Recoil = FieldLoader.GetValue<WDist>(RecoilKey, recoil.Value);
+
+			if (nodes.TryGetValue(FireDelayKey, out var fireDelay))
+				FireDelay = FieldLoader.GetValue<int>(FireDelayKey, fireDelay.Value);
+
+			if (nodes.TryGetValue(BurstKey, out var burst))
+				Burst = FieldLoader.GetValue<int>(BurstKey, burst.Value);
+
+			if (!nodes.TryGetValue(PendingShotsKey, out var pending))
+				return;
+
+			foreach (var node in pending.Nodes)
+			{
+				var shot = node.Value.ToDictionary();
+				var index = FieldLoader.GetValue<int>(BarrelKey, shot[BarrelKey].Value);
+
+				if (index < 0 || index >= Barrels.Length)
+					continue;
+
+				var remaining = FieldLoader.GetValue<int>(TicksKey, shot[TicksKey].Value);
+				var shotBurst = FieldLoader.GetValue<int>(BurstKey, shot[BurstKey].Value);
+
+				r.DeferTarget(shot[TargetKey].Value, t => RestorePendingShot(self, remaining, shotBurst, index, t));
+			}
+		}
+
+		void RestorePendingShot(Actor self, int remainingTicks, int burst, int barrelIndex, in Target target)
+		{
+			if (target.Type == TargetType.Invalid)
+				return;
+
+			var savedBurst = Burst;
+			Burst = burst;
+			BuildAndScheduleShot(self, target, Barrels[barrelIndex]);
+			Burst = savedBurst;
+
+			if (Info.FireDelay <= 0 || pendingShots.Count == 0)
+				return;
+
+			var scheduled = delayedActions[^1];
+			delayedActions[^1] = (remainingTicks, scheduled.Burst, scheduled.Func);
+
+			var recorded = pendingShots[^1];
+			pendingShots[^1] = (remainingTicks, recorded.Burst, recorded.Barrel, recorded.Target);
+		}
 	}
 }

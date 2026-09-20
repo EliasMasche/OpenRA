@@ -35,6 +35,10 @@ namespace OpenRA.Mods.Cnc.Traits
 		public ChronoVortexRenderer(Actor self)
 		{
 			renderer = Game.Renderer;
+
+			if (!self.World.HasRenderer)
+				return;
+
 			shader = renderer.CreateShader(new RenderPostProcessPassTexturedShaderBindings("vortex"));
 
 			vortexSheet = new Sheet(SheetType.BGRA, new Size(512, 512));
@@ -108,8 +112,8 @@ namespace OpenRA.Mods.Cnc.Traits
 
 		void INotifyActorDisposing.Disposing(Actor self)
 		{
-			vortexSheet.Dispose();
-			vortexBuffer.Dispose();
+			vortexSheet?.Dispose();
+			vortexBuffer?.Dispose();
 		}
 	}
 }

@@ -1,4 +1,4 @@
-#region Copyright & License Information
+﻿#region Copyright & License Information
 /*
  * Copyright (c) The OpenRA Developers and Contributors
  * This file is part of OpenRA, which is free software. It is made
@@ -10,21 +10,50 @@
 #endregion
 
 using System;
+using System.Collections.Generic;
 using Eluant;
 using OpenRA.Activities;
+using OpenRA.GameSaves;
+using OpenRA.Mods.Common.Scripting;
+using OpenRA.Mods.Common.Scripting.Snapshot;
 using OpenRA.Scripting;
 
 namespace OpenRA.Mods.Common.Activities
 {
-	public sealed class CallLuaFunc : Activity, IDisposable
+	[SaveableActivity]
+	public sealed class CallLuaFunc : Activity, IDisposable, ILuaHandleHolder
 	{
+		const string HandleKey = "Handle";
+
 		readonly ScriptContext context;
 		LuaFunction function;
+
+		readonly int savedHandle = -1;
 
 		public CallLuaFunc(LuaFunction function, ScriptContext context)
 		{
 			this.function = (LuaFunction)function.CopyReference();
 			this.context = context;
+		}
+
+		CallLuaFunc(Actor self, SnapshotReader r, MiniYaml yaml)
+		{
+			savedHandle = FieldLoader.GetValue<int>(HandleKey, yaml.NodeWithKeyOrDefault(HandleKey)?.Value.Value);
+
+			context = this.RegisterForHandles(self.World);
+		}
+
+		void ILuaHandleHolder.ResolveHandles(ScriptContext context)
+		{
+			function = (LuaFunction)context.ResolveHandle(savedHandle).CopyReference();
+		}
+
+		public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+		{
+			if (function == null)
+				return null;
+
+			return [new(HandleKey, FieldSaver.FormatValue(context.RegisterHandle(function)))];
 		}
 
 		public override bool Tick(Actor self)

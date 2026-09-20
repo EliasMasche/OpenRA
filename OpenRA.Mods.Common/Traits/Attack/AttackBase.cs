@@ -14,6 +14,7 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
 using OpenRA.Activities;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Activities;
 using OpenRA.Primitives;
 using OpenRA.Traits;
@@ -70,8 +71,11 @@ namespace OpenRA.Mods.Common.Traits
 		public abstract override object Create(ActorInitializer init);
 	}
 
-	public abstract class AttackBase : PausableConditionalTrait<AttackBaseInfo>, ITick, IIssueOrder, IResolveOrder, IOrderVoice, ISync
+	public abstract class AttackBase : PausableConditionalTrait<AttackBaseInfo>, ITick, IIssueOrder, IResolveOrder, IOrderVoice, ISync,
+		ISaveState, INotifyStateRestored
 	{
+		const string IsAimingKey = "IsAiming";
+
 		readonly string attackOrderName = "Attack";
 		readonly string forceAttackOrderName = "ForceAttack";
 
@@ -414,6 +418,35 @@ namespace OpenRA.Mods.Common.Traits
 					stances |= armament.Info.TargetRelationships;
 
 			return stances;
+		}
+
+		TraitInfo ISaveState.SaveStateInfo => Info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w) { return SaveState(w); }
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r) { LoadState(data, r); }
+
+		protected virtual List<MiniYamlNode> SaveState(SnapshotWriter w)
+		{
+			return [new(IsAimingKey, FieldSaver.FormatValue(IsAiming))];
+		}
+
+		protected virtual void LoadState(MiniYaml data, SnapshotReader r)
+		{
+			var node = data.NodeWithKeyOrDefault(IsAimingKey);
+			if (node == null)
+				return;
+
+			IsAiming = FieldLoader.GetValue<bool>(IsAimingKey, node.Value.Value);
+
+			wasAiming = IsAiming;
+		}
+
+		void INotifyStateRestored.StateRestored(Actor self)
+		{
+			if (IsAiming)
+				foreach (var n in notifyAiming)
+					n.StartedAiming(self, this);
 		}
 
 		sealed class AttackOrderTargeter : IOrderTargeter

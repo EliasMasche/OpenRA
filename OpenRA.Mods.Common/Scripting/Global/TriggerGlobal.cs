@@ -12,7 +12,7 @@
 using System;
 using System.Linq;
 using Eluant;
-using OpenRA.Effects;
+using OpenRA.Mods.Common.Scripting.Snapshot;
 using OpenRA.Scripting;
 
 namespace OpenRA.Mods.Common.Scripting
@@ -22,6 +22,8 @@ namespace OpenRA.Mods.Common.Scripting
 	{
 		public TriggerGlobal(ScriptContext context)
 			: base(context) { }
+
+		LuaScript Script => Context.World.WorldActor.Trait<LuaScript>();
 
 		public static ScriptTriggers GetScriptTriggers(Actor actor)
 		{
@@ -35,21 +37,8 @@ namespace OpenRA.Mods.Common.Scripting
 		[Desc("Call a function after a specified delay. The callback function will be called as func().")]
 		public void AfterDelay(int delay, [ScriptEmmyTypeOverride("fun()")] LuaFunction func)
 		{
-			var f = (LuaFunction)func.CopyReference();
-			void DoCall()
-			{
-				try
-				{
-					using (f)
-						f.Call().Dispose();
-				}
-				catch (Exception e)
-				{
-					Context.FatalError(e);
-				}
-			}
-
-			Context.World.AddFrameEndTask(w => w.Add(new DelayedAction(delay, DoCall)));
+			var call = new LuaDelayedCall(Context, delay, func);
+			Context.World.AddFrameEndTask(w => w.Add(call));
 		}
 
 		[Desc("Call a function for each passenger when it enters a transport. " +
@@ -110,25 +99,7 @@ namespace OpenRA.Mods.Common.Scripting
 			if (actors == null)
 				throw new NullReferenceException(nameof(actors));
 
-			var group = actors.ToList();
-			var f = (LuaFunction)func.CopyReference();
-			void OnMemberKilled(Actor m)
-			{
-				try
-				{
-					group.Remove(m);
-					if (group.Count == 0)
-						using (f)
-							f.Call();
-				}
-				catch (Exception e)
-				{
-					Context.FatalError(e);
-				}
-			}
-
-			foreach (var a in group)
-				GetScriptTriggers(a).OnKilledInternal += OnMemberKilled;
+			AddGroupTrigger(LuaGroupTriggerKind.AllKilled, actors, func);
 		}
 
 		[Desc("Call a function when one of the actors in a group is killed. " +
@@ -136,32 +107,10 @@ namespace OpenRA.Mods.Common.Scripting
 			"function will be called as func(killed: actor).")]
 		public void OnAnyKilled(Actor[] actors, [ScriptEmmyTypeOverride("fun(killed: actor)")] LuaFunction func)
 		{
-			var called = false;
-			var f = (LuaFunction)func.CopyReference();
-			void OnMemberKilled(Actor m)
-			{
-				try
-				{
-					if (called)
-						return;
-
-					using (f)
-					using (var killed = m.ToLuaValue(Context))
-						f.Call(killed).Dispose();
-
-					called = true;
-				}
-				catch (Exception e)
-				{
-					Context.FatalError(e);
-				}
-			}
-
 			if (actors == null)
 				throw new NullReferenceException(nameof(actors));
 
-			foreach (var a in actors)
-				GetScriptTriggers(a).OnKilledInternal += OnMemberKilled;
+			AddGroupTrigger(LuaGroupTriggerKind.AnyKilled, actors, func);
 		}
 
 		[Desc("Call a function when this actor produces another actor. " +
@@ -268,50 +217,7 @@ namespace OpenRA.Mods.Common.Scripting
 			if (actors == null)
 				throw new NullReferenceException(nameof(actors));
 
-			var group = actors.ToList();
-
-			var f = (LuaFunction)func.CopyReference();
-			void OnMemberRemoved(Actor m)
-			{
-				try
-				{
-					if (!group.Remove(m))
-						return;
-
-					if (group.Count == 0)
-					{
-						// Functions can only be .Call()ed once, so operate on a copy so we can reuse it later
-						var temp = (LuaFunction)f.CopyReference();
-						using (temp)
-							temp.Call().Dispose();
-					}
-				}
-				catch (Exception e)
-				{
-					Context.FatalError(e);
-				}
-			}
-
-			void OnMemberAdded(Actor m)
-			{
-				try
-				{
-					if (!actors.Contains(m) || group.Contains(m))
-						return;
-
-					group.Add(m);
-				}
-				catch (Exception e)
-				{
-					Context.FatalError(e);
-				}
-			}
-
-			foreach (var a in group)
-			{
-				GetScriptTriggers(a).OnRemovedInternal += OnMemberRemoved;
-				GetScriptTriggers(a).OnAddedInternal += OnMemberAdded;
-			}
+			AddGroupTrigger(LuaGroupTriggerKind.AllRemovedFromWorld, actors, func);
 		}
 
 		[Desc("Call a function when this actor is captured. The callback function " +
@@ -329,32 +235,10 @@ namespace OpenRA.Mods.Common.Scripting
 			"The callback function will be called as func().")]
 		public void OnKilledOrCaptured(Actor actor, [ScriptEmmyTypeOverride("fun()")] LuaFunction func)
 		{
-			var called = false;
-
-			var f = (LuaFunction)func.CopyReference();
-			void OnKilledOrCaptured(Actor m)
-			{
-				try
-				{
-					if (called)
-						return;
-
-					using (f)
-						f.Call().Dispose();
-
-					called = true;
-				}
-				catch (Exception e)
-				{
-					Context.FatalError(e);
-				}
-			}
-
 			if (actor == null)
 				throw new NullReferenceException(nameof(actor));
 
-			GetScriptTriggers(actor).OnCapturedInternal += OnKilledOrCaptured;
-			GetScriptTriggers(actor).OnKilledInternal += OnKilledOrCaptured;
+			AddGroupTrigger(LuaGroupTriggerKind.KilledOrCaptured, [actor], func);
 		}
 
 		[Desc("Call a function when all of the actors in a group have been killed or captured. " +
@@ -365,31 +249,15 @@ namespace OpenRA.Mods.Common.Scripting
 			if (actors == null)
 				throw new NullReferenceException(nameof(actors));
 
-			var group = actors.ToList();
+			AddGroupTrigger(LuaGroupTriggerKind.AllKilledOrCaptured, actors, func);
+		}
 
-			var f = (LuaFunction)func.CopyReference();
-			void OnMemberKilledOrCaptured(Actor m)
-			{
-				try
-				{
-					if (!group.Remove(m))
-						return;
+		void AddGroupTrigger(LuaGroupTriggerKind kind, Actor[] actors, LuaFunction func)
+		{
+			var trigger = LuaGroupTrigger.Create(kind, actors, func);
+			trigger.Subscribe(Context);
 
-					if (group.Count == 0)
-						using (f)
-							f.Call().Dispose();
-				}
-				catch (Exception e)
-				{
-					Context.FatalError(e);
-				}
-			}
-
-			foreach (var a in group)
-			{
-				GetScriptTriggers(a).OnCapturedInternal += OnMemberKilledOrCaptured;
-				GetScriptTriggers(a).OnKilledInternal += OnMemberKilledOrCaptured;
-			}
+			Script.RegisterGroupTrigger(trigger);
 		}
 
 		[Desc("Call a function when a ground-based actor enters this cell footprint. " +
@@ -397,26 +265,7 @@ namespace OpenRA.Mods.Common.Scripting
 			"The callback function will be called as func(a: actor, id: integer).")]
 		public int OnEnteredFootprint(CPos[] cells, [ScriptEmmyTypeOverride("fun(a: actor, id: integer)")] LuaFunction func)
 		{
-			// We can't easily dispose onEntry, so we'll have to rely on finalization for it.
-			var onEntry = (LuaFunction)func.CopyReference();
-			var triggerId = 0;
-			void InvokeEntry(Actor a)
-			{
-				try
-				{
-					using (var luaActor = a.ToLuaValue(Context))
-					using (var id = triggerId.ToLuaValue(Context))
-						onEntry.Call(luaActor, id).Dispose();
-				}
-				catch (Exception e)
-				{
-					Context.FatalError(e);
-				}
-			}
-
-			triggerId = Context.World.ActorMap.AddCellTrigger(cells, InvokeEntry, null);
-
-			return triggerId;
+			return AddFootprintTrigger(LuaMapTriggerKind.EnteredFootprint, cells, func);
 		}
 
 		[Desc("Call a function when a ground-based actor leaves this cell footprint. " +
@@ -424,32 +273,26 @@ namespace OpenRA.Mods.Common.Scripting
 			"The callback function will be called as func(a: actor, id: integer).")]
 		public int OnExitedFootprint(CPos[] cells, [ScriptEmmyTypeOverride("fun(a: actor, id: integer)")] LuaFunction func)
 		{
-			// We can't easily dispose onExit, so we'll have to rely on finalization for it.
-			var onExit = (LuaFunction)func.CopyReference();
-			var triggerId = 0;
-			void InvokeExit(Actor a)
-			{
-				try
-				{
-					using (var luaActor = a.ToLuaValue(Context))
-					using (var id = triggerId.ToLuaValue(Context))
-						onExit.Call(luaActor, id).Dispose();
-				}
-				catch (Exception e)
-				{
-					Context.FatalError(e);
-				}
-			}
+			return AddFootprintTrigger(LuaMapTriggerKind.ExitedFootprint, cells, func);
+		}
 
-			triggerId = Context.World.ActorMap.AddCellTrigger(cells, null, InvokeExit);
+		int AddFootprintTrigger(LuaMapTriggerKind kind, CPos[] cells, LuaFunction func)
+		{
+			var trigger = LuaMapTrigger.Footprint(kind, cells, (LuaFunction)func.CopyReference());
+			var invoke = trigger.Invoke(Context);
+			var entered = kind == LuaMapTriggerKind.EnteredFootprint;
 
-			return triggerId;
+			trigger.SetId(Context.World.ActorMap.AddCellTrigger(cells, entered ? invoke : null, entered ? null : invoke));
+			Script.RegisterMapTrigger(trigger);
+
+			return trigger.Id;
 		}
 
 		[Desc("Removes a previously created footprint trigger.")]
 		public void RemoveFootprintTrigger(int id)
 		{
 			Context.World.ActorMap.RemoveCellTrigger(id);
+			Script.ForgetMapTrigger(id);
 		}
 
 		[Desc("Call a function when an actor enters this range. " +
@@ -457,26 +300,7 @@ namespace OpenRA.Mods.Common.Scripting
 			"The callback function will be called as func(a: actor, id: integer).")]
 		public int OnEnteredProximityTrigger(WPos pos, WDist range, [ScriptEmmyTypeOverride("fun(a: actor, id: integer)")] LuaFunction func)
 		{
-			// We can't easily dispose onEntry, so we'll have to rely on finalization for it.
-			var onEntry = (LuaFunction)func.CopyReference();
-			var triggerId = 0;
-			void InvokeEntry(Actor a)
-			{
-				try
-				{
-					using (var luaActor = a.ToLuaValue(Context))
-					using (var id = triggerId.ToLuaValue(Context))
-						onEntry.Call(luaActor, id).Dispose();
-				}
-				catch (Exception e)
-				{
-					Context.FatalError(e);
-				}
-			}
-
-			triggerId = Context.World.ActorMap.AddProximityTrigger(pos, range, WDist.Zero, InvokeEntry, null);
-
-			return triggerId;
+			return AddProximityTrigger(LuaMapTriggerKind.EnteredProximity, pos, range, func);
 		}
 
 		[Desc("Call a function when an actor leaves this range. " +
@@ -484,32 +308,26 @@ namespace OpenRA.Mods.Common.Scripting
 			"The callback function will be called as func(a: actor, id: integer).")]
 		public int OnExitedProximityTrigger(WPos pos, WDist range, [ScriptEmmyTypeOverride("fun(a: actor, id: integer)")] LuaFunction func)
 		{
-			// We can't easily dispose onExit, so we'll have to rely on finalization for it.
-			var onExit = (LuaFunction)func.CopyReference();
-			var triggerId = 0;
-			void InvokeExit(Actor a)
-			{
-				try
-				{
-					using (var luaActor = a.ToLuaValue(Context))
-					using (var id = triggerId.ToLuaValue(Context))
-						onExit.Call(luaActor, id).Dispose();
-				}
-				catch (Exception e)
-				{
-					Context.FatalError(e);
-				}
-			}
+			return AddProximityTrigger(LuaMapTriggerKind.ExitedProximity, pos, range, func);
+		}
 
-			triggerId = Context.World.ActorMap.AddProximityTrigger(pos, range, WDist.Zero, null, InvokeExit);
+		int AddProximityTrigger(LuaMapTriggerKind kind, WPos pos, WDist range, LuaFunction func)
+		{
+			var trigger = LuaMapTrigger.Proximity(kind, pos, range, (LuaFunction)func.CopyReference());
+			var invoke = trigger.Invoke(Context);
+			var entered = kind == LuaMapTriggerKind.EnteredProximity;
 
-			return triggerId;
+			trigger.SetId(Context.World.ActorMap.AddProximityTrigger(pos, range, WDist.Zero, entered ? invoke : null, entered ? null : invoke));
+			Script.RegisterMapTrigger(trigger);
+
+			return trigger.Id;
 		}
 
 		[Desc("Removes a previously created proximity trigger.")]
 		public void RemoveProximityTrigger(int id)
 		{
 			Context.World.ActorMap.RemoveProximityTrigger(id);
+			Script.ForgetMapTrigger(id);
 		}
 
 		[Desc("Call a function when this actor is infiltrated. The callback function " +

@@ -12,6 +12,7 @@
 using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Linq;
+using OpenRA.GameSaves;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Traits
@@ -49,7 +50,7 @@ namespace OpenRA.Mods.Common.Traits
 	}
 
 	public class McvManagerBotModule : ConditionalTrait<McvManagerBotModuleInfo>,
-		IBotTick, IBotPositionsUpdated, IGameSaveTraitData, INotifyActorDisposing
+		IBotTick, IBotPositionsUpdated, ISaveState, INotifyActorDisposing
 	{
 		public CPos GetRandomBaseCenter()
 		{
@@ -207,7 +208,9 @@ namespace OpenRA.Mods.Common.Traits
 				distanceToBaseIsImportant ? Info.MaxBaseRadius : world.Map.Grid.MaximumTileSearchRange);
 		}
 
-		List<MiniYamlNode> IGameSaveTraitData.IssueTraitData(Actor self)
+		TraitInfo ISaveState.SaveStateInfo => Info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
 		{
 			if (IsTraitDisabled)
 				return null;
@@ -218,7 +221,7 @@ namespace OpenRA.Mods.Common.Traits
 			];
 		}
 
-		void IGameSaveTraitData.ResolveTraitData(Actor self, MiniYaml data)
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
 		{
 			if (self.World.IsReplay)
 				return;

@@ -11,6 +11,7 @@
 
 using System.Collections.Generic;
 using System.Linq;
+using OpenRA.GameSaves;
 using OpenRA.Primitives;
 using OpenRA.Traits;
 
@@ -41,7 +42,7 @@ namespace OpenRA.Mods.Common.Traits
 		public override object Create(ActorInitializer init) { return new CaptureManager(init.Self, this); }
 	}
 
-	public class CaptureManager : INotifyCreated, INotifyCapture, ITick, IDisableEnemyAutoTarget
+	public class CaptureManager : INotifyCreated, INotifyCapture, ITick, IDisableEnemyAutoTarget, ISaveState
 	{
 		readonly Actor self;
 		readonly CaptureManagerInfo info;
@@ -288,6 +289,31 @@ namespace OpenRA.Mods.Common.Traits
 		bool IDisableEnemyAutoTarget.DisableEnemyAutoTarget(Actor self, Actor attacker)
 		{
 			return info.PreventsAutoTarget && currentCaptors.Any(attacker.AppearsFriendlyTo);
+		}
+
+		TraitInfo ISaveState.SaveStateInfo => info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
+		{
+			return
+			[
+				new("CurrentTarget", w.ActorRef(currentTarget)),
+				new("CurrentTargetDelay", FieldSaver.FormatValue(currentTargetDelay)),
+				new("CurrentTargetTotal", FieldSaver.FormatValue(currentTargetTotal))
+			];
+		}
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
+		{
+			var nodes = data.ToDictionary();
+			currentTargetDelay = FieldLoader.GetValue<int>("CurrentTargetDelay", nodes["CurrentTargetDelay"].Value);
+			currentTargetTotal = FieldLoader.GetValue<int>("CurrentTargetTotal", nodes["CurrentTargetTotal"].Value);
+
+			r.DeferActor(nodes["CurrentTarget"].Value, a =>
+			{
+				currentTarget = a;
+				currentTargetManager = a?.TraitOrDefault<CaptureManager>();
+			});
 		}
 	}
 }

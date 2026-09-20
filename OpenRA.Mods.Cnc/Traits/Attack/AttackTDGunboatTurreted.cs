@@ -12,6 +12,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using OpenRA.Activities;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Traits;
 using OpenRA.Primitives;
 using OpenRA.Traits;
@@ -34,10 +35,12 @@ namespace OpenRA.Mods.Cnc.Traits
 			return new AttackTDGunboatTurretedActivity(self, newTarget, forceAttack, targetLineColor);
 		}
 
+		[SaveableActivity]
 		sealed class AttackTDGunboatTurretedActivity : Activity
 		{
 			readonly AttackTDGunboatTurreted attack;
-			readonly Target target;
+
+			Target target;
 			readonly bool forceAttack;
 			readonly Color? targetLineColor;
 			bool hasTicked;
@@ -48,6 +51,32 @@ namespace OpenRA.Mods.Cnc.Traits
 				this.target = target;
 				this.forceAttack = forceAttack;
 				this.targetLineColor = targetLineColor;
+			}
+
+			internal AttackTDGunboatTurretedActivity(Actor self, SnapshotReader r, MiniYaml yaml)
+			{
+				attack = self.Trait<AttackTDGunboatTurreted>();
+
+				var n = yaml.ToDictionary();
+				forceAttack = FieldLoader.GetValue<bool>("ForceAttack", n["ForceAttack"].Value);
+				hasTicked = FieldLoader.GetValue<bool>("HasTicked", n["HasTicked"].Value);
+
+				var color = n["TargetLineColor"].Value;
+				if (!string.IsNullOrEmpty(color))
+					targetLineColor = FieldLoader.GetValue<Color>("TargetLineColor", color);
+
+				r.DeferTarget(n["Target"].Value, t => target = t);
+			}
+
+			public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+			{
+				return
+				[
+					new("Target", w.TargetRef(target)),
+					new("ForceAttack", FieldSaver.FormatValue(forceAttack)),
+					new("HasTicked", FieldSaver.FormatValue(hasTicked)),
+					new("TargetLineColor", targetLineColor.HasValue ? FieldSaver.FormatValue(targetLineColor.Value) : "")
+				];
 			}
 
 			public override bool Tick(Actor self)

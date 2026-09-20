@@ -10,6 +10,8 @@
 #endregion
 
 using System.Collections.Frozen;
+using System.Collections.Generic;
+using OpenRA.GameSaves;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Traits
@@ -34,8 +36,12 @@ namespace OpenRA.Mods.Common.Traits
 		public override object Create(ActorInitializer init) { return new Wanders(init.Self, this); }
 	}
 
-	public class Wanders : ConditionalTrait<WandersInfo>, INotifyIdle, INotifyBecomingIdle
+	public class Wanders : ConditionalTrait<WandersInfo>, INotifyIdle, INotifyBecomingIdle, ISaveState
 	{
+		const string CountdownKey = "Countdown";
+		const string TicksIdleKey = "TicksIdle";
+		const string EffectiveMoveRadiusKey = "EffectiveMoveRadius";
+
 		readonly WandersInfo info;
 		readonly IMoveInfo moveInfo;
 		protected readonly IMove Move;
@@ -113,6 +119,32 @@ namespace OpenRA.Mods.Common.Traits
 		public virtual void DoAction(Actor self, CPos targetCell)
 		{
 			self.QueueActivity(Move.MoveTo(targetCell, targetLineColor: moveInfo.GetTargetLineColor()));
+		}
+
+		TraitInfo ISaveState.SaveStateInfo => Info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
+		{
+			return
+			[
+				new(CountdownKey, FieldSaver.FormatValue(countdown)),
+				new(TicksIdleKey, FieldSaver.FormatValue(ticksIdle)),
+				new(EffectiveMoveRadiusKey, FieldSaver.FormatValue(effectiveMoveRadius))
+			];
+		}
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
+		{
+			var nodes = data.ToDictionary();
+
+			if (nodes.TryGetValue(CountdownKey, out var c))
+				countdown = FieldLoader.GetValue<int>(CountdownKey, c.Value);
+
+			if (nodes.TryGetValue(TicksIdleKey, out var t))
+				ticksIdle = FieldLoader.GetValue<int>(TicksIdleKey, t.Value);
+
+			if (nodes.TryGetValue(EffectiveMoveRadiusKey, out var radius))
+				effectiveMoveRadius = FieldLoader.GetValue<int>(EffectiveMoveRadiusKey, radius.Value);
 		}
 	}
 }

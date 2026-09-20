@@ -50,6 +50,16 @@ namespace OpenRA.Mods.Common.Traits
 
 	public class BulkProductionQueue : ProductionQueue
 	{
+		protected override Action CompletionAction(Actor self, ActorInfo unit, int time)
+		{
+			return () => self.World.AddFrameEndTask(_ =>
+			{
+				if (!Queue.Any(i => i.Done && i.Item == unit.Name))
+					return;
+				BuildUnit(unit);
+			});
+		}
+
 		static readonly ActorInfo[] NoItems = [];
 
 		readonly Actor self;
@@ -223,13 +233,8 @@ namespace OpenRA.Mods.Common.Traits
 					{
 						if (Info.PayUpFront && cost > playerResources.GetCashAndResources())
 							return;
-						BeginProduction(new ProductionItem(this, order.TargetString, cost, playerPower, () => self.World.AddFrameEndTask(_ =>
-						{
-							// Make sure the item hasn't been invalidated between the ProductionItem ticking and this FrameEndTask running
-							if (!Queue.Any(i => i.Done && i.Item == unit.Name))
-								return;
-							BuildUnit(unit);
-						})), !order.Queued);
+						BeginProduction(new ProductionItem(this, order.TargetString, cost, playerPower,
+							CompletionAction(self, unit, time)), !order.Queued);
 					}
 
 					break;

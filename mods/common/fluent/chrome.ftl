@@ -136,6 +136,8 @@ label-load-game-browser-panel-incompatible-title = Incompatible Savegame
 label-load-game-browser-panel-incompatible-a = This savegame is not compatible
 label-load-game-browser-panel-incompatible-b = with this version of OpenRA
 label-load-game-browser-panel-human-player = Player
+notification-cannot-load-different-map = Cannot load: that saved game belongs to a different map than this session.
+notification-cannot-load-map-unavailable = Cannot load: this machine does not have that saved game's map.
 button-load-game-browser-panel-load = Load
 tooltip-savegame-date-created = Date Created
 tooltip-savegame-map = Map
@@ -395,6 +397,11 @@ button-multiplayer-tabs-players-tab = Players
 button-multiplayer-tabs-options-tab = Options
 button-multiplayer-tabs-servers-tab = Servers
 button-server-lobby-changemap = Change Map
+button-server-lobby-loadsave = Load Save
+
+label-lobby-load-save-panel-title = Load Saved Game
+button-lobby-load-save-load = Load
+label-lobby-uploading-save = Sending the saved game to the server...
 
 button-lobbychat-chat-mode =
     .label = Team

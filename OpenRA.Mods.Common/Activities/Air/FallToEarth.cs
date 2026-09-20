@@ -10,12 +10,15 @@
 #endregion
 
 using System;
+using System.Collections.Generic;
 using OpenRA.Activities;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Traits;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Activities
 {
+	[SaveableActivity]
 	public class FallToEarth : Activity
 	{
 		readonly Aircraft aircraft;
@@ -31,6 +34,27 @@ namespace OpenRA.Mods.Common.Activities
 			aircraft = self.Trait<Aircraft>();
 			if (!info.MaximumSpinSpeed.HasValue || info.MaximumSpinSpeed.Value != WAngle.Zero)
 				acceleration = self.World.SharedRandom.Next(2) * 2 - 1;
+		}
+
+		internal FallToEarth(Actor self, SnapshotReader _, MiniYaml yaml)
+		{
+			IsInterruptible = false;
+			aircraft = self.Trait<Aircraft>();
+			info = self.Info.TraitInfoOrDefault<FallsToEarthInfo>();
+
+			var n = yaml.ToDictionary();
+			spin = FieldLoader.GetValue<int>("Spin", n["Spin"].Value);
+
+			acceleration = FieldLoader.GetValue<int>("Acceleration", n["Acceleration"].Value);
+		}
+
+		public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+		{
+			return
+			[
+				new("Spin", FieldSaver.FormatValue(spin)),
+				new("Acceleration", FieldSaver.FormatValue(acceleration))
+			];
 		}
 
 		public override bool Tick(Actor self)

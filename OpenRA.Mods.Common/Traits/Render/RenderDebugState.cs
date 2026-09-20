@@ -39,8 +39,7 @@ namespace OpenRA.Mods.Common.Traits.Render
 			var buildingInfo = self.Info.TraitInfoOrDefault<BuildingInfo>();
 			var yOffset = buildingInfo?.Dimensions.Y ?? 1;
 			offset = new WVec(0, 512 * yOffset, 0);
-
-			font = Game.Renderer.Fonts[info.Font];
+			font = Renderer.FontOrDefault(info.Font);
 
 			debugVis = self.World.WorldActor.TraitOrDefault<DebugVisualizations>();
 		}

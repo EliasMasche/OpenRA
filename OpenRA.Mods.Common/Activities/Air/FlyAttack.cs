@@ -12,12 +12,14 @@
 using System.Collections.Generic;
 using System.Linq;
 using OpenRA.Activities;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Traits;
 using OpenRA.Primitives;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Activities
 {
+	[SaveableActivity]
 	public class FlyAttack : Activity, IActivityNotifyStanceChanged
 	{
 		readonly Aircraft aircraft;
@@ -70,6 +72,48 @@ namespace OpenRA.Mods.Common.Activities
 					lastVisibleTargetTypes = target.FrozenActor.TargetTypes;
 				}
 			}
+		}
+
+		internal FlyAttack(Actor self, SnapshotReader r, MiniYaml yaml)
+		{
+			ChildHasPriority = false;
+			aircraft = self.Trait<Aircraft>();
+			attackAircraft = self.Trait<AttackAircraft>();
+			rearmable = self.TraitOrDefault<Rearmable>();
+			strafeDistance = attackAircraft.Info.StrafeRunLength;
+
+			var n = yaml.ToDictionary();
+			source = FieldLoader.GetValue<AttackSource>("Source", n["Source"].Value);
+			forceAttack = FieldLoader.GetValue<bool>("ForceAttack", n["ForceAttack"].Value);
+			hasTicked = FieldLoader.GetValue<bool>("HasTicked", n["HasTicked"].Value);
+			returnToBase = FieldLoader.GetValue<bool>("ReturnToBase", n["ReturnToBase"].Value);
+			useLastVisibleTarget = LastVisibleTargetState.UseLastVisible(n);
+			lastVisibleMaximumRange = LastVisibleTargetState.MaximumRange(n);
+			lastVisibleOwner = LastVisibleTargetState.Owner(n, r);
+			lastVisibleTargetTypes = LastVisibleTargetState.TargetTypes(n);
+
+			var color = n["TargetLineColor"].Value;
+			if (!string.IsNullOrEmpty(color))
+				targetLineColor = FieldLoader.GetValue<Color>("TargetLineColor", color);
+
+			r.DeferTarget(n[LastVisibleTargetState.TargetKey].Value, t => target = t);
+			r.DeferTarget(n[LastVisibleTargetState.LastVisibleTargetKey].Value, t => lastVisibleTarget = t);
+		}
+
+		public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+		{
+			var nodes = new List<MiniYamlNode>
+			{
+				new("Source", FieldSaver.FormatValue(source)),
+				new("ForceAttack", FieldSaver.FormatValue(forceAttack)),
+				new("HasTicked", FieldSaver.FormatValue(hasTicked)),
+				new("ReturnToBase", FieldSaver.FormatValue(returnToBase)),
+				new("TargetLineColor", targetLineColor.HasValue ? FieldSaver.FormatValue(targetLineColor.Value) : "")
+			};
+
+			LastVisibleTargetState.Save(nodes, w, target, lastVisibleTarget, useLastVisibleTarget,
+				WDist.Zero, lastVisibleMaximumRange, lastVisibleOwner, lastVisibleTargetTypes);
+			return nodes;
 		}
 
 		public override bool Tick(Actor self)
@@ -216,6 +260,7 @@ namespace OpenRA.Mods.Common.Activities
 		}
 	}
 
+	[SaveableActivity]
 	sealed class FlyAttackRun : Activity
 	{
 		readonly AttackAircraft attack;
@@ -231,6 +276,28 @@ namespace OpenRA.Mods.Common.Activities
 			target = t;
 			this.exitRange = exitRange;
 			this.attack = attack;
+		}
+
+		internal FlyAttackRun(Actor self, SnapshotReader r, MiniYaml yaml)
+		{
+			ChildHasPriority = false;
+			attack = self.Trait<AttackAircraft>();
+
+			var n = yaml.ToDictionary();
+			exitRange = FieldLoader.GetValue<WDist>("ExitRange", n["ExitRange"].Value);
+			targetIsVisibleActor = FieldLoader.GetValue<bool>("TargetIsVisibleActor", n["TargetIsVisibleActor"].Value);
+
+			r.DeferTarget(n["Target"].Value, t => target = t);
+		}
+
+		public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+		{
+			return
+			[
+				new("Target", w.TargetRef(target)),
+				new("ExitRange", FieldSaver.FormatValue(exitRange)),
+				new("TargetIsVisibleActor", FieldSaver.FormatValue(targetIsVisibleActor))
+			];
 		}
 
 		protected override void OnFirstRun(Actor self)
@@ -265,6 +332,7 @@ namespace OpenRA.Mods.Common.Activities
 		}
 	}
 
+	[SaveableActivity]
 	sealed class StrafeAttackRun : Activity
 	{
 		readonly AttackAircraft attackAircraft;
@@ -281,6 +349,27 @@ namespace OpenRA.Mods.Common.Activities
 			this.attackAircraft = attackAircraft;
 			this.aircraft = aircraft;
 			this.exitRange = exitRange;
+		}
+
+		internal StrafeAttackRun(Actor self, SnapshotReader r, MiniYaml yaml)
+		{
+			ChildHasPriority = false;
+			attackAircraft = self.Trait<AttackAircraft>();
+			aircraft = self.Trait<Aircraft>();
+
+			var n = yaml.ToDictionary();
+			exitRange = FieldLoader.GetValue<WDist>("ExitRange", n["ExitRange"].Value);
+
+			r.DeferTarget(n["Target"].Value, t => target = t);
+		}
+
+		public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+		{
+			return
+			[
+				new("Target", w.TargetRef(target)),
+				new("ExitRange", FieldSaver.FormatValue(exitRange))
+			];
 		}
 
 		protected override void OnFirstRun(Actor self)

@@ -174,7 +174,7 @@ namespace OpenRA.Test
 				new TestCaseData("test") { TypeArgs = [typeof(CPos[])] },
 				new TestCaseData("1") { TypeArgs = [typeof(CPos[])] },
 				new TestCaseData("1,test") { TypeArgs = [typeof(CPos[])] },
-				new TestCaseData("1,2,3") { TypeArgs = [typeof(CPos[])] },
+				new TestCaseData("1,2,3,4,5") { TypeArgs = [typeof(CPos[])] },
 				new TestCaseData(null) { TypeArgs = [typeof(CVec)] },
 				new TestCaseData("test") { TypeArgs = [typeof(CVec)] },
 				new TestCaseData("1") { TypeArgs = [typeof(CVec)] },
@@ -387,6 +387,14 @@ namespace OpenRA.Test
 			var actual = FieldLoader.GetValue<CPos[]>("field", " 1 , 2 , 3 , 4 , 5 , 6 , , ");
 
 			Assert.That(actual, Is.EqualTo(new CPos[] { new(1, 2), new(3, 4), new(5, 6) }));
+		}
+
+		[Test]
+		public void GetValue_CPosArrayOfLayeredCells()
+		{
+			var actual = FieldLoader.GetValue<CPos[]>("field", "1,2, 3,4,2, 5,6");
+
+			Assert.That(actual, Is.EqualTo(new CPos[] { new(1, 2), new(3, 4, 2), new(5, 6) }));
 		}
 
 		[Test]

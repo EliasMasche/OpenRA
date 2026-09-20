@@ -9,7 +9,9 @@
  */
 #endregion
 
+using System.Collections.Generic;
 using System.Linq;
+using OpenRA.GameSaves;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Traits
@@ -24,8 +26,10 @@ namespace OpenRA.Mods.Common.Traits
 		public override object Create(ActorInitializer init) { return new SeedsResource(init.Self, this); }
 	}
 
-	sealed class SeedsResource : ConditionalTrait<SeedsResourceInfo>, ITick, ISeedableResource
+	sealed class SeedsResource : ConditionalTrait<SeedsResourceInfo>, ITick, ISeedableResource, ISaveState
 	{
+		const string TicksKey = "Ticks";
+
 		readonly SeedsResourceInfo info;
 		readonly IResourceLayer resourceLayer;
 
@@ -37,6 +41,20 @@ namespace OpenRA.Mods.Common.Traits
 		}
 
 		int ticks;
+
+		TraitInfo ISaveState.SaveStateInfo => info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
+		{
+			return [new(TicksKey, FieldSaver.FormatValue(ticks))];
+		}
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
+		{
+			var node = data.NodeWithKeyOrDefault(TicksKey);
+			if (node != null)
+				ticks = FieldLoader.GetValue<int>(TicksKey, node.Value.Value);
+		}
 
 		void ITick.Tick(Actor self)
 		{

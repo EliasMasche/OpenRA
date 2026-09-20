@@ -11,13 +11,16 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using OpenRA.Activities;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Traits;
 using OpenRA.Primitives;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Activities
 {
+	[SaveableActivity]
 	public class Fly : Activity
 	{
 		readonly Aircraft aircraft;
@@ -58,6 +61,44 @@ namespace OpenRA.Mods.Common.Activities
 		{
 			this.maxRange = maxRange;
 			this.minRange = minRange;
+		}
+
+		internal Fly(Actor self, SnapshotReader r, MiniYaml yaml)
+		{
+			aircraft = self.Trait<Aircraft>();
+
+			var n = yaml.ToDictionary();
+			nearEnough = FieldLoader.GetValue<WDist>("NearEnough", n["NearEnough"].Value);
+			minRange = FieldLoader.GetValue<WDist>("MinRange", n["MinRange"].Value);
+			maxRange = FieldLoader.GetValue<WDist>("MaxRange", n["MaxRange"].Value);
+			useLastVisibleTarget = FieldLoader.GetValue<bool>("UseLastVisibleTarget", n["UseLastVisibleTarget"].Value);
+
+			var positions = n["PreviousPositions"].Value;
+			if (!string.IsNullOrEmpty(positions))
+				foreach (var pos in FieldLoader.GetValue<WPos[]>("PreviousPositions", positions))
+					previousPositions.Add(pos);
+
+			var color = n["TargetLineColor"].Value;
+			if (!string.IsNullOrEmpty(color))
+				targetLineColor = FieldLoader.GetValue<Color>("TargetLineColor", color);
+
+			r.DeferTarget(n["Target"].Value, t => target = t);
+			r.DeferTarget(n["LastVisibleTarget"].Value, t => lastVisibleTarget = t);
+		}
+
+		public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+		{
+			return
+			[
+				new("Target", w.TargetRef(target)),
+				new("LastVisibleTarget", w.TargetRef(lastVisibleTarget)),
+				new("UseLastVisibleTarget", FieldSaver.FormatValue(useLastVisibleTarget)),
+				new("NearEnough", FieldSaver.FormatValue(nearEnough)),
+				new("MinRange", FieldSaver.FormatValue(minRange)),
+				new("MaxRange", FieldSaver.FormatValue(maxRange)),
+				new("PreviousPositions", FieldSaver.FormatValue(previousPositions.ToArray())),
+				new("TargetLineColor", targetLineColor.HasValue ? FieldSaver.FormatValue(targetLineColor.Value) : "")
+			];
 		}
 
 		public static void FlyTick(Actor self, Aircraft aircraft, WAngle desiredFacing, WDist desiredAltitude, in WVec moveOverride, bool idleTurn = false)

@@ -12,11 +12,13 @@
 using System.Collections.Generic;
 using System.Linq;
 using OpenRA.Activities;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Traits;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Activities
 {
+	[SaveableActivity]
 	public class UnloadCargo : Activity
 	{
 		readonly Actor self;
@@ -48,6 +50,37 @@ namespace OpenRA.Mods.Common.Activities
 			mobile = self.TraitOrDefault<Mobile>();
 			this.destination = destination;
 			this.unloadRange = unloadRange;
+		}
+
+		internal UnloadCargo(Actor self, SnapshotReader r, MiniYaml yaml)
+		{
+			this.self = self;
+			cargo = self.Trait<Cargo>();
+			notifiers = self.TraitsImplementing<INotifyUnloadCargo>().ToArray();
+			aircraft = self.TraitOrDefault<Aircraft>();
+			mobile = self.TraitOrDefault<Mobile>();
+
+			var n = yaml.ToDictionary();
+			unloadAll = FieldLoader.GetValue<bool>("UnloadAll", n["UnloadAll"].Value);
+			unloadRange = FieldLoader.GetValue<WDist>("UnloadRange", n["UnloadRange"].Value);
+			assignTargetOnFirstRun = FieldLoader.GetValue<bool>("AssignTargetOnFirstRun", n["AssignTargetOnFirstRun"].Value);
+			delayBetweenUnloads = FieldLoader.GetValue<int>("DelayBetweenUnloads", n["DelayBetweenUnloads"].Value);
+			takeOffAfterUnload = FieldLoader.GetValue<bool>("TakeOffAfterUnload", n["TakeOffAfterUnload"].Value);
+
+			r.DeferTarget(n["Destination"].Value, t => destination = t);
+		}
+
+		public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+		{
+			return
+			[
+				new("Destination", w.TargetRef(destination)),
+				new("UnloadAll", FieldSaver.FormatValue(unloadAll)),
+				new("UnloadRange", FieldSaver.FormatValue(unloadRange)),
+				new("AssignTargetOnFirstRun", FieldSaver.FormatValue(assignTargetOnFirstRun)),
+				new("DelayBetweenUnloads", FieldSaver.FormatValue(delayBetweenUnloads)),
+				new("TakeOffAfterUnload", FieldSaver.FormatValue(takeOffAfterUnload))
+			];
 		}
 
 		public (CPos Cell, SubCell SubCell)? ChooseExitSubCell(Actor passenger)

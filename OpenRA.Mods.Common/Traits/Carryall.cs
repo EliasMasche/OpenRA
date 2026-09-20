@@ -12,6 +12,7 @@
 using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Linq;
+using OpenRA.GameSaves;
 using OpenRA.Graphics;
 using OpenRA.Mods.Common.Activities;
 using OpenRA.Mods.Common.Graphics;
@@ -86,7 +87,7 @@ namespace OpenRA.Mods.Common.Traits
 
 	public class Carryall : ConditionalTrait<CarryallInfo>, INotifyKilled, ISync, ITick, IRender,
 		INotifyActorDisposing, IIssueOrder, IResolveOrder, IOrderVoice, IIssueDeployOrder,
-		IAircraftCenterPositionOffset, IOverrideAircraftLanding
+		IAircraftCenterPositionOffset, IOverrideAircraftLanding, ISaveState, INotifyStateRestored
 	{
 		public enum CarryallState
 		{
@@ -158,7 +159,7 @@ namespace OpenRA.Mods.Common.Traits
 
 		void INotifyActorDisposing.Disposing(Actor self)
 		{
-			if (State == CarryallState.Carrying)
+			if (State == CarryallState.Carrying && Carryable != null)
 			{
 				Carryable.Dispose();
 				Carryable = null;
@@ -169,7 +170,7 @@ namespace OpenRA.Mods.Common.Traits
 
 		void INotifyKilled.Killed(Actor self, AttackInfo e)
 		{
-			if (State == CarryallState.Carrying)
+			if (State == CarryallState.Carrying && Carryable != null)
 			{
 				if (!Carryable.IsDead)
 				{
@@ -461,6 +462,31 @@ namespace OpenRA.Mods.Common.Traits
 
 				return true;
 			}
+		}
+
+		TraitInfo ISaveState.SaveStateInfo => Info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
+		{
+			return
+			[
+				new("Carryable", w.ActorRef(Carryable)),
+				new("State", FieldSaver.FormatValue(State))
+			];
+		}
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
+		{
+			var nodes = data.ToDictionary();
+			State = FieldLoader.GetValue<CarryallState>("State", nodes["State"].Value);
+
+			r.DeferActor(nodes["Carryable"].Value, a => Carryable = a);
+		}
+
+		void INotifyStateRestored.StateRestored(Actor self)
+		{
+			if (Carryable != null)
+				AttachCarryable(self, Carryable);
 		}
 	}
 }

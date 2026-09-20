@@ -12,6 +12,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Graphics;
 using OpenRA.Primitives;
 using OpenRA.Traits;
@@ -127,8 +128,14 @@ namespace OpenRA.Mods.Common.Traits
 		public override object Create(ActorInitializer init) { return new Turreted(init, this); }
 	}
 
-	public class Turreted : PausableConditionalTrait<TurretedInfo>, ITick, IDeathActorInitModifier, IActorPreviewInitModifier, ISync
+	public class Turreted : PausableConditionalTrait<TurretedInfo>, ITick, IDeathActorInitModifier, IActorPreviewInitModifier, ISync,
+		ISaveState
 	{
+		const string FacingKey = "Facing";
+		const string DesiredDirectionKey = "DesiredDirection";
+		const string RealignTickKey = "RealignTick";
+		const string RealignDesiredKey = "RealignDesired";
+
 		AttackTurreted attack;
 		IFacing facing;
 		BodyOrientation body;
@@ -310,6 +317,39 @@ namespace OpenRA.Mods.Common.Traits
 		{
 			if (attack != null && attack.IsAiming)
 				attack.OnStopOrder(self);
+		}
+
+		TraitInfo ISaveState.SaveStateInfo => Info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w) { return SaveState(w); }
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r) { LoadState(data); }
+
+		protected virtual List<MiniYamlNode> SaveState(SnapshotWriter w)
+		{
+			return
+			[
+				new(FacingKey, FieldSaver.FormatValue(LocalOrientation.Yaw)),
+				new(DesiredDirectionKey, FieldSaver.FormatValue(desiredDirection)),
+				new(RealignTickKey, FieldSaver.FormatValue(realignTick)),
+				new(RealignDesiredKey, FieldSaver.FormatValue(realignDesired))
+			];
+		}
+
+		protected virtual void LoadState(MiniYaml data)
+		{
+			var nodes = data.ToDictionary();
+			if (nodes.TryGetValue(FacingKey, out var f))
+				LocalOrientation = WRot.FromYaw(FieldLoader.GetValue<WAngle>(FacingKey, f.Value));
+
+			if (nodes.TryGetValue(DesiredDirectionKey, out var d))
+				desiredDirection = FieldLoader.GetValue<WVec>(DesiredDirectionKey, d.Value);
+
+			if (nodes.TryGetValue(RealignTickKey, out var t))
+				realignTick = FieldLoader.GetValue<int>(RealignTickKey, t.Value);
+
+			if (nodes.TryGetValue(RealignDesiredKey, out var rd))
+				realignDesired = FieldLoader.GetValue<bool>(RealignDesiredKey, rd.Value);
 		}
 	}
 

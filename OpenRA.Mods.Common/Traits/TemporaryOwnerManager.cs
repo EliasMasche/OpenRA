@@ -9,6 +9,8 @@
  */
 #endregion
 
+using System.Collections.Generic;
+using OpenRA.GameSaves;
 using OpenRA.Primitives;
 using OpenRA.Traits;
 
@@ -23,8 +25,13 @@ namespace OpenRA.Mods.Common.Traits
 		public override object Create(ActorInitializer init) { return new TemporaryOwnerManager(init.Self, this); }
 	}
 
-	public class TemporaryOwnerManager : ISelectionBar, ITick, ISync, INotifyOwnerChanged
+	public class TemporaryOwnerManager : ISelectionBar, ITick, ISync, INotifyOwnerChanged, ISaveState
 	{
+		const string RemainingKey = "Remaining";
+		const string DurationKey = "Duration";
+		const string OriginalOwnerKey = "OriginalOwner";
+		const string ChangingOwnerKey = "ChangingOwner";
+
 		readonly TemporaryOwnerManagerInfo info;
 
 		Player originalOwner;
@@ -82,5 +89,34 @@ namespace OpenRA.Mods.Common.Traits
 		}
 
 		bool ISelectionBar.DisplayWhenEmpty => false;
+
+		TraitInfo ISaveState.SaveStateInfo => info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
+		{
+			return
+			[
+				new(RemainingKey, FieldSaver.FormatValue(remaining)),
+				new(DurationKey, FieldSaver.FormatValue(duration)),
+				new(OriginalOwnerKey, w.PlayerRef(originalOwner)),
+				new(ChangingOwnerKey, w.PlayerRef(changingOwner))
+			];
+		}
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
+		{
+			var nodes = data.ToDictionary();
+			if (nodes.TryGetValue(RemainingKey, out var rem))
+				remaining = FieldLoader.GetValue<int>(RemainingKey, rem.Value);
+
+			if (nodes.TryGetValue(DurationKey, out var dur))
+				duration = FieldLoader.GetValue<int>(DurationKey, dur.Value);
+
+			if (nodes.TryGetValue(OriginalOwnerKey, out var original))
+				originalOwner = r.ResolvePlayer(original.Value);
+
+			if (nodes.TryGetValue(ChangingOwnerKey, out var changing))
+				changingOwner = r.ResolvePlayer(changing.Value);
+		}
 	}
 }

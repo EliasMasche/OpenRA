@@ -9,6 +9,8 @@
  */
 #endregion
 
+using System.Collections.Generic;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Cnc.Activities;
 using OpenRA.Mods.Common;
 using OpenRA.Mods.Common.Activities;
@@ -46,8 +48,14 @@ namespace OpenRA.Mods.Cnc.Traits
 	}
 
 	public class Chronoshiftable : ConditionalTrait<ChronoshiftableInfo>, ITick, ISync, ISelectionBar,
-		IDeathActorInitModifier, ITransformActorInitModifier
+		IDeathActorInitModifier, ITransformActorInitModifier, ISaveState
 	{
+		const string OriginKey = "Origin";
+		const string ReturnTicksKey = "ReturnTicks";
+		const string DurationKey = "Duration";
+		const string KillCargoKey = "KillCargo";
+		const string ChronosphereKey = "Chronosphere";
+
 		readonly Actor self;
 		Actor chronosphere;
 		bool killCargo;
@@ -180,6 +188,40 @@ namespace OpenRA.Mods.Cnc.Traits
 
 		void IDeathActorInitModifier.ModifyDeathActorInit(Actor self, TypeDictionary init) { ModifyActorInit(init); }
 		void ITransformActorInitModifier.ModifyTransformActorInit(Actor self, TypeDictionary init) { ModifyActorInit(init); }
+
+		TraitInfo ISaveState.SaveStateInfo => Info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
+		{
+			return
+			[
+				new(OriginKey, FieldSaver.FormatValue(Origin)),
+				new(ReturnTicksKey, FieldSaver.FormatValue(ReturnTicks)),
+				new(DurationKey, FieldSaver.FormatValue(duration)),
+				new(KillCargoKey, FieldSaver.FormatValue(killCargo)),
+				new(ChronosphereKey, w.ActorRef(chronosphere))
+			];
+		}
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
+		{
+			var nodes = data.ToDictionary();
+
+			if (nodes.TryGetValue(OriginKey, out var origin))
+				Origin = FieldLoader.GetValue<CPos>(OriginKey, origin.Value);
+
+			if (nodes.TryGetValue(ReturnTicksKey, out var returnTicks))
+				ReturnTicks = FieldLoader.GetValue<int>(ReturnTicksKey, returnTicks.Value);
+
+			if (nodes.TryGetValue(DurationKey, out var d))
+				duration = FieldLoader.GetValue<int>(DurationKey, d.Value);
+
+			if (nodes.TryGetValue(KillCargoKey, out var kill))
+				killCargo = FieldLoader.GetValue<bool>(KillCargoKey, kill.Value);
+
+			if (nodes.TryGetValue(ChronosphereKey, out var sphere))
+				r.DeferActor(sphere.Value, a => chronosphere = a);
+		}
 	}
 
 	public class ChronoshiftReturnInit(int ticks, int duration, CPos origin, Actor chronosphere) : CompositeActorInit, ISingleInstanceInit

@@ -11,17 +11,32 @@
 
 using System.Collections.Generic;
 using OpenRA.Activities;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Activities;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Traits
 {
+	[SaveableActivity]
 	public class Nudge : Activity
 	{
-		readonly Actor nudger;
+		const string NudgerKey = "Nudger";
+
+		Actor nudger;
+
 		public Nudge(Actor nudger)
 		{
 			this.nudger = nudger;
+		}
+
+		internal Nudge(Actor _, SnapshotReader r, MiniYaml yaml)
+		{
+			r.DeferActor(yaml.NodeWithKeyOrDefault(NudgerKey).Value.Value, a => nudger = a);
+		}
+
+		public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+		{
+			return [new(NudgerKey, w.ActorRef(nudger))];
 		}
 
 		protected override void OnFirstRun(Actor self)

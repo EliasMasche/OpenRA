@@ -180,7 +180,7 @@ namespace OpenRA.Mods.Common.Traits
 				if (!p.Playable)
 					continue;
 
-				if (p == world.LocalPlayer)
+				if (wr != null && p == world.LocalPlayer)
 					wr.Viewport.Center(world.Map.CenterOfCell(p.HomeLocation));
 
 				var cells = Shroud.ProjectedCellsInRange(world.Map, p.HomeLocation, info.InitialExploreRange)

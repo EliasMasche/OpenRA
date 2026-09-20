@@ -9,14 +9,19 @@
  */
 #endregion
 
+using System.Collections.Generic;
 using OpenRA.Activities;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Traits;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Activities
 {
+	[SaveableActivity]
 	public class Turn : Activity
 	{
+		const string DesiredFacingKey = "DesiredFacing";
+
 		readonly Mobile mobile;
 		readonly IFacing facing;
 		readonly WAngle desiredFacing;
@@ -26,6 +31,13 @@ namespace OpenRA.Mods.Common.Activities
 			mobile = self.TraitOrDefault<Mobile>();
 			facing = self.Trait<IFacing>();
 			this.desiredFacing = desiredFacing;
+		}
+
+		protected Turn(Actor self, SnapshotReader r, MiniYaml yaml)
+		{
+			mobile = self.TraitOrDefault<Mobile>();
+			facing = self.Trait<IFacing>();
+			desiredFacing = FieldLoader.GetValue<WAngle>(DesiredFacingKey, yaml.NodeWithKeyOrDefault(DesiredFacingKey)?.Value.Value);
 		}
 
 		public override bool Tick(Actor self)
@@ -42,6 +54,11 @@ namespace OpenRA.Mods.Common.Activities
 			facing.Facing = Util.TickFacing(facing.Facing, desiredFacing, facing.TurnSpeed);
 
 			return false;
+		}
+
+		public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+		{
+			return [new(DesiredFacingKey, FieldSaver.FormatValue(desiredFacing))];
 		}
 	}
 }

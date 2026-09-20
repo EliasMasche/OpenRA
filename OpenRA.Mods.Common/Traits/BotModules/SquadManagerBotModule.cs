@@ -13,6 +13,7 @@ using System;
 using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Linq;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Traits.BotModules.Squads;
 using OpenRA.Primitives;
 using OpenRA.Traits;
@@ -105,7 +106,7 @@ namespace OpenRA.Mods.Common.Traits
 	}
 
 	public class SquadManagerBotModule : ConditionalTrait<SquadManagerBotModuleInfo>,
-		IBotEnabled, IBotTick, IBotRespondToAttack, IBotPositionsUpdated, IGameSaveTraitData, INotifyActorDisposing
+		IBotEnabled, IBotTick, IBotRespondToAttack, IBotPositionsUpdated, ISaveState, INotifyStateRestored, INotifyActorDisposing
 	{
 		public CPos GetRandomBaseCenter()
 		{
@@ -131,6 +132,9 @@ namespace OpenRA.Mods.Common.Traits
 		readonly ActorIndex.NamesAndTrait<BuildingInfo> constructionYardBuildings;
 
 		IBot bot;
+
+		MiniYaml savedSquads;
+
 		IBotPositionsUpdated[] notifyPositionsUpdated;
 		IBotNotifyIdleBaseUnits[] notifyIdleBaseUnits;
 
@@ -558,7 +562,9 @@ namespace OpenRA.Mods.Common.Traits
 			protectFrom = e.Attacker;
 		}
 
-		List<MiniYamlNode> IGameSaveTraitData.IssueTraitData(Actor self)
+		TraitInfo ISaveState.SaveStateInfo => Info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
 		{
 			if (IsTraitDisabled)
 				return null;
@@ -582,7 +588,7 @@ namespace OpenRA.Mods.Common.Traits
 			];
 		}
 
-		void IGameSaveTraitData.ResolveTraitData(Actor self, MiniYaml data)
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
 		{
 			if (self.World.IsReplay)
 				return;
@@ -592,18 +598,28 @@ namespace OpenRA.Mods.Common.Traits
 			if (nodes.TryGetValue("InitialBaseCenter", out var initialBaseCenterNode))
 				initialBaseCenter = FieldLoader.GetValue<CPos>("InitialBaseCenter", initialBaseCenterNode.Value);
 
+			savedSquads = nodes.GetValueOrDefault("Squads");
+
 			if (nodes.TryGetValue("UnitsHangingAroundTheBase", out var unitsHangingAroundTheBaseNode))
 			{
 				unitsHangingAroundTheBase.Clear();
-				unitsHangingAroundTheBase.AddRange(FieldLoader.GetValue<uint[]>("UnitsHangingAroundTheBase", unitsHangingAroundTheBaseNode.Value)
-					.Select(self.World.GetActorById).Where(a => a != null));
+				foreach (var actorID in FieldLoader.GetValue<uint[]>("UnitsHangingAroundTheBase", unitsHangingAroundTheBaseNode.Value))
+					r.DeferActor(SnapshotRefs.FormatActorID(actorID), a =>
+					{
+						if (a != null)
+							unitsHangingAroundTheBase.Add(a);
+					});
 			}
 
 			if (nodes.TryGetValue("ActiveUnits", out var activeUnitsNode))
 			{
 				activeUnits.Clear();
-				activeUnits.UnionWith(FieldLoader.GetValue<uint[]>("ActiveUnits", activeUnitsNode.Value)
-					.Select(self.World.GetActorById).Where(a => a != null));
+				foreach (var actorID in FieldLoader.GetValue<uint[]>("ActiveUnits", activeUnitsNode.Value))
+					r.DeferActor(SnapshotRefs.FormatActorID(actorID), a =>
+					{
+						if (a != null)
+							activeUnits.Add(a);
+					});
 			}
 
 			if (nodes.TryGetValue("RushTicks", out var rushTicksNode))
@@ -617,13 +633,18 @@ namespace OpenRA.Mods.Common.Traits
 
 			if (nodes.TryGetValue("MinAttackForceDelayTicks", out var minAttackForceDelayTicksNode))
 				minAttackForceDelayTicks = FieldLoader.GetValue<int>("MinAttackForceDelayTicks", minAttackForceDelayTicksNode.Value);
+		}
 
-			if (nodes.TryGetValue("Squads", out var squadsNode))
-			{
-				Squads.Clear();
-				foreach (var n in squadsNode.Nodes)
-					Squads.Add(Squad.Deserialize(bot, this, n.Value));
-			}
+		void INotifyStateRestored.StateRestored(Actor self)
+		{
+			if (savedSquads == null)
+				return;
+
+			Squads.Clear();
+			foreach (var n in savedSquads.Nodes)
+				Squads.Add(Squad.Deserialize(bot, this, n.Value));
+
+			savedSquads = null;
 		}
 
 		void INotifyActorDisposing.Disposing(Actor self)

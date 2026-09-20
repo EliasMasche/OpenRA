@@ -12,12 +12,14 @@
 using System;
 using System.Collections.Generic;
 using OpenRA.Activities;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Pathfinder;
 using OpenRA.Mods.Common.Traits;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Activities
 {
+	[SaveableActivity]
 	public class FindAndDeliverResources : Activity
 	{
 		readonly Harvester harv;
@@ -45,6 +47,45 @@ namespace OpenRA.Mods.Common.Activities
 			moveCooldownHelper = new MoveCooldownHelper(self.World, mobile) { RetryIfDestinationBlocked = true };
 			if (orderLocation.HasValue)
 				this.orderLocation = orderLocation.Value;
+		}
+
+		internal FindAndDeliverResources(Actor self, SnapshotReader _, MiniYaml yaml)
+		{
+			harv = self.Trait<Harvester>();
+			harvInfo = self.Info.TraitInfo<HarvesterInfo>();
+			dockClient = self.Trait<DockClientManager>();
+			mobile = self.Trait<Mobile>();
+			claimLayer = self.World.WorldActor.Trait<ResourceClaimLayer>();
+			moveCooldownHelper = new MoveCooldownHelper(self.World, mobile) { RetryIfDestinationBlocked = true };
+
+			var n = yaml.ToDictionary();
+			hasDeliveredLoad = FieldLoader.GetValue<bool>("HasDeliveredLoad", n["HasDeliveredLoad"].Value);
+			hasHarvestedCell = FieldLoader.GetValue<bool>("HasHarvestedCell", n["HasHarvestedCell"].Value);
+			hasWaited = FieldLoader.GetValue<bool>("HasWaited", n["HasWaited"].Value);
+			LastSearchFailed = FieldLoader.GetValue<bool>("LastSearchFailed", n["LastSearchFailed"].Value);
+			moveCooldownHelper.LoadState(n["Cooldown"]);
+
+			var order = n["OrderLocation"].Value;
+			if (!string.IsNullOrEmpty(order))
+				orderLocation = FieldLoader.GetValue<CPos>("OrderLocation", order);
+
+			var last = n["LastHarvestedCell"].Value;
+			if (!string.IsNullOrEmpty(last))
+				lastHarvestedCell = FieldLoader.GetValue<CPos>("LastHarvestedCell", last);
+		}
+
+		public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+		{
+			return
+			[
+				new("OrderLocation", orderLocation.HasValue ? FieldSaver.FormatValue(orderLocation.Value) : ""),
+				new("LastHarvestedCell", lastHarvestedCell.HasValue ? FieldSaver.FormatValue(lastHarvestedCell.Value) : ""),
+				new("HasDeliveredLoad", FieldSaver.FormatValue(hasDeliveredLoad)),
+				new("HasHarvestedCell", FieldSaver.FormatValue(hasHarvestedCell)),
+				new("HasWaited", FieldSaver.FormatValue(hasWaited)),
+				new("LastSearchFailed", FieldSaver.FormatValue(LastSearchFailed)),
+				new("Cooldown", new MiniYaml("", moveCooldownHelper.SaveState()))
+			];
 		}
 
 		protected override void OnFirstRun(Actor self)

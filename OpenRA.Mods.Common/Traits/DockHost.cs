@@ -10,6 +10,7 @@
 #endregion
 using System.Collections.Generic;
 using OpenRA.Activities;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Activities;
 using OpenRA.Primitives;
 using OpenRA.Traits;
@@ -49,8 +50,12 @@ namespace OpenRA.Mods.Common.Traits
 	}
 
 	public class DockHost : ConditionalTrait<DockHostInfo>,
-		IDockHost, ITick, INotifySold, INotifyCapture, INotifyOwnerChanged, ISync, INotifyKilled, INotifyActorDisposing
+		IDockHost, ITick, INotifySold, INotifyCapture, INotifyOwnerChanged, ISync, INotifyKilled, INotifyActorDisposing,
+		ISaveState
 	{
+		const string PreventDockKey = "PreventDock";
+		const string DockedClientKey = "DockedClient";
+
 		readonly Actor self;
 
 		public BitSet<DockType> GetDockType => Info.Type;
@@ -181,5 +186,30 @@ namespace OpenRA.Mods.Common.Traits
 		void INotifyKilled.Killed(Actor self, AttackInfo e) { UnreserveAll(); }
 
 		void INotifyActorDisposing.Disposing(Actor self) { preventDock = true; UnreserveAll(); }
+
+		TraitInfo ISaveState.SaveStateInfo => Info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
+		{
+			return
+			[
+				new(PreventDockKey, FieldSaver.FormatValue(preventDock)),
+				new(DockedClientKey, w.ActorRef(dockedClientActor))
+			];
+		}
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
+		{
+			var nodes = data.ToDictionary();
+			if (nodes.TryGetValue(PreventDockKey, out var prevent))
+				preventDock = FieldLoader.GetValue<bool>(PreventDockKey, prevent.Value);
+
+			if (nodes.TryGetValue(DockedClientKey, out var client))
+				r.DeferActor(client.Value, a =>
+				{
+					dockedClientActor = a;
+					dockedClient = a?.TraitOrDefault<DockClientManager>();
+				});
+		}
 	}
 }

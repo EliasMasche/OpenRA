@@ -10,7 +10,9 @@
 #endregion
 
 using System.Collections.Frozen;
+using System.Collections.Generic;
 using System.Linq;
+using OpenRA.GameSaves;
 using OpenRA.Primitives;
 using OpenRA.Traits;
 
@@ -38,8 +40,11 @@ namespace OpenRA.Mods.Common.Traits
 		public override object Create(ActorInitializer init) { return new GrantConditionOnProduction(this); }
 	}
 
-	public class GrantConditionOnProduction : INotifyProduction, ITick, ISync, ISelectionBar
+	public class GrantConditionOnProduction : INotifyProduction, ITick, ISync, ISelectionBar, ISaveState
 	{
+		const string TicksKey = "Ticks";
+		const string ActiveKey = "Active";
+
 		readonly GrantConditionOnProductionInfo info;
 
 		int token = Actor.InvalidConditionToken;
@@ -80,5 +85,27 @@ namespace OpenRA.Mods.Common.Traits
 
 		Color ISelectionBar.GetColor() { return info.SelectionBarColor; }
 		bool ISelectionBar.DisplayWhenEmpty => false;
+
+		TraitInfo ISaveState.SaveStateInfo => info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
+		{
+			return
+			[
+				new(TicksKey, FieldSaver.FormatValue(ticks)),
+				new(ActiveKey, FieldSaver.FormatValue(token != Actor.InvalidConditionToken))
+			];
+		}
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
+		{
+			var nodes = data.ToDictionary();
+			if (nodes.TryGetValue(TicksKey, out var t))
+				ticks = FieldLoader.GetValue<int>(TicksKey, t.Value);
+
+			if (nodes.TryGetValue(ActiveKey, out var a) &&
+				FieldLoader.GetValue<bool>(ActiveKey, a.Value) && token == Actor.InvalidConditionToken)
+				token = self.GrantCondition(info.Condition);
+		}
 	}
 }

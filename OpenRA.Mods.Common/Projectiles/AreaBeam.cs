@@ -14,10 +14,12 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
 using OpenRA.GameRules;
+using OpenRA.GameSaves;
 using OpenRA.Graphics;
 using OpenRA.Mods.Common.Graphics;
 using OpenRA.Mods.Common.Traits;
 using OpenRA.Primitives;
+using OpenRA.Scripting;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Projectiles
@@ -86,11 +88,27 @@ namespace OpenRA.Mods.Common.Projectiles
 		}
 	}
 
-	public class AreaBeam : IProjectile, ISync
+	[SaveableEffect]
+	public class AreaBeam : IProjectile, ISync, ISaveableEffect, IProjectileScriptInfo
 	{
+		const string ArgsKey = "Args";
+		const string HeadPosKey = "HeadPos";
+		const string TailPosKey = "TailPos";
+		const string TargetKey = "Target";
+		const string SpeedKey = "Speed";
+		const string LengthKey = "Length";
+		const string FacingKey = "TowardsTargetFacing";
+		const string HeadTicksKey = "HeadTicks";
+		const string TailTicksKey = "TailTicks";
+		const string HeadTravellingKey = "IsHeadTravelling";
+		const string TailTravellingKey = "IsTailTravelling";
+		const string ContinueTrackingKey = "ContinueTracking";
+		const string ColorKey = "Color";
+		const string WeaponRangeKey = "WeaponRange";
+
 		readonly AreaBeamInfo info;
 		readonly ProjectileArgs args;
-		readonly AttackBase actorAttackBase;
+		AttackBase actorAttackBase;
 		readonly Color color;
 		readonly WDist speed;
 		readonly WDist weaponRange;
@@ -121,7 +139,7 @@ namespace OpenRA.Mods.Common.Projectiles
 			this.color = color;
 			actorAttackBase = args.SourceActor.Trait<AttackBase>();
 
-			var world = args.SourceActor.World;
+			var world = args.World;
 			if (info.Speed.Length > 1)
 				speed = new WDist(world.SharedRandom.Next(info.Speed[0].Length, info.Speed[1].Length));
 			else
@@ -161,12 +179,64 @@ namespace OpenRA.Mods.Common.Projectiles
 			weaponRange = new WDist(Util.ApplyPercentageModifiers(args.Weapon.Range.Length, args.RangeModifiers));
 		}
 
+		internal AreaBeam(World world, SnapshotReader r, MiniYaml yaml)
+		{
+			var nodes = yaml.ToDictionary();
+
+			args = ProjectileArgsCodec.Load(nodes[ArgsKey], world, r);
+
+			info = (AreaBeamInfo)args.Weapon.Projectile;
+
+			speed = FieldLoader.GetValue<WDist>(SpeedKey, nodes[SpeedKey].Value);
+			target = FieldLoader.GetValue<WPos>(TargetKey, nodes[TargetKey].Value);
+
+			headPos = FieldLoader.GetValue<WPos>(HeadPosKey, nodes[HeadPosKey].Value);
+			tailPos = FieldLoader.GetValue<WPos>(TailPosKey, nodes[TailPosKey].Value);
+			length = FieldLoader.GetValue<int>(LengthKey, nodes[LengthKey].Value);
+			towardsTargetFacing = FieldLoader.GetValue<WAngle>(FacingKey, nodes[FacingKey].Value);
+			headTicks = FieldLoader.GetValue<int>(HeadTicksKey, nodes[HeadTicksKey].Value);
+			tailTicks = FieldLoader.GetValue<int>(TailTicksKey, nodes[TailTicksKey].Value);
+			isHeadTravelling = FieldLoader.GetValue<bool>(HeadTravellingKey, nodes[HeadTravellingKey].Value);
+			isTailTravelling = FieldLoader.GetValue<bool>(TailTravellingKey, nodes[TailTravellingKey].Value);
+			continueTracking = FieldLoader.GetValue<bool>(ContinueTrackingKey, nodes[ContinueTrackingKey].Value);
+
+			color = FieldLoader.GetValue<Color>(ColorKey, nodes[ColorKey].Value);
+			weaponRange = FieldLoader.GetValue<WDist>(WeaponRangeKey, nodes[WeaponRangeKey].Value);
+
+			r.DeferCompleted(() => actorAttackBase = args.SourceActor?.TraitOrDefault<AttackBase>());
+		}
+
+		List<MiniYamlNode> ISaveableEffect.SaveState(World world, SnapshotWriter w)
+		{
+			var argNodes = ProjectileArgsCodec.Save(args, world, w);
+			if (argNodes == null)
+				return null;
+
+			return
+			[
+				new(ArgsKey, new MiniYaml("", argNodes)),
+				new(HeadPosKey, FieldSaver.FormatValue(headPos)),
+				new(TailPosKey, FieldSaver.FormatValue(tailPos)),
+				new(TargetKey, FieldSaver.FormatValue(target)),
+				new(SpeedKey, FieldSaver.FormatValue(speed)),
+				new(LengthKey, FieldSaver.FormatValue(length)),
+				new(FacingKey, FieldSaver.FormatValue(towardsTargetFacing)),
+				new(HeadTicksKey, FieldSaver.FormatValue(headTicks)),
+				new(TailTicksKey, FieldSaver.FormatValue(tailTicks)),
+				new(HeadTravellingKey, FieldSaver.FormatValue(isHeadTravelling)),
+				new(TailTravellingKey, FieldSaver.FormatValue(isTailTravelling)),
+				new(ContinueTrackingKey, FieldSaver.FormatValue(continueTracking)),
+				new(ColorKey, FieldSaver.FormatValue(color)),
+				new(WeaponRangeKey, FieldSaver.FormatValue(weaponRange))
+			];
+		}
+
 		void TrackTarget()
 		{
 			if (!continueTracking)
 				return;
 
-			if (args.GuidedTarget.IsValidFor(args.SourceActor))
+			if (args.GuidedTarget.IsValidFor(args.SourceOwner))
 			{
 				var guidedTargetPos = args.Weapon.TargetActorCenter ? args.GuidedTarget.CenterPosition : args.GuidedTarget.Positions.ClosestToIgnoringPath(args.Source);
 				var targetDistance = new WDist((guidedTargetPos - args.Source).Length);
@@ -207,7 +277,7 @@ namespace OpenRA.Mods.Common.Projectiles
 			else if (isHeadTravelling)
 				headPos = WPos.LerpQuadratic(args.Source, target, WAngle.Zero, headTicks, length);
 
-			if (tailTicks <= 0 && args.SourceActor.IsInWorld && !args.SourceActor.IsDead)
+			if (tailTicks <= 0 && args.SourceActor != null && args.SourceActor.IsInWorld && !args.SourceActor.IsDead)
 			{
 				args.Source = args.CurrentSource();
 				tailPos = args.Source;
@@ -217,9 +287,10 @@ namespace OpenRA.Mods.Common.Projectiles
 			var outOfWeaponRange = weaponRange + info.BeyondTargetRange < new WDist((args.PassiveTarget - args.Source).Length);
 
 			// While the head is travelling, the tail must start to follow Duration ticks later.
+			// While the head is travelling, the tail must start to follow Duration ticks later.
 			// Alternatively, also stop emitting the beam if source actor dies or is ordered to stop.
-			if ((headTicks >= info.Duration && !isTailTravelling) || args.SourceActor.IsDead ||
-				!actorAttackBase.IsAiming || outOfWeaponRange)
+			if ((headTicks >= info.Duration && !isTailTravelling) || args.SourceActor?.IsDead == true ||
+				actorAttackBase?.IsAiming != true || outOfWeaponRange)
 				StopTargeting();
 
 			if (isTailTravelling)
@@ -234,7 +305,7 @@ namespace OpenRA.Mods.Common.Projectiles
 			}
 
 			// Check for blocking actors
-			if (info.Blockable && BlocksProjectiles.AnyBlockingActorsBetween(world, args.SourceActor.Owner, tailPos, headPos, info.Width, out var blockedPos))
+			if (info.Blockable && BlocksProjectiles.AnyBlockingActorsBetween(world, args.SourceOwner, tailPos, headPos, info.Width, out var blockedPos))
 			{
 				headPos = blockedPos;
 				target = headPos;
@@ -293,5 +364,11 @@ namespace OpenRA.Mods.Common.Projectiles
 
 			return 0;
 		}
+
+		WPos IProjectileScriptInfo.Position => headPos;
+		WPos IProjectileScriptInfo.TargetPosition => target;
+		ScriptProjectileInterface IProjectileScriptInfo.LuaInterface { get; set; }
+		Actor IProjectileScriptInfo.SourceActor => args.SourceActor;
+		WeaponInfo IProjectileScriptInfo.Weapon => args.Weapon;
 	}
 }

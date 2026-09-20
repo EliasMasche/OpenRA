@@ -12,11 +12,13 @@
 using System.Collections.Generic;
 using System.Linq;
 using OpenRA.Activities;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Traits;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Activities
 {
+	[SaveableActivity]
 	public class HarvestResource : Activity
 	{
 		readonly Harvester harv;
@@ -42,6 +44,34 @@ namespace OpenRA.Mods.Common.Activities
 			this.targetCell = targetCell;
 			notifyHarvestActions = self.TraitsImplementing<INotifyHarvestAction>().ToArray();
 			moveCooldownHelper = new MoveCooldownHelper(self.World, move as Mobile);
+		}
+
+		internal HarvestResource(Actor self, SnapshotReader _, MiniYaml yaml)
+		{
+			harv = self.Trait<Harvester>();
+			harvInfo = self.Info.TraitInfo<HarvesterInfo>();
+			facing = self.Trait<IFacing>();
+			body = self.Trait<BodyOrientation>();
+			move = self.Trait<IMove>();
+			claimLayer = self.World.WorldActor.Trait<ResourceClaimLayer>();
+			resourceLayer = self.World.WorldActor.Trait<IResourceLayer>();
+			notifyHarvestActions = self.TraitsImplementing<INotifyHarvestAction>().ToArray();
+			moveCooldownHelper = new MoveCooldownHelper(self.World, move as Mobile);
+
+			var n = yaml.ToDictionary();
+			targetCell = FieldLoader.GetValue<CPos>("TargetCell", n["TargetCell"].Value);
+			moveCooldownHelper.LoadState(n["Cooldown"]);
+
+			claimLayer.TryClaimCell(self, targetCell);
+		}
+
+		public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+		{
+			return
+			[
+				new("TargetCell", FieldSaver.FormatValue(targetCell)),
+				new("Cooldown", new MiniYaml("", moveCooldownHelper.SaveState()))
+			];
 		}
 
 		protected override void OnFirstRun(Actor self)

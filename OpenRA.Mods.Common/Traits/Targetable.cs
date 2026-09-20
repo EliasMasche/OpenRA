@@ -53,6 +53,17 @@ namespace OpenRA.Mods.Common.Traits
 			return cloaks.All(c => c.IsTraitDisabled || c.IsVisible(self, viewer.Owner));
 		}
 
+		public virtual bool TargetableBy(Actor self, Player viewer)
+		{
+			if (IsTraitDisabled)
+				return false;
+
+			if (cloaks.Length == 0)
+				return true;
+
+			return cloaks.All(c => c.IsTraitDisabled || c.IsVisible(self, viewer));
+		}
+
 		public virtual BitSet<TargetableType> TargetTypes => Info.TargetTypes;
 
 		public bool RequiresForceFire => Info.RequiresForceFire;

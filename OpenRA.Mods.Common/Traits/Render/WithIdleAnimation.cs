@@ -9,8 +9,10 @@
  */
 #endregion
 
+using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
+using OpenRA.GameSaves;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Traits.Render
@@ -31,8 +33,10 @@ namespace OpenRA.Mods.Common.Traits.Render
 		public override object Create(ActorInitializer init) { return new WithIdleAnimation(init.Self, this); }
 	}
 
-	public class WithIdleAnimation : ConditionalTrait<WithIdleAnimationInfo>, ITick
+	public class WithIdleAnimation : ConditionalTrait<WithIdleAnimationInfo>, ITick, ISaveState
 	{
+		const string TicksKey = "Ticks";
+
 		readonly WithSpriteBody wsb;
 		int ticks;
 
@@ -58,6 +62,20 @@ namespace OpenRA.Mods.Common.Traits.Render
 		protected override void TraitDisabled(Actor self)
 		{
 			wsb.CancelCustomAnimation(self);
+		}
+
+		TraitInfo ISaveState.SaveStateInfo => Info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
+		{
+			return [new(TicksKey, FieldSaver.FormatValue(ticks))];
+		}
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
+		{
+			var node = data.NodeWithKeyOrDefault(TicksKey);
+			if (node != null)
+				ticks = FieldLoader.GetValue<int>(TicksKey, node.Value.Value);
 		}
 	}
 }

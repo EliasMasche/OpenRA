@@ -13,6 +13,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using OpenRA.Activities;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Traits;
 using OpenRA.Primitives;
 using OpenRA.Traits;
@@ -20,10 +21,19 @@ using OpenRA.Traits;
 namespace OpenRA.Mods.Common.Activities
 {
 	/* non-turreted attack */
+	[SaveableActivity]
 	public class Attack : Activity, IActivityNotifyStanceChanged
 	{
 		[Flags]
 		protected enum AttackStatus { UnableToAttack, NeedsToTurn, NeedsToMove, Attacking }
+
+		const string ForceAttackKey = "ForceAttack";
+		const string AllowMovementKey = "AllowMovement";
+		const string MinRangeKey = "MinRange";
+		const string MaxRangeKey = "MaxRange";
+		const string AttackStatusKey = "AttackStatus";
+		const string TargetLineColorKey = "TargetLineColor";
+		const string CooldownKey = "Cooldown";
 
 		readonly IEnumerable<AttackFrontal> attackTraits;
 		readonly RevealsShroud[] revealsShroud;
@@ -86,6 +96,58 @@ namespace OpenRA.Mods.Common.Activities
 					lastVisibleTargetTypes = target.FrozenActor.TargetTypes;
 				}
 			}
+		}
+
+		protected Attack(Actor self, SnapshotReader r, MiniYaml yaml)
+		{
+			ChildHasPriority = false;
+
+			var nodes = yaml.ToDictionary();
+			forceAttack = FieldLoader.GetValue<bool>(ForceAttackKey, nodes[ForceAttackKey].Value);
+
+			attackTraits = self.TraitsImplementing<AttackFrontal>().ToArray().Where(t => !t.IsTraitDisabled);
+			revealsShroud = self.TraitsImplementing<RevealsShroud>().ToArray();
+			facing = self.Trait<IFacing>();
+			positionable = self.Trait<IPositionable>();
+
+			var iMove = self.TraitOrDefault<IMove>();
+			mobile = iMove as Mobile;
+			move = FieldLoader.GetValue<bool>(AllowMovementKey, nodes[AllowMovementKey].Value) ? iMove : null;
+			moveCooldownHelper = new MoveCooldownHelper(self.World, mobile);
+			moveCooldownHelper.LoadState(nodes[CooldownKey]);
+
+			minRange = FieldLoader.GetValue<WDist>(MinRangeKey, nodes[MinRangeKey].Value);
+			maxRange = FieldLoader.GetValue<WDist>(MaxRangeKey, nodes[MaxRangeKey].Value);
+			attackStatus = FieldLoader.GetValue<AttackStatus>(AttackStatusKey, nodes[AttackStatusKey].Value);
+			useLastVisibleTarget = LastVisibleTargetState.UseLastVisible(nodes);
+			lastVisibleMaximumRange = LastVisibleTargetState.MaximumRange(nodes);
+			lastVisibleOwner = LastVisibleTargetState.Owner(nodes, r);
+			lastVisibleTargetTypes = LastVisibleTargetState.TargetTypes(nodes);
+
+			var color = nodes[TargetLineColorKey].Value;
+			if (!string.IsNullOrEmpty(color))
+				targetLineColor = FieldLoader.GetValue<Color>(TargetLineColorKey, color);
+
+			r.DeferTarget(nodes[LastVisibleTargetState.TargetKey].Value, t => target = t);
+			r.DeferTarget(nodes[LastVisibleTargetState.LastVisibleTargetKey].Value, t => lastVisibleTarget = t);
+		}
+
+		public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+		{
+			var nodes = new List<MiniYamlNode>
+			{
+				new(ForceAttackKey, FieldSaver.FormatValue(forceAttack)),
+				new(AllowMovementKey, FieldSaver.FormatValue(move != null)),
+				new(MinRangeKey, FieldSaver.FormatValue(minRange)),
+				new(MaxRangeKey, FieldSaver.FormatValue(maxRange)),
+				new(AttackStatusKey, FieldSaver.FormatValue(attackStatus)),
+				new(TargetLineColorKey, targetLineColor.HasValue ? FieldSaver.FormatValue(targetLineColor.Value) : ""),
+				new(CooldownKey, new MiniYaml("", moveCooldownHelper.SaveState()))
+			};
+
+			LastVisibleTargetState.Save(nodes, w, target, lastVisibleTarget, useLastVisibleTarget,
+				WDist.Zero, lastVisibleMaximumRange, lastVisibleOwner, lastVisibleTargetTypes);
+			return nodes;
 		}
 
 		protected virtual Target RecalculateTarget(Actor self, out bool targetIsHiddenActor)

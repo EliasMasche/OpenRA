@@ -9,19 +9,32 @@
  */
 #endregion
 
+using System.Collections.Generic;
+using OpenRA.GameSaves;
 using OpenRA.Primitives;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Activities
 {
+	[SaveableActivity]
 	public class MoveOntoAndTurn : MoveOnto
 	{
+		const string DesiredFacingKey = "DesiredFacing";
+
 		readonly WAngle? desiredFacing;
 
 		public MoveOntoAndTurn(Actor self, in Target target, in WVec offset, WAngle? desiredFacing, Color? targetLineColor = null)
 			: base(self, target, offset, null, targetLineColor)
 		{
 			this.desiredFacing = desiredFacing;
+		}
+
+		internal MoveOntoAndTurn(Actor self, SnapshotReader r, MiniYaml yaml)
+			: base(self, r, yaml)
+		{
+			var facing = yaml.NodeWithKeyOrDefault(DesiredFacingKey).Value.Value;
+			if (!string.IsNullOrEmpty(facing))
+				desiredFacing = FieldLoader.GetValue<WAngle>(DesiredFacingKey, facing);
 		}
 
 		public override bool Tick(Actor self)
@@ -38,6 +51,13 @@ namespace OpenRA.Mods.Common.Activities
 			}
 
 			return false;
+		}
+
+		public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+		{
+			var nodes = base.SaveState(self, w);
+			nodes.Add(new MiniYamlNode(DesiredFacingKey, desiredFacing.HasValue ? FieldSaver.FormatValue(desiredFacing.Value) : ""));
+			return nodes;
 		}
 	}
 }

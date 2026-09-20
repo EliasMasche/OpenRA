@@ -76,7 +76,7 @@ namespace OpenRA.Mods.Common.Traits
 
 			startcolor = Color.FromArgb(info.StartColorAlpha, info.StartColor);
 			endcolor = Color.FromArgb(info.EndColorAlpha, info.EndColor ?? startcolor);
-			trail = new ContrailRenderable(self.World, self,
+			trail = new ContrailRenderable(self.World, self.Owner,
 				startcolor, info.StartColorUsePlayerColor,
 				endcolor, info.EndColor == null ? info.StartColorUsePlayerColor : info.EndColorUsePlayerColor,
 				info.StartWidth,
@@ -110,7 +110,7 @@ namespace OpenRA.Mods.Common.Traits
 
 		void INotifyAddedToWorld.AddedToWorld(Actor self)
 		{
-			trail = new ContrailRenderable(self.World, self,
+			trail = new ContrailRenderable(self.World, self.Owner,
 				startcolor, info.StartColorUsePlayerColor,
 				endcolor, info.EndColor == null ? info.StartColorUsePlayerColor : info.EndColorUsePlayerColor,
 				info.StartWidth,

@@ -13,6 +13,7 @@ using System.Linq;
 using Eluant;
 using OpenRA.Activities;
 using OpenRA.Mods.Common.Activities;
+using OpenRA.Mods.Common.Scripting.Snapshot;
 using OpenRA.Mods.Common.Traits;
 using OpenRA.Scripting;
 using OpenRA.Traits;
@@ -22,12 +23,9 @@ namespace OpenRA.Mods.Common.Scripting
 	[ScriptPropertyGroup("Combat")]
 	public class CombatProperties : ScriptActorProperties, Requires<AttackBaseInfo>, Requires<IMoveInfo>
 	{
-		readonly IMove move;
-
 		public CombatProperties(ScriptContext context, Actor self)
 			: base(context, self)
 		{
-			move = self.Trait<IMove>();
 		}
 
 		[ScriptActorPropertyActivity]
@@ -43,7 +41,7 @@ namespace OpenRA.Mods.Common.Scripting
 			"close enough to complete the activity.")]
 		public void AttackMove(CPos cell, int closeEnough = 0)
 		{
-			Self.QueueActivity(new AttackMoveActivity(Self, () => move.MoveTo(cell, closeEnough)));
+			Self.QueueActivity(new AttackMoveActivity(Self, MoveSpec.ToCellAt(cell, closeEnough)));
 		}
 
 		[ScriptActorPropertyActivity]
@@ -53,12 +51,12 @@ namespace OpenRA.Mods.Common.Scripting
 		{
 			foreach (var wpt in waypoints)
 			{
-				Self.QueueActivity(new AttackMoveActivity(Self, () => move.MoveTo(wpt, 2)));
+				Self.QueueActivity(new AttackMoveActivity(Self, MoveSpec.ToCellAt(wpt, 2)));
 				Self.QueueActivity(new Wait(wait));
 			}
 
 			if (loop)
-				Self.QueueActivity(new CallFunc(() => Patrol(waypoints, loop, wait)));
+				Self.QueueActivity(new LuaPatrol(waypoints, wait));
 		}
 
 		[ScriptActorPropertyActivity]
@@ -69,10 +67,10 @@ namespace OpenRA.Mods.Common.Scripting
 		{
 			Patrol(waypoints, false, wait);
 
-			var repeat = func.Call(Self.ToLuaValue(Context)).First().ToBoolean();
-			if (repeat)
-				using (var f = func.CopyReference() as LuaFunction)
-					Self.QueueActivity(new CallFunc(() => PatrolUntil(waypoints, f, wait)));
+			if (!func.Call(Self.ToLuaValue(Context)).First().ToBoolean())
+				return;
+
+			Self.QueueActivity(new LuaPatrolUntil(waypoints, wait, func, Context));
 		}
 	}
 

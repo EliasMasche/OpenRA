@@ -12,6 +12,7 @@
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
+using OpenRA.GameSaves;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Traits
@@ -38,7 +39,7 @@ namespace OpenRA.Mods.Common.Traits
 		public override object Create(ActorInitializer init) { return new SupportPowerBotModule(init.Self, this); }
 	}
 
-	public class SupportPowerBotModule : ConditionalTrait<SupportPowerBotModuleInfo>, IBotTick, IGameSaveTraitData
+	public class SupportPowerBotModule : ConditionalTrait<SupportPowerBotModuleInfo>, IBotTick, ISaveState
 	{
 		readonly World world;
 		readonly Player player;
@@ -210,7 +211,9 @@ namespace OpenRA.Mods.Common.Traits
 			return bestLocation;
 		}
 
-		List<MiniYamlNode> IGameSaveTraitData.IssueTraitData(Actor self)
+		TraitInfo ISaveState.SaveStateInfo => Info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
 		{
 			if (IsTraitDisabled)
 				return null;
@@ -225,7 +228,7 @@ namespace OpenRA.Mods.Common.Traits
 			];
 		}
 
-		void IGameSaveTraitData.ResolveTraitData(Actor self, MiniYaml data)
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
 		{
 			if (self.World.IsReplay)
 				return;

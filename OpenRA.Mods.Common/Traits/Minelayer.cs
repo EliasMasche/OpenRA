@@ -14,6 +14,7 @@ using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
+using OpenRA.GameSaves;
 using OpenRA.Graphics;
 using OpenRA.Mods.Common.Activities;
 using OpenRA.Mods.Common.Orders;
@@ -74,8 +75,10 @@ namespace OpenRA.Mods.Common.Traits
 		public override object Create(ActorInitializer init) { return new Minelayer(init.Self, this); }
 	}
 
-	public class Minelayer : IIssueOrder, IResolveOrder, ISync, IIssueDeployOrder, IOrderVoice, ITick
+	public class Minelayer : IIssueOrder, IResolveOrder, ISync, IIssueDeployOrder, IOrderVoice, ITick, ISaveState
 	{
+		const string MinefieldStartKey = "MinefieldStart";
+
 		public readonly MinelayerInfo Info;
 		public readonly Sprite Tile;
 
@@ -88,6 +91,9 @@ namespace OpenRA.Mods.Common.Traits
 		{
 			Info = info;
 			this.self = self;
+
+			if (!self.World.Map.Sequences.SpritesLoaded)
+				return;
 
 			var tileset = self.World.Map.Tileset.ToLowerInvariant();
 			var sequences = self.World.Map.Sequences;
@@ -178,6 +184,20 @@ namespace OpenRA.Mods.Common.Traits
 			if (self.CurrentActivity != null)
 				foreach (var field in self.CurrentActivity.ActivitiesImplementing<LayMines>())
 					field.CleanMineField(self);
+		}
+
+		TraitInfo ISaveState.SaveStateInfo => Info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
+		{
+			return [new(MinefieldStartKey, FieldSaver.FormatValue(minefieldStart))];
+		}
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
+		{
+			var node = data.NodeWithKeyOrDefault(MinefieldStartKey);
+			if (node != null)
+				minefieldStart = FieldLoader.GetValue<CPos>(MinefieldStartKey, node.Value.Value);
 		}
 
 		string IOrderVoice.VoicePhraseForOrder(Actor self, Order order)

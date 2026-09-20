@@ -9,16 +9,31 @@
  */
 #endregion
 
+using System.Collections.Generic;
 using OpenRA.Activities;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Traits;
 
 namespace OpenRA.Mods.Common.Activities
 {
+	[SaveableActivity]
 	public class SimpleTeleport : Activity
 	{
+		const string DestinationKey = "Destination";
+
 		readonly CPos destination;
 
 		public SimpleTeleport(CPos destination) { this.destination = destination; }
+
+		internal SimpleTeleport(Actor _1, SnapshotReader _2, MiniYaml yaml)
+		{
+			destination = FieldLoader.GetValue<CPos>(DestinationKey, yaml.NodeWithKeyOrDefault(DestinationKey).Value.Value);
+		}
+
+		public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+		{
+			return [new(DestinationKey, FieldSaver.FormatValue(destination))];
+		}
 
 		public override bool Tick(Actor self)
 		{

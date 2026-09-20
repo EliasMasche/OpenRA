@@ -516,7 +516,22 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 			{
 				{ "onExit", () => SwitchMenu(MenuType.Singleplayer) },
 				{ "onStart", () => { RemoveShellmapUI(); lastGameState = MenuPanel.GameSaves; } },
+
+				{ "loadAction", new Action<string, string>(StartLocalGameFromSave) },
+
+				{ "sessionMapUid", null },
 			});
+		}
+
+		static void StartLocalGameFromSave(string savePath, string mapUid)
+		{
+			var orders = new List<Order>
+			{
+				Order.FromTargetString("LoadGameSave", Path.GetFileName(savePath), true, 1),
+				Order.Command($"state {Session.ClientState.Ready}")
+			};
+
+			Game.CreateAndStartLocalServer(mapUid, orders);
 		}
 
 		protected override void Dispose(bool disposing)

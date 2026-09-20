@@ -9,15 +9,21 @@
  */
 #endregion
 
+using System.Collections.Generic;
 using System.Linq;
 using OpenRA.Activities;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Traits;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Activities
 {
+	[SaveableActivity]
 	public class FlyIdle : Activity
 	{
+		const string RemainingTicksKey = "RemainingTicks";
+		const string IdleTurnKey = "IdleTurn";
+
 		readonly Aircraft aircraft;
 		readonly INotifyIdle[] tickIdles;
 		readonly bool idleTurn;
@@ -33,6 +39,28 @@ namespace OpenRA.Mods.Common.Activities
 
 			if (idleTurn)
 				tickIdles = self.TraitsImplementing<INotifyIdle>().ToArray();
+		}
+
+		internal FlyIdle(Actor self, SnapshotReader _, MiniYaml yaml)
+		{
+			aircraft = self.Trait<Aircraft>();
+			isIdleTurner = aircraft.Info.IdleSpeed > 0 || (!aircraft.Info.CanHover && aircraft.Info.IdleSpeed < 0);
+
+			var nodes = yaml.ToDictionary();
+			remainingTicks = FieldLoader.GetValue<int>(RemainingTicksKey, nodes[RemainingTicksKey].Value);
+			idleTurn = FieldLoader.GetValue<bool>(IdleTurnKey, nodes[IdleTurnKey].Value);
+
+			if (idleTurn)
+				tickIdles = self.TraitsImplementing<INotifyIdle>().ToArray();
+		}
+
+		public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+		{
+			return
+			[
+				new(RemainingTicksKey, FieldSaver.FormatValue(remainingTicks)),
+				new(IdleTurnKey, FieldSaver.FormatValue(idleTurn))
+			];
 		}
 
 		public override bool Tick(Actor self)

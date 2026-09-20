@@ -1,4 +1,4 @@
-﻿#region Copyright & License Information
+#region Copyright & License Information
 /*
  * Copyright (c) The OpenRA Developers and Contributors
  * This file is part of OpenRA, which is free software. It is made
@@ -13,6 +13,7 @@ using System;
 using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Linq;
+using OpenRA.GameSaves;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Traits
@@ -34,8 +35,13 @@ namespace OpenRA.Mods.Common.Traits
 		public override object Create(ActorInitializer init) { return new PowerDownBotModule(init.Self, this); }
 	}
 
-	public class PowerDownBotModule : ConditionalTrait<PowerDownBotModuleInfo>, IBotTick, IGameSaveTraitData, INotifyActorDisposing
+	public class PowerDownBotModule : ConditionalTrait<PowerDownBotModuleInfo>, IBotTick, ISaveState, INotifyActorDisposing
 	{
+		const string ToggledBuildingsKey = "ToggledBuildings";
+		const string ToggledBuildingKey = "ToggledBuilding";
+		const string ActorKey = "Actor";
+		const string ExpectedPowerChangingKey = "ExpectedPowerChanging";
+
 		readonly World world;
 		readonly Player player;
 		readonly ActorIndex.OwnerAndNamesAndTrait<ToggleConditionOnOrderInfo> togglable;
@@ -162,37 +168,50 @@ namespace OpenRA.Mods.Common.Traits
 			toggleTick = Info.Interval;
 		}
 
-		List<MiniYamlNode> IGameSaveTraitData.IssueTraitData(Actor self)
+		TraitInfo ISaveState.SaveStateInfo => Info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
 		{
 			if (IsTraitDisabled)
 				return null;
 
 			var data = new List<MiniYamlNode>();
 			foreach (var tb in toggled.Where(td => isTogglableValid(td.Actor)))
-				data.Add(new MiniYamlNode(FieldSaver.FormatValue(tb.Actor.ActorID), FieldSaver.FormatValue(tb.ExpectedPowerChanging)));
+				data.Add(new MiniYamlNode(ToggledBuildingKey, new MiniYaml("",
+				[
+					new(ActorKey, w.ActorRef(tb.Actor)),
+					new(ExpectedPowerChangingKey, FieldSaver.FormatValue(tb.ExpectedPowerChanging))
+				])));
 
 			return
 			[
-				new("ToggledBuildings", new MiniYaml("", data))
+				new(ToggledBuildingsKey, new MiniYaml("", data))
 			];
 		}
 
-		void IGameSaveTraitData.ResolveTraitData(Actor self, MiniYaml data)
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
 		{
 			if (self.World.IsReplay)
 				return;
 
 			var nodes = data.ToDictionary();
 
-			if (nodes.TryGetValue("ToggledBuildings", out var toggledBuildingsNode))
-			{
-				foreach (var n in toggledBuildingsNode.Nodes)
-				{
-					var a = self.World.GetActorById(FieldLoader.GetValue<uint>(n.Key, n.Key));
+			if (!nodes.TryGetValue(ToggledBuildingsKey, out var toggledBuildingsNode))
+				return;
 
-					if (isTogglableValid(a))
-						toggled.Add(new ToggledPowerWrapper(a, FieldLoader.GetValue<int>(n.Key, n.Value.Value)));
-				}
+			foreach (var n in toggledBuildingsNode.Nodes)
+			{
+				var entry = n.Value.ToDictionary();
+				if (!entry.TryGetValue(ActorKey, out var actor) || !entry.TryGetValue(ExpectedPowerChangingKey, out var power))
+					continue;
+
+				var expectedPowerChanging = FieldLoader.GetValue<int>(ExpectedPowerChangingKey, power.Value);
+
+				r.DeferActor(actor.Value, a =>
+				{
+					if (a != null && isTogglableValid(a))
+						toggled.Add(new ToggledPowerWrapper(a, expectedPowerChanging));
+				});
 			}
 		}
 

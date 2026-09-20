@@ -94,7 +94,7 @@ namespace OpenRA.Mods.Common.Traits
 				var assaultMoving = order.OrderString == "AssaultMove";
 
 				// TODO: this should scale with unit selection group size.
-				self.QueueActivity(order.Queued, new AttackMoveActivity(self, () => move.MoveTo(targetLocation, 8, targetLineColor: Info.TargetLineColor), assaultMoving));
+				self.QueueActivity(order.Queued, new AttackMoveActivity(self, MoveSpec.ToCellAt(targetLocation, 8, targetLineColor: Info.TargetLineColor), assaultMoving));
 				self.ShowTargetLines();
 			}
 		}

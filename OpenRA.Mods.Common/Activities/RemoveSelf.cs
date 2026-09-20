@@ -9,12 +9,24 @@
  */
 #endregion
 
+using System.Collections.Generic;
 using OpenRA.Activities;
+using OpenRA.GameSaves;
 
 namespace OpenRA.Mods.Common.Activities
 {
+	[SaveableActivity]
 	public class RemoveSelf : Activity
 	{
+		public RemoveSelf() { }
+
+		internal RemoveSelf(Actor _1, SnapshotReader _2, MiniYaml _3) { }
+
+		public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+		{
+			return [];
+		}
+
 		public override bool Tick(Actor self)
 		{
 			if (IsCanceling) return true;

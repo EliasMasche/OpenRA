@@ -9,14 +9,19 @@
  */
 #endregion
 
+using System.Collections.Generic;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Traits;
 using OpenRA.Primitives;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Activities
 {
+	[SaveableActivity]
 	sealed class DonateExperience : Enter
 	{
+		const string EnterActorKey = "EnterActor";
+
 		readonly int level;
 		readonly int playerExperience;
 
@@ -28,6 +33,32 @@ namespace OpenRA.Mods.Common.Activities
 		{
 			this.level = level;
 			this.playerExperience = playerExperience;
+		}
+
+		internal DonateExperience(Actor self, SnapshotReader r, MiniYaml yaml)
+			: base(self, r, yaml)
+		{
+			var n = yaml.ToDictionary();
+			level = FieldLoader.GetValue<int>("Level", n["Level"].Value);
+			playerExperience = FieldLoader.GetValue<int>("PlayerExperience", n["PlayerExperience"].Value);
+
+			r.DeferActor(yaml.NodeWithKeyOrDefault(EnterActorKey).Value.Value, a =>
+			{
+				enterActor = a;
+				enterGainsExperience = a?.TraitOrDefault<GainsExperience>();
+			});
+		}
+
+		public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+		{
+			var nodes = base.SaveState(self, w);
+			nodes.AddRange(
+			[
+				new(EnterActorKey, w.ActorRef(enterActor)),
+				new("Level", FieldSaver.FormatValue(level)),
+				new("PlayerExperience", FieldSaver.FormatValue(playerExperience))
+			]);
+			return nodes;
 		}
 
 		protected override bool TryStartEnter(Actor self, Actor targetActor)

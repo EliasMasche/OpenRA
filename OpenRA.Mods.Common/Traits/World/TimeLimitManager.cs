@@ -13,6 +13,7 @@ using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Widgets;
 using OpenRA.Primitives;
 using OpenRA.Traits;
@@ -103,10 +104,14 @@ namespace OpenRA.Mods.Common.Traits
 		public override object Create(ActorInitializer init) { return new TimeLimitManager(init.Self, this); }
 	}
 
-	public class TimeLimitManager : INotifyTimeLimit, ITick, IWorldLoaded
+	public class TimeLimitManager : INotifyTimeLimit, ITick, IWorldLoaded, ISaveState
 	{
 		[FluentReference]
 		const string TimeLimitExpired = "notification-time-limit-expired";
+
+		const string TicksRemainingKey = "TicksRemaining";
+		const string TimeLimitKey = "TimeLimit";
+		const string NotificationKey = "Notification";
 
 		readonly TimeLimitManagerInfo info;
 		readonly int ticksPerSecond;
@@ -116,6 +121,32 @@ namespace OpenRA.Mods.Common.Traits
 
 		public int TimeLimit;
 		public string Notification;
+
+		TraitInfo ISaveState.SaveStateInfo => info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
+		{
+			return
+			[
+				new(TicksRemainingKey, FieldSaver.FormatValue(ticksRemaining)),
+				new(TimeLimitKey, FieldSaver.FormatValue(TimeLimit)),
+				new(NotificationKey, Notification ?? "")
+			];
+		}
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
+		{
+			var nodes = data.ToDictionary();
+
+			if (nodes.TryGetValue(TicksRemainingKey, out var t))
+				ticksRemaining = FieldLoader.GetValue<int>(TicksRemainingKey, t.Value);
+
+			if (nodes.TryGetValue(TimeLimitKey, out var l))
+				TimeLimit = FieldLoader.GetValue<int>(TimeLimitKey, l.Value);
+
+			if (nodes.TryGetValue(NotificationKey, out var n))
+				Notification = string.IsNullOrEmpty(n.Value) ? null : n.Value;
+		}
 
 		public TimeLimitManager(Actor self, TimeLimitManagerInfo info)
 		{

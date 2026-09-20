@@ -11,6 +11,7 @@
 
 using System.Collections.Generic;
 using System.Collections.Immutable;
+using OpenRA.GameSaves;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Traits.Sound
@@ -32,8 +33,10 @@ namespace OpenRA.Mods.Common.Traits.Sound
 		public override object Create(ActorInitializer init) { return new AmbientSound(init.Self, this); }
 	}
 
-	sealed class AmbientSound : ConditionalTrait<AmbientSoundInfo>, ITick, INotifyRemovedFromWorld
+	sealed class AmbientSound : ConditionalTrait<AmbientSoundInfo>, ITick, INotifyRemovedFromWorld, ISaveState
 	{
+		const string DelayKey = "Delay";
+
 		readonly bool loop;
 		readonly HashSet<ISound> currentSounds = [];
 		WPos cachedPosition;
@@ -106,5 +109,19 @@ namespace OpenRA.Mods.Common.Traits.Sound
 		protected override void TraitDisabled(Actor self) { StopSound(); }
 
 		void INotifyRemovedFromWorld.RemovedFromWorld(Actor self) { StopSound(); }
+
+		TraitInfo ISaveState.SaveStateInfo => Info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
+		{
+			return [new(DelayKey, FieldSaver.FormatValue(delay))];
+		}
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
+		{
+			var node = data.NodeWithKeyOrDefault(DelayKey);
+			if (node != null)
+				delay = FieldLoader.GetValue<int>(DelayKey, node.Value.Value);
+		}
 	}
 }

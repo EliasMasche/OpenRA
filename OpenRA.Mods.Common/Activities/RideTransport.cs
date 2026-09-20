@@ -9,14 +9,19 @@
  */
 #endregion
 
+using System.Collections.Generic;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Traits;
 using OpenRA.Primitives;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Activities
 {
+	[SaveableActivity]
 	sealed class RideTransport : Enter
 	{
+		const string EnterActorKey = "EnterActor";
+
 		readonly Passenger passenger;
 
 		Actor enterActor;
@@ -27,6 +32,29 @@ namespace OpenRA.Mods.Common.Activities
 			: base(self, target, targetLineColor)
 		{
 			passenger = self.Trait<Passenger>();
+		}
+
+		internal RideTransport(Actor self, SnapshotReader r, MiniYaml yaml)
+			: base(self, r, yaml)
+		{
+			passenger = self.Trait<Passenger>();
+
+			r.DeferActor(yaml.NodeWithKeyOrDefault(EnterActorKey).Value.Value, a =>
+			{
+				enterActor = a;
+				enterCargo = a?.TraitOrDefault<Cargo>();
+				enterAircraft = a?.TraitOrDefault<Aircraft>();
+			});
+		}
+
+		public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+		{
+			var nodes = base.SaveState(self, w);
+			nodes.AddRange(
+			[
+				new(EnterActorKey, w.ActorRef(enterActor))
+			]);
+			return nodes;
 		}
 
 		protected override bool TryStartEnter(Actor self, Actor targetActor)

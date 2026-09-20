@@ -15,6 +15,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using OpenRA.GameSaves;
 using OpenRA.Network;
 using OpenRA.Primitives;
 using OpenRA.Traits;
@@ -97,7 +98,7 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 
 		readonly string defaultSaveFilename;
 		string selectedPath;
-		GameSave selectedSave;
+		SaveFileInfo selectedSave;
 		readonly World world;
 
 		[ObjectCreator.UseCtor]
@@ -122,14 +123,20 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 			var dateHeaderTemplate = panel.Get<ScrollItemWidget>("DATE_HEADER");
 
 			var mod = modData.Manifest;
-			baseSavePath = Path.Combine(Platform.SupportDir, "Saves", mod.Id, mod.Metadata.Version);
+			baseSavePath = SavePaths.BaseSaveDirectory(mod);
 
 			panel.Get("SAVE_TITLE").IsVisible = () => true;
 
 			defaultSaveFilename = world.Map.Title;
-			var filenameAttempt = 0;
-			while (File.Exists(Path.Combine(baseSavePath, defaultSaveFilename + ".orasav")))
-				defaultSaveFilename = world.Map.Title + $" ({++filenameAttempt})";
+
+			try
+			{
+				defaultSaveFilename = Path.GetFileNameWithoutExtension(
+					SavePaths.UniqueFilePath(baseSavePath, defaultSaveFilename + ".orasav"));
+			}
+			catch (IOException)
+			{
+			}
 
 			var saveButton = panel.Get<ButtonWidget>("SAVE_BUTTON");
 			saveButton.IsDisabled = () => string.IsNullOrWhiteSpace(saveTextField.Text);
@@ -189,15 +196,7 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 			if (savegameInfoDuration != null)
 			{
 				savegameInfoDuration.GetText = () =>
-				{
-					if (selectedSave != null && selectedSave.GlobalSettings.GameTimestep > 0 && selectedSave.LastOrdersFrame >= 0)
-					{
-						var duration = TimeSpan.FromMilliseconds((long)selectedSave.LastOrdersFrame * selectedSave.GlobalSettings.GameTimestep);
-						return "Duration: " + duration.ToString(@"hh\:mm\:ss", CultureInfo.InvariantCulture);
-					}
-
-					return "Duration: ?";
-				};
+					"Duration: " + GameSaveUtils.FormatGameDuration(GameSaveUtils.GetGameDuration(selectedSave));
 				savegameInfoDuration.IsVisible = () => selectedSave != null;
 			}
 
@@ -206,7 +205,7 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 			playerTemplate = playerList.Get<ScrollItemWidget>("TEMPLATE");
 			playerList.RemoveChildren();
 
-			var spawnOccupants = new CachedTransform<GameSave, Dictionary<int, SpawnOccupant>>(_ => GetSpawnOccupants());
+			var spawnOccupants = new CachedTransform<SaveFileInfo, Dictionary<int, SpawnOccupant>>(_ => GetSpawnOccupants());
 
 			Ui.LoadWidget("MAP_PREVIEW", mapPreviewRoot, new WidgetArgs
 			{
@@ -301,14 +300,8 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 				{
 					games.Add(savePath);
 
-					GameSave save = null;
-					try
-					{
-						save = new GameSave(savePath);
-					}
-					catch
-					{
-					}
+					SaveFileInfo save = null;
+					save = SaveFileInfo.Read(savePath);
 
 					// Create the item manually so the click handlers can refer to itself.
 					// This simplifies the rename handling (only needs to update ItemKey).
@@ -342,12 +335,8 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 		{
 			var oldPath = Path.Combine(baseSavePath, oldName + ".orasav");
 
-			var uniqueName = newName;
-			var attempt = 1;
-			while (File.Exists(Path.Combine(baseSavePath, uniqueName + ".orasav")))
-				uniqueName = newName + $" ({attempt++})";
-
-			var newPath = Path.Combine(baseSavePath, uniqueName + ".orasav");
+			var newPath = SavePaths.UniqueFilePath(baseSavePath, newName + ".orasav");
+			var uniqueName = Path.GetFileNameWithoutExtension(newPath);
 
 			try
 			{
@@ -410,9 +399,11 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 
 			if (savePath != null)
 			{
-				try
+				selectedSave = SaveFileInfo.Read(savePath);
+				if (selectedSave == null)
+					map = MapCache.UnknownMap;
+				else
 				{
-					selectedSave = new GameSave(savePath);
 					var preview = modData.MapCache[selectedSave.GlobalSettings.Map];
 					if (preview.Status != MapStatus.Available && selectedSave.MapGenerationArgs != null)
 					{
@@ -422,11 +413,6 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 					}
 
 					map = preview;
-				}
-				catch
-				{
-					selectedSave = null;
-					map = MapCache.UnknownMap;
 				}
 
 				UpdatePlayerList();
@@ -550,12 +536,7 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 		void Save(World world)
 		{
 			var filename = saveTextField.Text + ".orasav";
-			var testPath = Path.Combine(
-				Platform.SupportDir,
-				"Saves",
-				modData.Manifest.Id,
-				modData.Manifest.Metadata.Version,
-				filename);
+			var testPath = Path.Combine(SavePaths.BaseSaveDirectory(modData.Manifest), filename);
 
 			void Inner()
 			{

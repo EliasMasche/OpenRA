@@ -11,19 +11,23 @@
 
 using System.Collections.Generic;
 using OpenRA.Activities;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Traits;
 using OpenRA.Primitives;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Activities
 {
+	[SaveableActivity]
 	public class PickupUnit : Activity
 	{
-		readonly Actor cargo;
+		const string PickupStateKey = "PickupState";
+
+		Actor cargo;
 		readonly Carryall carryall;
-		readonly Carryable carryable;
-		readonly IFacing carryableFacing;
-		readonly BodyOrientation carryableBody;
+		Carryable carryable;
+		IFacing carryableFacing;
+		BodyOrientation carryableBody;
 
 		readonly int delay;
 		readonly Color? targetLineColor;
@@ -32,6 +36,7 @@ namespace OpenRA.Mods.Common.Activities
 		readonly WDist targetLockRange = WDist.FromCells(4);
 
 		enum PickupState { Intercept, LockCarryable, Pickup }
+
 		PickupState state = PickupState.Intercept;
 		bool reserveFailed;
 
@@ -47,6 +52,41 @@ namespace OpenRA.Mods.Common.Activities
 			carryall = self.Trait<Carryall>();
 
 			ChildHasPriority = false;
+		}
+
+		internal PickupUnit(Actor self, SnapshotReader r, MiniYaml yaml)
+		{
+			carryall = self.Trait<Carryall>();
+			ChildHasPriority = false;
+
+			var n = yaml.ToDictionary();
+			delay = FieldLoader.GetValue<int>("Delay", n["Delay"].Value);
+			state = FieldLoader.GetValue<PickupState>(PickupStateKey, n[PickupStateKey].Value);
+			reserveFailed = FieldLoader.GetValue<bool>("ReserveFailed", n["ReserveFailed"].Value);
+
+			var color = n["TargetLineColor"].Value;
+			if (!string.IsNullOrEmpty(color))
+				targetLineColor = FieldLoader.GetValue<Color>("TargetLineColor", color);
+
+			r.DeferActor(n["Cargo"].Value, a =>
+			{
+				cargo = a;
+				carryable = a?.TraitOrDefault<Carryable>();
+				carryableFacing = a?.TraitOrDefault<IFacing>();
+				carryableBody = a?.TraitOrDefault<BodyOrientation>();
+			});
+		}
+
+		public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+		{
+			return
+			[
+				new("Cargo", w.ActorRef(cargo)),
+				new("Delay", FieldSaver.FormatValue(delay)),
+				new(PickupStateKey, FieldSaver.FormatValue(state)),
+				new("ReserveFailed", FieldSaver.FormatValue(reserveFailed)),
+				new("TargetLineColor", targetLineColor.HasValue ? FieldSaver.FormatValue(targetLineColor.Value) : "")
+			];
 		}
 
 		protected override void OnFirstRun(Actor self)
@@ -150,17 +190,37 @@ namespace OpenRA.Mods.Common.Activities
 				yield return new TargetLineNode(Target.FromActor(cargo), targetLineColor.Value);
 		}
 
+		[SaveableActivity]
 		sealed class AttachUnit : Activity
 		{
-			readonly Actor cargo;
-			readonly Carryable carryable;
+			const string CargoKey = "Cargo";
+
 			readonly Carryall carryall;
+
+			Actor cargo;
+			Carryable carryable;
 
 			public AttachUnit(Actor self, Actor cargo)
 			{
 				this.cargo = cargo;
 				carryable = cargo.Trait<Carryable>();
 				carryall = self.Trait<Carryall>();
+			}
+
+			internal AttachUnit(Actor self, SnapshotReader r, MiniYaml yaml)
+			{
+				carryall = self.Trait<Carryall>();
+
+				r.DeferActor(yaml.NodeWithKeyOrDefault(CargoKey).Value.Value, a =>
+				{
+					cargo = a;
+					carryable = a?.TraitOrDefault<Carryable>();
+				});
+			}
+
+			public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+			{
+				return [new(CargoKey, w.ActorRef(cargo))];
 			}
 
 			protected override void OnFirstRun(Actor self)

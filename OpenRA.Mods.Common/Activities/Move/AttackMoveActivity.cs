@@ -12,43 +12,84 @@
 using System;
 using System.Collections.Generic;
 using OpenRA.Activities;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Traits;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Activities
 {
+	[SaveableActivity]
 	public class AttackMoveActivity : Activity
 	{
-		readonly Func<Activity> getMove;
+		const string SpecKey = "Spec";
+		const string IsAssaultMoveKey = "IsAssaultMove";
+		const string RunningMoveActivityKey = "RunningMoveActivity";
+		const string TargetKey = "Target";
+
 		readonly bool isAssaultMove;
 		readonly AutoTarget autoTarget;
 		readonly AttackMove attackMove;
+		readonly IMove move;
+
+		readonly MoveSpec spec;
+		readonly Func<Activity> getMove;
 
 		bool runningMoveActivity = false;
 		int token = Actor.InvalidConditionToken;
 		Target target = Target.Invalid;
 
-		public AttackMoveActivity(Actor self, Func<Activity> getMove, bool assaultMoving = false)
+		public AttackMoveActivity(Actor self, MoveSpec spec, bool assaultMoving = false)
 		{
-			this.getMove = getMove;
+			this.spec = spec;
+			move = self.Trait<IMove>();
 			autoTarget = self.TraitOrDefault<AutoTarget>();
 			attackMove = self.TraitOrDefault<AttackMove>();
 			isAssaultMove = assaultMoving;
 			ChildHasPriority = false;
 		}
 
+		public AttackMoveActivity(Actor self, Func<Activity> getMove, bool assaultMoving = false)
+		{
+			this.getMove = getMove;
+			move = self.Trait<IMove>();
+			autoTarget = self.TraitOrDefault<AutoTarget>();
+			attackMove = self.TraitOrDefault<AttackMove>();
+			isAssaultMove = assaultMoving;
+			ChildHasPriority = false;
+		}
+
+		internal AttackMoveActivity(Actor self, SnapshotReader r, MiniYaml yaml)
+		{
+			move = self.Trait<IMove>();
+			autoTarget = self.TraitOrDefault<AutoTarget>();
+			attackMove = self.TraitOrDefault<AttackMove>();
+			ChildHasPriority = false;
+
+			var nodes = yaml.ToDictionary();
+			isAssaultMove = FieldLoader.GetValue<bool>(IsAssaultMoveKey, nodes[IsAssaultMoveKey].Value);
+			runningMoveActivity = FieldLoader.GetValue<bool>(RunningMoveActivityKey, nodes[RunningMoveActivityKey].Value);
+			spec = MoveSpec.LoadState(nodes[SpecKey], r);
+
+			if (attackMove != null && autoTarget != null)
+				GrantMoveCondition(self);
+
+			r.DeferTarget(nodes[TargetKey].Value, t => target = t);
+		}
+
+		Activity NextMove(Actor self)
+		{
+			return spec != null ? spec.Resolve(self, move) : getMove();
+		}
+
 		protected override void OnFirstRun(Actor self)
 		{
 			if (attackMove == null || autoTarget == null)
 			{
-				QueueChild(getMove());
+				QueueChild(NextMove(self));
 				return;
 			}
 
-			if (isAssaultMove)
-				token = self.GrantCondition(attackMove.Info.AssaultMoveCondition);
-			else
-				token = self.GrantCondition(attackMove.Info.AttackMoveCondition);
+			GrantMoveCondition(self);
 		}
 
 		public override bool Tick(Actor self)
@@ -77,7 +118,7 @@ namespace OpenRA.Mods.Common.Activities
 				if (ChildActivity == null)
 				{
 					runningMoveActivity = true;
-					QueueChild(getMove());
+					QueueChild(NextMove(self));
 				}
 			}
 
@@ -101,8 +142,29 @@ namespace OpenRA.Mods.Common.Activities
 
 		public override IEnumerable<TargetLineNode> TargetLineNodes(Actor self)
 		{
-			foreach (var n in getMove().TargetLineNodes(self))
+			foreach (var n in NextMove(self).TargetLineNodes(self))
 				yield return n;
+		}
+
+		void GrantMoveCondition(Actor self)
+		{
+			token = self.GrantCondition(isAssaultMove
+				? attackMove.Info.AssaultMoveCondition
+				: attackMove.Info.AttackMoveCondition);
+		}
+
+		public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+		{
+			if (spec == null)
+				return null;
+
+			return
+			[
+				new(SpecKey, spec.SaveState(w)),
+				new(IsAssaultMoveKey, FieldSaver.FormatValue(isAssaultMove)),
+				new(RunningMoveActivityKey, FieldSaver.FormatValue(runningMoveActivity)),
+				new(TargetKey, w.TargetRef(target))
+			];
 		}
 	}
 }

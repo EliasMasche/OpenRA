@@ -1,4 +1,4 @@
-#region Copyright & License Information
+﻿#region Copyright & License Information
 /*
  * Copyright (c) The OpenRA Developers and Contributors
  * This file is part of OpenRA, which is free software. It is made
@@ -15,6 +15,7 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
 using OpenRA.Activities;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Activities;
 using OpenRA.Mods.Common.Orders;
 using OpenRA.Primitives;
@@ -229,8 +230,12 @@ namespace OpenRA.Mods.Common.Traits
 
 	public class Aircraft : PausableConditionalTrait<AircraftInfo>, ITick, ISync, IFacing, IPositionable, IMove,
 		INotifyAddedToWorld, INotifyRemovedFromWorld, INotifyActorDisposing, INotifyBecomingIdle, ICreationActivity,
-		IActorPreviewInitModifier, IDeathActorInitModifier, IIssueDeployOrder, IIssueOrder, IResolveOrder, IOrderVoice
+		IActorPreviewInitModifier, IDeathActorInitModifier, IIssueDeployOrder, IIssueOrder, IResolveOrder, IOrderVoice,
+		ISaveState, INotifyStateRestored
 	{
+		const string ReservedActorKey = "ReservedActor";
+		const string ForceLandingKey = "ForceLanding";
+
 		readonly Actor self;
 
 		Repairable repairable;
@@ -1223,6 +1228,40 @@ namespace OpenRA.Mods.Common.Traits
 			return null;
 		}
 
+		TraitInfo ISaveState.SaveStateInfo => Info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
+		{
+			if (ReservedActor == null && !ForceLanding)
+				return null;
+
+			return
+			[
+				new(ReservedActorKey, w.ActorRef(ReservedActor)),
+				new(ForceLandingKey, FieldSaver.FormatValue(ForceLanding))
+			];
+		}
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
+		{
+			var nodes = data.ToDictionary();
+			if (nodes.TryGetValue(ForceLandingKey, out var forceLanding))
+				ForceLanding = FieldLoader.GetValue<bool>(ForceLandingKey, forceLanding.Value);
+
+			if (nodes.TryGetValue(ReservedActorKey, out var reserved))
+				r.DeferActor(reserved.Value, a => ReservedActor = a);
+		}
+
+		void INotifyStateRestored.StateRestored(Actor self)
+		{
+			if (ReservedActor == null)
+				return;
+
+			var target = ReservedActor;
+			ReservedActor = null;
+			MakeReservation(target);
+		}
+
 		sealed class AssociateWithAirfieldActivity : Activity
 		{
 			readonly Aircraft aircraft;
@@ -1300,7 +1339,7 @@ namespace OpenRA.Mods.Common.Traits
 
 				if (rallyPoint != null && rallyPoint.Length > 0)
 					foreach (var cell in rallyPoint)
-						QueueChild(new AttackMoveActivity(self, () => aircraft.MoveTo(cell, 1, evaluateNearestMovableCell: true, targetLineColor: Color.OrangeRed)));
+						QueueChild(new AttackMoveActivity(self, MoveSpec.ToCellAt(cell, 1, evaluateNearestMovableCell: true, targetLineColor: Color.OrangeRed)));
 
 				if (!creationByMap)
 					aircraft.UnReserve();

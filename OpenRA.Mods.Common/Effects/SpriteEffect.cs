@@ -60,6 +60,12 @@ namespace OpenRA.Mods.Common.Effects
 			if (delay-- > 0)
 				return;
 
+			if (!world.Map.Sequences.SpritesLoaded)
+			{
+				world.AddFrameEndTask(w => w.Remove(this));
+				return;
+			}
+
 			if (!initialized)
 			{
 				anim.PlayThen(sequence, () => world.AddFrameEndTask(w => { w.Remove(this); w.ScreenMap.Remove(this); }));

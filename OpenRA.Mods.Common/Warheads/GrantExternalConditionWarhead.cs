@@ -30,7 +30,10 @@ namespace OpenRA.Mods.Common.Warheads
 
 		public override void DoImpact(in Target target, WarheadArgs args)
 		{
-			var firedBy = args.SourceActor;
+			var firedBy = args.SourceOwner;
+
+			if (firedBy == null)
+				return;
 
 			if (target.Type == TargetType.Invalid)
 				return;

@@ -1,4 +1,4 @@
-﻿#region Copyright & License Information
+#region Copyright & License Information
 /*
  * Copyright (c) The OpenRA Developers and Contributors
  * This file is part of OpenRA, which is free software. It is made
@@ -10,6 +10,8 @@
 #endregion
 
 using System.Collections.Frozen;
+using System.Collections.Generic;
+using OpenRA.GameSaves;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Traits
@@ -30,8 +32,10 @@ namespace OpenRA.Mods.Common.Traits
 		public override object Create(ActorInitializer init) { return new GrantConditionOnClientDock(this); }
 	}
 
-	public sealed class GrantConditionOnClientDock : INotifyDockClient, ITick, ISync
+	public sealed class GrantConditionOnClientDock : INotifyDockClient, ITick, ISync, ISaveState
 	{
+		const string DurationKey = "Duration";
+
 		readonly GrantConditionOnClientDockInfo info;
 		int token;
 		int delayedtoken;
@@ -80,6 +84,25 @@ namespace OpenRA.Mods.Common.Traits
 		{
 			if (delayedtoken != Actor.InvalidConditionToken && --Duration <= 0)
 				delayedtoken = self.RevokeCondition(delayedtoken);
+		}
+
+		TraitInfo ISaveState.SaveStateInfo => info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
+		{
+			return [new(DurationKey, FieldSaver.FormatValue(Duration))];
+		}
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
+		{
+			var node = data.NodeWithKeyOrDefault(DurationKey);
+			if (node == null)
+				return;
+
+			Duration = FieldLoader.GetValue<int>(DurationKey, node.Value.Value);
+
+			if (Duration > 0 && delayedtoken == Actor.InvalidConditionToken && info.Condition != null)
+				delayedtoken = self.GrantCondition(info.Condition);
 		}
 	}
 }

@@ -9,8 +9,11 @@
  */
 #endregion
 
+using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using OpenRA.GameSaves;
 using OpenRA.Graphics;
 using OpenRA.Traits;
 
@@ -20,13 +23,86 @@ namespace OpenRA.Mods.Common.Traits
 	[Desc("Spawns the initial units for each player upon game start.")]
 	public class SpawnMapActorsInfo : TraitInfo<SpawnMapActors> { }
 
-	public class SpawnMapActors : IWorldLoaded
+	public class SpawnMapActors : IWorldLoaded, IWorldSaveState, ILoadBeforeDeferredScript, IMapActorRoster
 	{
+		public bool MappingWasRead { get; private set; }
+
+		readonly Dictionary<string, uint> idsByName = [];
+
 		public Dictionary<string, Actor> Actors = [];
-		public uint LastMapActorID { get; private set; }
+
+		MapActorRoster roster = MapActorRoster.None;
+
+		string IWorldSaveState.SectionName => WorldRestorer.MapActorsSection;
+
+		MapActorRoster IMapActorRoster.SaveRoster => roster;
+
+		public bool IsMapActor(uint actorID)
+		{
+			return roster.Contains(actorID);
+		}
+
+		IEnumerable<KeyValuePair<string, Actor>> LiveActors()
+		{
+			return Actors.Where(kv => kv.Value.IsInWorld);
+		}
+
+		void IMapActorRoster.LoadRoster(MapActorRoster loaded, SnapshotReader r)
+		{
+			roster = loaded;
+
+			idsByName.Clear();
+			Actors.Clear();
+			MappingWasRead = true;
+
+			foreach (var kv in loaded.Names)
+				idsByName[kv.Key] = kv.Value;
+		}
+
+		void IWorldSaveState.SaveState(Actor self, Stream s, SnapshotWriter w)
+		{
+			var live = LiveActors().ToArray();
+
+			WorldRestorer.WriteMapActorRoster(s, roster with
+			{
+				Names = live.Select(kv => new KeyValuePair<string, uint>(kv.Key, kv.Value.ActorID)).ToArray()
+			});
+		}
+
+		void IWorldSaveState.LoadState(Actor self, Stream s, SnapshotReader r)
+		{
+			s.CopyTo(Stream.Null);
+
+			foreach (var kv in idsByName)
+			{
+				var actor = r.GetActorById(kv.Value);
+				if (actor != null)
+					Actors[kv.Key] = actor;
+			}
+
+			if (Actors.Count != idsByName.Count)
+			{
+				var missing = idsByName.Where(kv => !Actors.ContainsKey(kv.Key))
+					.Select(kv => $"{kv.Key}={kv.Value}");
+
+				throw new InvalidDataException($"{WorldRestorer.MapActorsSection} names {idsByName.Count} map actors, " +
+					$"but {idsByName.Count - Actors.Count} of them are not in the restored world: " +
+					string.Join(", ", missing));
+			}
+
+			if (roster.IsEmpty || roster.LastID < roster.FirstID ||
+				idsByName.Values.Any(id => !roster.Contains(id)))
+			{
+				throw new InvalidDataException($"{WorldRestorer.MapActorsSection} records the id span " +
+					$"{roster.FirstID}..{roster.LastID}, which does not hold its {idsByName.Count} named actors.");
+			}
+		}
 
 		public void WorldLoaded(World world, WorldRenderer wr)
 		{
+			if (world.IsRestoringSnapshot)
+				return;
+
 			var preventMapSpawns = world.WorldActor.TraitsImplementing<IPreventMapSpawn>()
 				.Concat(world.WorldActor.Owner.PlayerActor.TraitsImplementing<IPreventMapSpawn>())
 				.ToArray();
@@ -48,7 +124,12 @@ namespace OpenRA.Mods.Common.Traits
 
 				var actor = world.CreateActor(true, actorReference);
 				Actors[kv.Key] = actor;
-				LastMapActorID = actor.ActorID;
+
+				if (roster.IsEmpty || actor.ActorID < roster.FirstID)
+					roster = roster with { FirstID = actor.ActorID };
+
+				if (actor.ActorID > roster.LastID)
+					roster = roster with { LastID = actor.ActorID };
 			}
 		}
 
@@ -63,13 +144,4 @@ namespace OpenRA.Mods.Common.Traits
 	}
 
 	public class SkipMakeAnimsInit : RuntimeFlagInit { }
-	public class SpawnedByMapInit : ActorInit, ISuppressInitExport, ISingleInstanceInit
-	{
-		protected SpawnedByMapInit(string instanceName)
-			: base(instanceName) { }
-
-		public SpawnedByMapInit() { }
-
-		public override MiniYaml Save() => null;
-	}
 }

@@ -153,7 +153,7 @@ namespace OpenRA.Mods.Common.Traits
 			fogSprites = new (Sprite, float, float)[variantCount * variantStride];
 
 			var sequences = map.Sequences;
-			for (var j = 0; j < variantCount; j++)
+			for (var j = 0; sequences.SpritesLoaded && j < variantCount; j++)
 			{
 				var shroudSequence = sequences.GetSequence(info.Sequence, info.ShroudVariants[j]);
 				var fogSequence = sequences.GetSequence(info.Sequence, info.FogVariants[j]);
@@ -200,12 +200,15 @@ namespace OpenRA.Mods.Common.Traits
 		{
 			// Initialize tile cache
 			// This includes the region outside the visible area to cover any sprites peeking outside the map
-			foreach (var uv in w.Map.AllCells.MapCoords)
+			if (wr != null)
 			{
-				var pos = w.Map.CenterOfCell(uv.ToCPos(map));
-				var screen = wr.Screen3DPosition(pos - new WVec(0, 0, pos.Z));
-				var variant = (byte)Game.CosmeticRandom.Next(info.ShroudVariants.Length);
-				tileInfos[uv] = new TileInfo(screen, variant);
+				foreach (var uv in w.Map.AllCells.MapCoords)
+				{
+					var pos = w.Map.CenterOfCell(uv.ToCPos(map));
+					var screen = wr.Screen3DPosition(pos - new WVec(0, 0, pos.Z));
+					var variant = (byte)Game.CosmeticRandom.Next(info.ShroudVariants.Length);
+					tileInfos[uv] = new TileInfo(screen, variant);
+				}
 			}
 
 			// All tiles are visible in the editor
@@ -213,6 +216,9 @@ namespace OpenRA.Mods.Common.Traits
 				cellVisibility = puv => map.Contains(puv) ? Shroud.CellVisibility.Visible | Shroud.CellVisibility.Explored : Shroud.CellVisibility.Explored;
 			else
 				cellVisibility = puv => map.Contains(puv) ? Shroud.CellVisibility.Visible | Shroud.CellVisibility.Explored : Shroud.CellVisibility.Hidden;
+
+			if (wr == null)
+				return;
 
 			var shroudBlend = shroudSprites[0].Sprite.BlendMode;
 			if (shroudSprites.Any(s => s.Sprite.BlendMode != shroudBlend))
@@ -322,6 +328,9 @@ namespace OpenRA.Mods.Common.Traits
 
 		void UpdateShroud(IEnumerable<PPos> region)
 		{
+			if (shroudLayer == null)
+				return;
+
 			if (!anyCellDirty)
 				return;
 
@@ -383,8 +392,8 @@ namespace OpenRA.Mods.Common.Traits
 			if (disposed)
 				return;
 
-			shroudLayer.Dispose();
-			fogLayer.Dispose();
+			shroudLayer?.Dispose();
+			fogLayer?.Dispose();
 			disposed = true;
 		}
 	}

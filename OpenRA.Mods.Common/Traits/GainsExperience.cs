@@ -1,4 +1,4 @@
-#region Copyright & License Information
+﻿#region Copyright & License Information
 /*
  * Copyright (c) The OpenRA Developers and Contributors
  * This file is part of OpenRA, which is free software. It is made
@@ -12,6 +12,7 @@
 using System;
 using System.Collections.Frozen;
 using System.Collections.Generic;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Effects;
 using OpenRA.Primitives;
 using OpenRA.Traits;
@@ -57,8 +58,10 @@ namespace OpenRA.Mods.Common.Traits
 		public override object Create(ActorInitializer init) { return new GainsExperience(init, this); }
 	}
 
-	public class GainsExperience : INotifyCreated, ISync, IResolveOrder, ITransformActorInitModifier
+	public class GainsExperience : INotifyCreated, ISync, IResolveOrder, ITransformActorInitModifier, ISaveState
 	{
+		const string ExperienceKey = "Experience";
+
 		[FluentReference("cheat", "player", "suffix")]
 		const string CheatUsed = "notification-cheat-used";
 
@@ -161,6 +164,25 @@ namespace OpenRA.Mods.Common.Traits
 		void ITransformActorInitModifier.ModifyTransformActorInit(Actor self, TypeDictionary init)
 		{
 			init.Add(new ExperienceInit(info, Experience));
+		}
+
+		TraitInfo ISaveState.SaveStateInfo => info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
+		{
+			if (Experience == 0)
+				return null;
+
+			return [new(ExperienceKey, FieldSaver.FormatValue(Experience))];
+		}
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
+		{
+			var node = data.NodeWithKeyOrDefault(ExperienceKey);
+			if (node == null)
+				return;
+
+			GiveExperience(FieldLoader.GetValue<int>(ExperienceKey, node.Value.Value), true);
 		}
 	}
 

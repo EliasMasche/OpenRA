@@ -10,7 +10,9 @@
 #endregion
 
 using System.Collections.Frozen;
+using System.Collections.Generic;
 using System.Linq;
+using OpenRA.GameSaves;
 using OpenRA.Primitives;
 using OpenRA.Traits;
 
@@ -53,6 +55,8 @@ namespace OpenRA.Mods.Common.Traits
 
 	public class TakeCover : Turreted, INotifyDamage, IDamageModifier, ISpeedModifier, ISync, IRenderInfantrySequenceModifier
 	{
+		const string RemainingDurationKey = "RemainingDuration";
+
 		readonly TakeCoverInfo info;
 
 		[VerifySync]
@@ -146,6 +150,28 @@ namespace OpenRA.Mods.Common.Traits
 				remainingDuration = info.Duration;
 				SetProneState(true);
 			}
+		}
+
+		protected override List<MiniYamlNode> SaveState(SnapshotWriter w)
+		{
+			return
+			[
+				.. base.SaveState(w),
+				new(RemainingDurationKey, FieldSaver.FormatValue(remainingDuration))
+			];
+		}
+
+		protected override void LoadState(MiniYaml data)
+		{
+			base.LoadState(data);
+
+			var node = data.NodeWithKeyOrDefault(RemainingDurationKey);
+			if (node == null)
+				return;
+
+			remainingDuration = FieldLoader.GetValue<int>(RemainingDurationKey, node.Value.Value);
+
+			SetProneState(remainingDuration != 0);
 		}
 	}
 }

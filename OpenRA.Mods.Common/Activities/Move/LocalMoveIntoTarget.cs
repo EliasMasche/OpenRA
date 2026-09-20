@@ -11,18 +11,26 @@
 
 using System.Collections.Generic;
 using OpenRA.Activities;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Traits;
 using OpenRA.Primitives;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Activities
 {
+	[SaveableActivity]
 	public class LocalMoveIntoTarget : Activity
 	{
+		const string TargetKey = "Target";
+		const string TargetMovementThresholdKey = "TargetMovementThreshold";
+		const string TargetStartPosKey = "TargetStartPos";
+		const string TargetLineColorKey = "TargetLineColor";
+
 		readonly Mobile mobile;
-		readonly Target target;
 		readonly Color? targetLineColor;
 		readonly WDist targetMovementThreshold;
+
+		Target target;
 		WPos targetStartPos;
 
 		public LocalMoveIntoTarget(Actor self, in Target target, WDist targetMovementThreshold, Color? targetLineColor = null)
@@ -31,6 +39,21 @@ namespace OpenRA.Mods.Common.Activities
 			this.target = target;
 			this.targetMovementThreshold = targetMovementThreshold;
 			this.targetLineColor = targetLineColor;
+		}
+
+		protected LocalMoveIntoTarget(Actor self, SnapshotReader r, MiniYaml yaml)
+		{
+			mobile = self.Trait<Mobile>();
+
+			var nodes = yaml.ToDictionary();
+			targetMovementThreshold = FieldLoader.GetValue<WDist>(TargetMovementThresholdKey, nodes[TargetMovementThresholdKey].Value);
+			targetStartPos = FieldLoader.GetValue<WPos>(TargetStartPosKey, nodes[TargetStartPosKey].Value);
+
+			var color = nodes[TargetLineColorKey].Value;
+			if (!string.IsNullOrEmpty(color))
+				targetLineColor = FieldLoader.GetValue<Color>(TargetLineColorKey, color);
+
+			r.DeferTarget(nodes[TargetKey].Value, t => target = t);
 		}
 
 		protected override void OnFirstRun(Actor self)
@@ -84,6 +107,18 @@ namespace OpenRA.Mods.Common.Activities
 		{
 			if (targetLineColor != null)
 				yield return new TargetLineNode(target, targetLineColor.Value);
+		}
+
+		public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+		{
+			return
+			[
+				new(TargetKey, w.TargetRef(target)),
+				new(TargetMovementThresholdKey, FieldSaver.FormatValue(targetMovementThreshold)),
+
+				new(TargetStartPosKey, FieldSaver.FormatValue(targetStartPos)),
+				new(TargetLineColorKey, targetLineColor.HasValue ? FieldSaver.FormatValue(targetLineColor.Value) : "")
+			];
 		}
 	}
 }

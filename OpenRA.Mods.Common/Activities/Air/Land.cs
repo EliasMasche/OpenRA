@@ -13,12 +13,14 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using OpenRA.Activities;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Traits;
 using OpenRA.Primitives;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Activities
 {
+	[SaveableActivity]
 	public class Land : Activity
 	{
 		readonly Aircraft aircraft;
@@ -65,6 +67,51 @@ namespace OpenRA.Mods.Common.Activities
 				desiredFacing = aircraft.Info.InitialFacing;
 			else
 				desiredFacing = facing;
+		}
+
+		internal Land(Actor self, SnapshotReader r, MiniYaml yaml)
+		{
+			aircraft = self.Trait<Aircraft>();
+
+			var n = yaml.ToDictionary();
+			offset = FieldLoader.GetValue<WVec>("Offset", n["Offset"].Value);
+			landRange = FieldLoader.GetValue<WDist>("LandRange", n["LandRange"].Value);
+			assignTargetOnFirstRun = FieldLoader.GetValue<bool>("AssignTargetOnFirstRun", n["AssignTargetOnFirstRun"].Value);
+			targetPosition = FieldLoader.GetValue<WPos>("TargetPosition", n["TargetPosition"].Value);
+			landingCell = FieldLoader.GetValue<CPos>("LandingCell", n["LandingCell"].Value);
+			landingInitiated = FieldLoader.GetValue<bool>("LandingInitiated", n["LandingInitiated"].Value);
+			finishedApproach = FieldLoader.GetValue<bool>("FinishedApproach", n["FinishedApproach"].Value);
+
+			var cells = n["ClearCells"].Value;
+			clearCells = string.IsNullOrEmpty(cells) ? [] : FieldLoader.GetValue<CPos[]>("ClearCells", cells);
+
+			var f = n["DesiredFacing"].Value;
+			if (!string.IsNullOrEmpty(f))
+				desiredFacing = FieldLoader.GetValue<WAngle>("DesiredFacing", f);
+
+			var color = n["TargetLineColor"].Value;
+			if (!string.IsNullOrEmpty(color))
+				targetLineColor = FieldLoader.GetValue<Color>("TargetLineColor", color);
+
+			r.DeferTarget(n["Target"].Value, t => target = t);
+		}
+
+		public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+		{
+			return
+			[
+				new("Target", w.TargetRef(target)),
+				new("Offset", FieldSaver.FormatValue(offset)),
+				new("LandRange", FieldSaver.FormatValue(landRange)),
+				new("AssignTargetOnFirstRun", FieldSaver.FormatValue(assignTargetOnFirstRun)),
+				new("ClearCells", FieldSaver.FormatValue(clearCells)),
+				new("DesiredFacing", desiredFacing.HasValue ? FieldSaver.FormatValue(desiredFacing.Value) : ""),
+				new("TargetPosition", FieldSaver.FormatValue(targetPosition)),
+				new("LandingCell", FieldSaver.FormatValue(landingCell)),
+				new("LandingInitiated", FieldSaver.FormatValue(landingInitiated)),
+				new("FinishedApproach", FieldSaver.FormatValue(finishedApproach)),
+				new("TargetLineColor", targetLineColor.HasValue ? FieldSaver.FormatValue(targetLineColor.Value) : "")
+			];
 		}
 
 		protected override void OnFirstRun(Actor self)

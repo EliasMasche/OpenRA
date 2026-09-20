@@ -12,12 +12,14 @@
 using System.Collections.Generic;
 using System.Linq;
 using OpenRA.Activities;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Traits;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Activities
 {
 	// Assumes you have Minelayer on that unit
+	[SaveableActivity]
 	public class LayMines : Activity
 	{
 		readonly Minelayer minelayer;
@@ -41,6 +43,39 @@ namespace OpenRA.Mods.Common.Activities
 			rearmableInfo = self.Info.TraitInfoOrDefault<RearmableInfo>();
 			moveCooldownHelper = new MoveCooldownHelper(self.World, movement as Mobile) { RetryIfDestinationBlocked = true };
 			this.minefield = minefield;
+		}
+
+		internal LayMines(Actor self, SnapshotReader r, MiniYaml yaml)
+		{
+			minelayer = self.Trait<Minelayer>();
+			ammoPools = self.TraitsImplementing<AmmoPool>().ToArray();
+			movement = self.Trait<IMove>();
+			moveInfo = self.Info.TraitInfo<IMoveInfo>();
+			rearmableInfo = self.Info.TraitInfoOrDefault<RearmableInfo>();
+			moveCooldownHelper = new MoveCooldownHelper(self.World, movement as Mobile) { RetryIfDestinationBlocked = true };
+
+			var n = yaml.ToDictionary();
+			returnToBase = FieldLoader.GetValue<bool>("ReturnToBase", n["ReturnToBase"].Value);
+			layingMine = FieldLoader.GetValue<bool>("LayingMine", n["LayingMine"].Value);
+			moveCooldownHelper.LoadState(n["Cooldown"]);
+
+			var cells = n["Minefield"].Value;
+			if (!string.IsNullOrEmpty(cells))
+				minefield = FieldLoader.GetValue<CPos[]>("Minefield", cells).ToList();
+
+			r.DeferActor(n["RearmTarget"].Value, a => rearmTarget = a);
+		}
+
+		public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+		{
+			return
+			[
+				new("Minefield", minefield != null ? FieldSaver.FormatValue(minefield) : ""),
+				new("ReturnToBase", FieldSaver.FormatValue(returnToBase)),
+				new("LayingMine", FieldSaver.FormatValue(layingMine)),
+				new("RearmTarget", w.ActorRef(rearmTarget)),
+				new("Cooldown", new MiniYaml("", moveCooldownHelper.SaveState()))
+			];
 		}
 
 		protected override void OnFirstRun(Actor self)

@@ -56,6 +56,9 @@ namespace OpenRA.Mods.Cnc.Traits.Render
 			var body = self.Trait<BodyOrientation>();
 			rv = self.Trait<RenderVoxels>();
 
+			if (rv.Renderer.ModelCache == null)
+				return;
+
 			var idleModel = rv.Renderer.ModelCache.GetModelSequence(rv.Image, info.IdleSequence);
 			modelAnimation = new ModelAnimation(idleModel, () => WVec.Zero,
 				() => body.QuantizeOrientation(self.Orientation),

@@ -12,20 +12,23 @@
 using System;
 using System.Collections.Generic;
 using OpenRA.Activities;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Cnc.Traits;
 using OpenRA.Mods.Common.Traits;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Cnc.Activities
 {
+	[SaveableActivity]
 	public class Leap : Activity
 	{
 		readonly Mobile mobile;
-		readonly Mobile targetMobile;
 		readonly int speed;
 		readonly AttackLeap attack;
-		readonly EdibleByLeap edible;
-		readonly Target target;
+
+		Mobile targetMobile;
+		EdibleByLeap edible;
+		Target target;
 
 		CPos destinationCell;
 		SubCell destinationSubCell = SubCell.Any;
@@ -44,6 +47,50 @@ namespace OpenRA.Mods.Cnc.Activities
 			this.target = target;
 			this.edible = edible;
 			this.speed = speed;
+		}
+
+		internal Leap(Actor self, SnapshotReader r, MiniYaml yaml)
+		{
+			mobile = self.Trait<Mobile>();
+			attack = self.Trait<AttackLeap>();
+
+			var n = yaml.ToDictionary();
+			speed = FieldLoader.GetValue<int>("Speed", n["Speed"].Value);
+			destinationCell = FieldLoader.GetValue<CPos>("DestinationCell", n["DestinationCell"].Value);
+			destination = FieldLoader.GetValue<WPos>("Destination", n["Destination"].Value);
+			origin = FieldLoader.GetValue<WPos>("Origin", n["Origin"].Value);
+			length = FieldLoader.GetValue<int>("Length", n["Length"].Value);
+			canceled = FieldLoader.GetValue<bool>("Canceled", n["Canceled"].Value);
+			jumpComplete = FieldLoader.GetValue<bool>("JumpComplete", n["JumpComplete"].Value);
+			ticks = FieldLoader.GetValue<int>("Ticks", n["Ticks"].Value);
+			targetPosition = FieldLoader.GetValue<WPos>("TargetPosition", n["TargetPosition"].Value);
+			destinationSubCell = FieldLoader.GetValue<SubCell>("DestinationSubCell", n["DestinationSubCell"].Value);
+
+			r.DeferTarget(n["Target"].Value, t =>
+			{
+				target = t;
+				var a = t.Type == TargetType.Actor ? t.Actor : null;
+				targetMobile = a?.TraitOrDefault<Mobile>();
+				edible = a?.TraitOrDefault<EdibleByLeap>();
+			});
+		}
+
+		public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+		{
+			return
+			[
+				new("Target", w.TargetRef(target)),
+				new("Speed", FieldSaver.FormatValue(speed)),
+				new("DestinationCell", FieldSaver.FormatValue(destinationCell)),
+				new("DestinationSubCell", FieldSaver.FormatValue(destinationSubCell)),
+				new("Destination", FieldSaver.FormatValue(destination)),
+				new("Origin", FieldSaver.FormatValue(origin)),
+				new("Length", FieldSaver.FormatValue(length)),
+				new("Canceled", FieldSaver.FormatValue(canceled)),
+				new("JumpComplete", FieldSaver.FormatValue(jumpComplete)),
+				new("Ticks", FieldSaver.FormatValue(ticks)),
+				new("TargetPosition", FieldSaver.FormatValue(targetPosition))
+			];
 		}
 
 		protected override void OnFirstRun(Actor self)

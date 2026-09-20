@@ -1,5 +1,6 @@
 ^BaseWorld:
 	Inherits: ^Palettes
+	MapLayerSnapshot:
 	ScreenMap:
 	ActorMap:
 	Selection:

@@ -1,0 +1,88 @@
+MapFormat: 12
+
+RequiresMod: ra
+
+Title: Lua Snapshot Test
+
+Author: OpenRA Lua snapshot harness
+
+Tileset: SNOW
+
+MapSize: 48,40
+
+Bounds: 1,1,46,38
+
+Visibility: Lobby
+
+Categories: Conquest
+
+Players:
+	PlayerReference@Neutral:
+		Name: Neutral
+		OwnsWorld: True
+		NonCombatant: True
+		Faction: england
+	PlayerReference@Creeps:
+		Name: Creeps
+		NonCombatant: True
+		Faction: england
+		Enemies: TestPlayer, TestEnemy
+	PlayerReference@TestPlayer:
+		Name: TestPlayer
+		Playable: True
+		Faction: england
+		Enemies: Creeps
+	PlayerReference@TestEnemy:
+		Name: TestEnemy
+		Playable: True
+		Faction: russia
+		Enemies: Creeps
+
+Actors:
+	Spawn0: mpspawn
+		Owner: Neutral
+		Location: 8,20
+	Spawn1: mpspawn
+		Owner: Neutral
+		Location: 40,20
+	TestWalker: e1
+		Owner: TestPlayer
+		Location: 10,20
+	TestBlocker: e1
+		Owner: TestEnemy
+		Location: 24,20
+	TestGuardA: e1
+		Owner: TestEnemy
+		Location: 30,18
+	TestGuardB: e1
+		Owner: TestEnemy
+		Location: 31,20
+	TestGuardC: e1
+		Owner: TestEnemy
+		Location: 32,22
+	Tree0: t01
+		Owner: Neutral
+		Location: 4,4
+	Tree1: t01
+		Owner: Neutral
+		Location: 6,4
+	Tree2: t01
+		Owner: Neutral
+		Location: 8,4
+	Tree3: t01
+		Owner: Neutral
+		Location: 4,6
+	Tree4: t01
+		Owner: Neutral
+		Location: 6,6
+	Tree5: t01
+		Owner: Neutral
+		Location: 8,6
+	Tree6: t01
+		Owner: Neutral
+		Location: 4,8
+	Tree7: t01
+		Owner: Neutral
+		Location: 6,8
+
+Rules: rules.yaml

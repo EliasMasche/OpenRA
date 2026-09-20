@@ -41,6 +41,9 @@ namespace OpenRA.Mods.Common.Server
 		const string NoStartWithoutPlayers = "notification-no-start-without-players";
 
 		[FluentReference]
+		const string NoStartWithoutSeatedPlayers = "notification-no-start-without-seated-players";
+
+		[FluentReference]
 		const string TwoHumansRequired = "notification-two-humans-required";
 
 		[FluentReference]
@@ -335,6 +338,13 @@ namespace OpenRA.Mods.Common.Server
 					return true;
 				}
 
+				if (server.LobbyRestoredFromSnapshot && !server.LobbyInfo.Slots.Any(sl =>
+					server.LobbyInfo.ClientInSlot(sl.Key) is { Bot: null }))
+				{
+					server.SendFluentMessageTo(conn, NoStartWithoutSeatedPlayers);
+					return true;
+				}
+
 				if (!server.LobbyInfo.GlobalSettings.EnableSingleplayer && server.LobbyInfo.NonBotPlayers.Count() < 2)
 				{
 					server.SendFluentMessageTo(conn, TwoHumansRequired);
@@ -590,7 +600,7 @@ namespace OpenRA.Mods.Common.Server
 						server.LobbyInfo.GlobalSettings.MapStatus = server.MapStatusCache[server.Map];
 
 						server.LobbyInfo.Slots = server.Map.Players.Players
-							.Select(p => MakeSlotFromPlayerReference(p.Value))
+							.Select(p => Session.Slot.FromPlayerReference(p.Value))
 							.Where(ss => ss != null)
 							.ToDictionary(ss => ss.PlayerReference);
 
@@ -1328,31 +1338,12 @@ namespace OpenRA.Mods.Common.Server
 				server.Map = server.ModData.MapCache[uid];
 				server.LobbyInfo.GlobalSettings.MapStatus = server.MapStatusCache[server.Map];
 				server.LobbyInfo.Slots = server.Map.Players.Players
-					.Select(p => MakeSlotFromPlayerReference(p.Value))
+					.Select(p => Session.Slot.FromPlayerReference(p.Value))
 					.Where(s => s != null)
 					.ToDictionary(s => s.PlayerReference);
 
 				LoadMapSettings(server, server.LobbyInfo.GlobalSettings, server.Map);
 			}
-		}
-
-		static Session.Slot MakeSlotFromPlayerReference(PlayerReference pr)
-		{
-			if (!pr.Playable)
-				return null;
-
-			return new Session.Slot
-			{
-				PlayerReference = pr.Name,
-				Closed = false,
-				AllowBots = pr.AllowBots,
-				LockFaction = pr.LockFaction,
-				LockColor = pr.LockColor,
-				LockTeam = pr.LockTeam,
-				LockHandicap = pr.LockHandicap,
-				LockSpawn = pr.LockSpawn,
-				Required = pr.Required,
-			};
 		}
 
 		public static void LoadMapSettings(S server, Session.Global gs, MapPreview map)
@@ -1444,7 +1435,7 @@ namespace OpenRA.Mods.Common.Server
 
 				// Reset player slots
 				server.LobbyInfo.Slots = server.Map.Players.Players
-					.Select(p => MakeSlotFromPlayerReference(p.Value))
+					.Select(p => Session.Slot.FromPlayerReference(p.Value))
 					.Where(ss => ss != null)
 					.ToDictionary(ss => ss.PlayerReference);
 			}

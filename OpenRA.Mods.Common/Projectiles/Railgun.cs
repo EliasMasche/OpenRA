@@ -11,10 +11,12 @@
 
 using System.Collections.Generic;
 using OpenRA.GameRules;
+using OpenRA.GameSaves;
 using OpenRA.Graphics;
 using OpenRA.Mods.Common.Graphics;
 using OpenRA.Mods.Common.Traits;
 using OpenRA.Primitives;
+using OpenRA.Scripting;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Projectiles
@@ -104,8 +106,16 @@ namespace OpenRA.Mods.Common.Projectiles
 		}
 	}
 
-	public class Railgun : IProjectile, ISync
+	[SaveableEffect]
+	public class Railgun : IProjectile, ISync, ISaveableEffect, IProjectileScriptInfo
 	{
+		const string ArgsKey = "Args";
+		const string TargetKey = "Target";
+		const string TicksKey = "Ticks";
+		const string AnimationCompleteKey = "AnimationComplete";
+		const string BeamColorKey = "BeamColor";
+		const string HelixColorKey = "HelixColor";
+
 		readonly ProjectileArgs args;
 		readonly RailgunInfo info;
 		readonly Animation hitanim;
@@ -139,19 +149,57 @@ namespace OpenRA.Mods.Common.Projectiles
 			if (info.Inaccuracy.Length > 0)
 			{
 				var maxInaccuracyOffset = Util.GetProjectileInaccuracy(info.Inaccuracy.Length, info.InaccuracyType, args);
-				target += WVec.FromPDF(args.SourceActor.World.SharedRandom, 2) * maxInaccuracyOffset / 1024;
+				target += WVec.FromPDF(args.World.SharedRandom, 2) * maxInaccuracyOffset / 1024;
 			}
 
 			if (!string.IsNullOrEmpty(info.HitAnim))
-				hitanim = new Animation(args.SourceActor.World, info.HitAnim);
+				hitanim = new Animation(args.World, info.HitAnim);
 
 			CalculateVectors();
+		}
+
+		internal Railgun(World world, SnapshotReader r, MiniYaml yaml)
+		{
+			var nodes = yaml.ToDictionary();
+
+			args = ProjectileArgsCodec.Load(nodes[ArgsKey], world, r);
+
+			info = (RailgunInfo)args.Weapon.Projectile;
+
+			target = FieldLoader.GetValue<WPos>(TargetKey, nodes[TargetKey].Value);
+			ticks = FieldLoader.GetValue<int>(TicksKey, nodes[TicksKey].Value);
+			animationComplete = FieldLoader.GetValue<bool>(AnimationCompleteKey, nodes[AnimationCompleteKey].Value);
+
+			BeamColor = FieldLoader.GetValue<Color>(BeamColorKey, nodes[BeamColorKey].Value);
+			HelixColor = FieldLoader.GetValue<Color>(HelixColorKey, nodes[HelixColorKey].Value);
+
+			if (!string.IsNullOrEmpty(info.HitAnim))
+				hitanim = new Animation(world, info.HitAnim);
+
+			r.DeferCompleted(CalculateVectors);
+		}
+
+		List<MiniYamlNode> ISaveableEffect.SaveState(World world, SnapshotWriter w)
+		{
+			var argNodes = ProjectileArgsCodec.Save(args, world, w);
+			if (argNodes == null)
+				return null;
+
+			return
+			[
+				new(ArgsKey, new MiniYaml("", argNodes)),
+				new(TargetKey, FieldSaver.FormatValue(target)),
+				new(TicksKey, FieldSaver.FormatValue(ticks)),
+				new(AnimationCompleteKey, FieldSaver.FormatValue(animationComplete)),
+				new(BeamColorKey, FieldSaver.FormatValue(BeamColor)),
+				new(HelixColorKey, FieldSaver.FormatValue(HelixColor))
+			];
 		}
 
 		void CalculateVectors()
 		{
 			// Check for blocking actors
-			if (info.Blockable && BlocksProjectiles.AnyBlockingActorsBetween(args.SourceActor.World, args.SourceActor.Owner, target, args.Source,
+			if (info.Blockable && BlocksProjectiles.AnyBlockingActorsBetween(args.World, args.SourceOwner, target, args.Source,
 					info.BeamWidth, out var blockedPos))
 				target = blockedPos;
 
@@ -253,5 +301,11 @@ namespace OpenRA.Mods.Common.Projectiles
 				foreach (var r in hitanim.Render(target, wr.Palette(info.HitAnimPalette)))
 					yield return r;
 		}
+
+		WPos IProjectileScriptInfo.Position => args.Source;
+		WPos IProjectileScriptInfo.TargetPosition => target;
+		ScriptProjectileInterface IProjectileScriptInfo.LuaInterface { get; set; }
+		Actor IProjectileScriptInfo.SourceActor => args.SourceActor;
+		WeaponInfo IProjectileScriptInfo.Weapon => args.Weapon;
 	}
 }

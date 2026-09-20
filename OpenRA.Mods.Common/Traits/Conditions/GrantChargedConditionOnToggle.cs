@@ -11,7 +11,9 @@
 
 using System.Collections.Generic;
 using System.Collections.Immutable;
+using System.Linq;
 using OpenRA.Activities;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Orders;
 using OpenRA.Primitives;
 using OpenRA.Traits;
@@ -91,8 +93,11 @@ namespace OpenRA.Mods.Common.Traits
 	}
 
 	public class GrantChargedConditionOnToggle : PausableConditionalTrait<GrantChargedConditionOnToggleInfo>,
-		IIssueOrder, IResolveOrder, ITick, ISelectionBar, IOrderVoice, ISync, IIssueDeployOrder
+		IIssueOrder, IResolveOrder, ITick, ISelectionBar, IOrderVoice, ISync, IIssueDeployOrder, ISaveState
 	{
+		const string ChargeTickKey = "ChargeTick";
+		const string IsActiveKey = "IsActive";
+
 		[VerifySync]
 		int chargeTick = 0;
 
@@ -242,6 +247,35 @@ namespace OpenRA.Mods.Common.Traits
 			}
 		}
 
+		TraitInfo ISaveState.SaveStateInfo => Info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
+		{
+			return
+			[
+				new(ChargeTickKey, FieldSaver.FormatValue(chargeTick)),
+				new(IsActiveKey, FieldSaver.FormatValue(isActive))
+			];
+		}
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
+		{
+			var nodes = data.ToDictionary();
+			if (nodes.TryGetValue(ChargeTickKey, out var tick))
+				chargeTick = FieldLoader.GetValue<int>(ChargeTickKey, tick.Value);
+
+			if (!nodes.TryGetValue(IsActiveKey, out var active))
+				return;
+
+			isActive = FieldLoader.GetValue<bool>(IsActiveKey, active.Value);
+
+			if (isActive && activatedToken == Actor.InvalidConditionToken)
+				activatedToken = self.GrantCondition(Info.ActivatedCondition);
+
+			if (Info.ChargedCondition != null && chargeTick >= (isActive ? activatedChargeThreshold : chargeThreshold))
+				chargedToken = self.GrantCondition(Info.ChargedCondition);
+		}
+
 		float ISelectionBar.GetValue()
 		{
 			if (IsTraitDisabled)
@@ -256,13 +290,30 @@ namespace OpenRA.Mods.Common.Traits
 		bool ISelectionBar.DisplayWhenEmpty => Info.DisplayBarWhenEmpty;
 	}
 
+	[SaveableActivity]
 	public class ToggleChargedCondition : Activity
 	{
+		const string ToggleKey = "Toggle";
+
 		readonly GrantChargedConditionOnToggle toggle;
 
 		public ToggleChargedCondition(Actor self, GrantChargedConditionOnToggle toggle)
 		{
 			this.toggle = toggle;
+		}
+
+		internal ToggleChargedCondition(Actor self, SnapshotReader _, MiniYaml yaml)
+		{
+			var index = FieldLoader.GetValue<int>(ToggleKey, yaml.NodeWithKeyOrDefault(ToggleKey).Value.Value);
+			var toggles = self.TraitsImplementing<GrantChargedConditionOnToggle>().ToArray();
+			if (index >= 0 && index < toggles.Length)
+				toggle = toggles[index];
+		}
+
+		public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+		{
+			var index = self.TraitsImplementing<GrantChargedConditionOnToggle>().ToList().IndexOf(toggle);
+			return [new(ToggleKey, FieldSaver.FormatValue(index))];
 		}
 
 		protected override void OnFirstRun(Actor self)

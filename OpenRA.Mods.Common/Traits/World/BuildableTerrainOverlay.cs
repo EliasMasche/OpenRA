@@ -67,6 +67,9 @@ namespace OpenRA.Mods.Common.Traits
 
 		void IWorldLoaded.WorldLoaded(World w, WorldRenderer wr)
 		{
+			if (wr == null)
+				return;
+
 			render = new TerrainSpriteLayer(w, wr, disabledSprite, BlendMode.Alpha, false);
 
 			world.Map.Tiles.CellEntryChanged += UpdateTerrainCell;
@@ -102,7 +105,7 @@ namespace OpenRA.Mods.Common.Traits
 			if (disposed)
 				return;
 
-			render.Dispose();
+			render?.Dispose();
 			disposed = true;
 		}
 	}

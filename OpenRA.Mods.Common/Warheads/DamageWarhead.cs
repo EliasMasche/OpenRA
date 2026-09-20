@@ -29,25 +29,26 @@ namespace OpenRA.Mods.Common.Warheads
 		[Desc("Damage percentage versus each armor type.")]
 		public readonly FrozenDictionary<string, int> Versus = FrozenDictionary<string, int>.Empty;
 
-		public override bool IsValidAgainst(Actor victim, Actor firedBy)
+		public override bool IsValidAgainst(Actor victim, Player firedBy, Actor firedByActor = null)
 		{
 			// Cannot be damaged without a Health trait
 			if (!victim.Info.HasTraitInfo<IHealthInfo>())
 				return false;
 
-			return base.IsValidAgainst(victim, firedBy);
+			return base.IsValidAgainst(victim, firedBy, firedByActor);
 		}
 
 		public override void DoImpact(in Target target, WarheadArgs args)
 		{
-			var firedBy = args.SourceActor;
+			var firedBy = args.SourceOwner;
+			var firedByActor = args.SourceActor;
 
 			// Used by traits or warheads that damage a single actor, rather than a position
 			if (target.Type == TargetType.Actor)
 			{
 				var victim = target.Actor;
 
-				if (!IsValidAgainst(victim, firedBy))
+				if (!IsValidAgainst(victim, firedBy, firedByActor))
 					return;
 
 				// PERF: Avoid using TraitsImplementing<HitShape> that needs to find the actor in the trait dictionary.
@@ -63,10 +64,10 @@ namespace OpenRA.Mods.Common.Warheads
 				if (closestActiveShape == null)
 					return;
 
-				InflictDamage(victim, firedBy, closestActiveShape, args);
+				InflictDamage(victim, firedBy, firedByActor, closestActiveShape, args);
 			}
 			else if (target.Type != TargetType.Invalid)
-				DoImpact(target.CenterPosition, firedBy, args);
+				DoImpact(target.CenterPosition, firedBy, firedByActor, args);
 		}
 
 		protected virtual int DamageVersus(Actor victim, HitShape shape, WarheadArgs args)
@@ -83,12 +84,12 @@ namespace OpenRA.Mods.Common.Warheads
 			return Util.ApplyPercentageModifiers(100, armor);
 		}
 
-		protected virtual void InflictDamage(Actor victim, Actor firedBy, HitShape shape, WarheadArgs args)
+		protected virtual void InflictDamage(Actor victim, Player firedBy, Actor firedByActor, HitShape shape, WarheadArgs args)
 		{
 			var damage = Util.ApplyPercentageModifiers(Damage, args.DamageModifiers.Append(DamageVersus(victim, shape, args)));
-			victim.InflictDamage(firedBy, new Damage(damage, DamageTypes));
+			victim.InflictDamage(firedByActor, new Damage(damage, DamageTypes));
 		}
 
-		protected abstract void DoImpact(WPos pos, Actor firedBy, WarheadArgs args);
+		protected abstract void DoImpact(WPos pos, Player firedBy, Actor firedByActor, WarheadArgs args);
 	}
 }

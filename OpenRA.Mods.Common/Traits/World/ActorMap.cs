@@ -13,6 +13,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using OpenRA.GameSaves;
 using OpenRA.Primitives;
 using OpenRA.Traits;
 
@@ -27,7 +28,7 @@ namespace OpenRA.Mods.Common.Traits
 		public override object Create(ActorInitializer init) { return new ActorMap(init.World, this); }
 	}
 
-	public class ActorMap : IActorMap, ITick, INotifyCreated
+	public class ActorMap : IActorMap, ITick, INotifyCreated, ISaveState
 	{
 		sealed class InfluenceNode
 		{
@@ -52,16 +53,22 @@ namespace OpenRA.Mods.Common.Traits
 			readonly HashSet<Actor> oldActors = [];
 			readonly HashSet<Actor> currentActors = [];
 
-			public CellTrigger(CPos[] footprint, Action<Actor> onActorEntered, Action<Actor> onActorExited)
+			public CellTrigger(CPos[] footprint, Action<Actor> onActorEntered, Action<Actor> onActorExited,
+				IEnumerable<Actor> occupants = null)
 			{
 				Footprint = footprint;
 
 				this.onActorEntered = onActorEntered;
 				this.onActorExited = onActorExited;
 
+				if (occupants != null)
+					currentActors.UnionWith(occupants);
+
 				// Notify any actors that are initially inside the trigger zone
 				Dirty = true;
 			}
+
+			public IEnumerable<Actor> Occupants => currentActors;
 
 			public void Tick(ActorMap actorMap)
 			{
@@ -105,13 +112,19 @@ namespace OpenRA.Mods.Common.Traits
 			WDist range;
 			WDist vRange;
 
-			public ProximityTrigger(WPos pos, WDist range, WDist vRange, Action<Actor> onActorEntered, Action<Actor> onActorExited)
+			public ProximityTrigger(WPos pos, WDist range, WDist vRange, Action<Actor> onActorEntered, Action<Actor> onActorExited,
+				IEnumerable<Actor> occupants = null)
 			{
 				this.onActorEntered = onActorEntered;
 				this.onActorExited = onActorExited;
 
+				if (occupants != null)
+					currentActors.UnionWith(occupants);
+
 				Update(pos, range, vRange);
 			}
+
+			public IEnumerable<Actor> Occupants => currentActors;
 
 			public void Update(WPos newPos, WDist newRange, WDist newVRange)
 			{
@@ -163,6 +176,8 @@ namespace OpenRA.Mods.Common.Traits
 						onActorExited(a);
 			}
 		}
+
+		const string NextTriggerIdKey = "NextTriggerId";
 
 		readonly ActorMapInfo info;
 		readonly Map map;
@@ -510,8 +525,20 @@ namespace OpenRA.Mods.Common.Traits
 
 		public int AddCellTrigger(CPos[] cells, Action<Actor> onEntry, Action<Actor> onExit)
 		{
-			var id = nextTriggerId++;
-			var t = new CellTrigger(cells, onEntry, onExit);
+			return AddCellTrigger(nextTriggerId++, cells, onEntry, onExit, null);
+		}
+
+		public int RestoreCellTrigger(int id, CPos[] cells, Action<Actor> onEntry, Action<Actor> onExit, IEnumerable<Actor> occupants)
+		{
+			if (id >= nextTriggerId)
+				nextTriggerId = id + 1;
+
+			return AddCellTrigger(id, cells, onEntry, onExit, occupants);
+		}
+
+		int AddCellTrigger(int id, CPos[] cells, Action<Actor> onEntry, Action<Actor> onExit, IEnumerable<Actor> occupants)
+		{
+			var t = new CellTrigger(cells, onEntry, onExit, occupants);
 			cellTriggers.Add(id, t);
 
 			var layer = influence[0];
@@ -550,8 +577,22 @@ namespace OpenRA.Mods.Common.Traits
 
 		public int AddProximityTrigger(WPos pos, WDist range, WDist vRange, Action<Actor> onEntry, Action<Actor> onExit)
 		{
-			var id = nextTriggerId++;
-			var t = new ProximityTrigger(pos, range, vRange, onEntry, onExit);
+			return AddProximityTrigger(nextTriggerId++, pos, range, vRange, onEntry, onExit, null);
+		}
+
+		public int RestoreProximityTrigger(int id, WPos pos, WDist range, WDist vRange,
+			Action<Actor> onEntry, Action<Actor> onExit, IEnumerable<Actor> occupants)
+		{
+			if (id >= nextTriggerId)
+				nextTriggerId = id + 1;
+
+			return AddProximityTrigger(id, pos, range, vRange, onEntry, onExit, occupants);
+		}
+
+		int AddProximityTrigger(int id, WPos pos, WDist range, WDist vRange,
+			Action<Actor> onEntry, Action<Actor> onExit, IEnumerable<Actor> occupants)
+		{
+			var t = new ProximityTrigger(pos, range, vRange, onEntry, onExit, occupants);
 			proximityTriggers.Add(id, t);
 
 			foreach (var bin in BinsInBox(t.TopLeft, t.BottomRight))
@@ -583,6 +624,30 @@ namespace OpenRA.Mods.Common.Traits
 
 			foreach (var bin in BinsInBox(t.TopLeft, t.BottomRight))
 				bin.ProximityTriggers.Add(t);
+		}
+
+		public IEnumerable<Actor> CellTriggerOccupants(int id)
+		{
+			return cellTriggers.TryGetValue(id, out var t) ? t.Occupants : [];
+		}
+
+		public IEnumerable<Actor> ProximityTriggerOccupants(int id)
+		{
+			return proximityTriggers.TryGetValue(id, out var t) ? t.Occupants : [];
+		}
+
+		TraitInfo ISaveState.SaveStateInfo => info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
+		{
+			return [new(NextTriggerIdKey, FieldSaver.FormatValue(nextTriggerId))];
+		}
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
+		{
+			var node = data.NodeWithKeyOrDefault(NextTriggerIdKey);
+			if (node != null)
+				nextTriggerId = FieldLoader.GetValue<int>(NextTriggerIdKey, node.Value.Value);
 		}
 
 		public void AddPosition(Actor a, IOccupySpace ios)

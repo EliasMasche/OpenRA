@@ -36,8 +36,9 @@ namespace OpenRA.Mods.Common.Warheads
 			if (target.Type == TargetType.Invalid)
 				return;
 
-			var firedBy = args.SourceActor;
-			var world = firedBy.World;
+			var firedBy = args.SourceOwner;
+
+			var world = args.World;
 
 			if (Chance < world.LocalRandom.Next(100))
 				return;

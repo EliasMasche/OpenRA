@@ -12,7 +12,6 @@
 using System;
 using System.Globalization;
 using System.IO;
-using OpenRA.Network;
 
 namespace OpenRA.Mods.Common.Widgets.Logic
 {
@@ -30,12 +29,9 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 		[FluentReference]
 		const string TooltipSavegamePlayers = "tooltip-savegame-players";
 
-		public static TimeSpan? GetGameDuration(GameSave save)
+		public static TimeSpan? GetGameDuration(SaveFileInfo save)
 		{
-			if (save == null || save.GlobalSettings.GameTimestep <= 0 || save.LastOrdersFrame < 0)
-				return null;
-
-			return TimeSpan.FromMilliseconds((long)save.LastOrdersFrame * save.GlobalSettings.GameTimestep);
+			return save?.Duration;
 		}
 
 		public static string FormatGameDuration(TimeSpan? duration)
@@ -47,7 +43,7 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 			return $"{(int)d.TotalHours:D2}:{d.Minutes:D2}:{d.Seconds:D2}";
 		}
 
-		public static string BuildSaveTooltipText(string savePath, GameSave save, ModData modData)
+		public static string BuildSaveTooltipText(string savePath, SaveFileInfo save, ModData modData)
 		{
 			var mapTitle = save != null ? modData.MapCache[save.GlobalSettings.Map].Title : null;
 			var creationDate = File.GetCreationTime(savePath).ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);

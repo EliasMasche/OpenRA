@@ -290,6 +290,22 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 				};
 			}
 
+			var loadSaveButton = lobby.GetOrNull<ButtonWidget>("LOADSAVE_BUTTON");
+			if (loadSaveButton != null)
+			{
+				loadSaveButton.IsVisible = () => panel != PanelType.Servers
+					&& orderManager.LobbyInfo.GlobalSettings.Dedicated
+					&& orderManager.LobbyInfo.GlobalSettings.EnableGameSaves;
+
+				loadSaveButton.IsDisabled = () => gameStarting || panel == PanelType.Kick || panel == PanelType.ForceStart
+					|| orderManager.LocalClient == null || !orderManager.LocalClient.IsAdmin;
+
+				loadSaveButton.OnClick = () => Ui.OpenWindow("LOBBY_LOAD_SAVE_PANEL", new WidgetArgs()
+				{
+					{ "onExit", () => { } },
+				});
+			}
+
 			var slotsButton = lobby.GetOrNull<DropDownButtonWidget>("SLOTS_DROPDOWNBUTTON");
 			if (slotsButton != null)
 			{

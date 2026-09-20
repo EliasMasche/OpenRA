@@ -12,12 +12,14 @@
 using System.Collections.Generic;
 using System.Linq;
 using OpenRA.Activities;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Traits;
 using OpenRA.Primitives;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Activities
 {
+	[SaveableActivity]
 	public class ReturnToBase : Activity
 	{
 		readonly Aircraft aircraft;
@@ -34,6 +36,32 @@ namespace OpenRA.Mods.Common.Activities
 			aircraft = self.Trait<Aircraft>();
 			repairableInfo = self.Info.TraitInfoOrDefault<RepairableInfo>();
 			rearmable = self.TraitOrDefault<Rearmable>();
+		}
+
+		internal ReturnToBase(Actor self, SnapshotReader r, MiniYaml yaml)
+		{
+			aircraft = self.Trait<Aircraft>();
+			repairableInfo = self.Info.TraitInfoOrDefault<RepairableInfo>();
+			rearmable = self.TraitOrDefault<Rearmable>();
+
+			var n = yaml.ToDictionary();
+			alwaysLand = FieldLoader.GetValue<bool>("AlwaysLand", n["AlwaysLand"].Value);
+
+			var f = n["Facing"].Value;
+			if (!string.IsNullOrEmpty(f))
+				facing = FieldLoader.GetValue<WAngle>("Facing", f);
+
+			r.DeferActor(n["Dest"].Value, a => dest = a);
+		}
+
+		public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+		{
+			return
+			[
+				new("Dest", w.ActorRef(dest)),
+				new("AlwaysLand", FieldSaver.FormatValue(alwaysLand)),
+				new("Facing", facing.HasValue ? FieldSaver.FormatValue(facing.Value) : "")
+			];
 		}
 
 		public static Actor ChooseResupplier(Actor self, bool unreservedOnly)

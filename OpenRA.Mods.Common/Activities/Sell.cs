@@ -9,15 +9,20 @@
  */
 #endregion
 
+using System.Collections.Generic;
 using OpenRA.Activities;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Effects;
 using OpenRA.Mods.Common.Traits;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Activities
 {
+	[SaveableActivity]
 	sealed class Sell : Activity
 	{
+		const string ShowTicksKey = "ShowTicks";
+
 		readonly IHealth health;
 		readonly SellableInfo sellableInfo;
 		readonly PlayerResources playerResources;
@@ -30,6 +35,20 @@ namespace OpenRA.Mods.Common.Activities
 			sellableInfo = self.Info.TraitInfo<SellableInfo>();
 			playerResources = self.Owner.PlayerActor.Trait<PlayerResources>();
 			IsInterruptible = false;
+		}
+
+		internal Sell(Actor self, SnapshotReader _, MiniYaml yaml)
+		{
+			health = self.TraitOrDefault<IHealth>();
+			sellableInfo = self.Info.TraitInfo<SellableInfo>();
+			playerResources = self.Owner.PlayerActor.Trait<PlayerResources>();
+			IsInterruptible = false;
+			showTicks = FieldLoader.GetValue<bool>(ShowTicksKey, yaml.NodeWithKeyOrDefault(ShowTicksKey).Value.Value);
+		}
+
+		public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+		{
+			return [new(ShowTicksKey, FieldSaver.FormatValue(showTicks))];
 		}
 
 		public override bool Tick(Actor self)

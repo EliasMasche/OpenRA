@@ -9,6 +9,8 @@
  */
 #endregion
 
+using System.Collections.Generic;
+using OpenRA.GameSaves;
 using OpenRA.Primitives;
 using OpenRA.Traits;
 
@@ -41,8 +43,11 @@ namespace OpenRA.Mods.Common.Traits
 		public override object Create(ActorInitializer init) { return new ChangesHealth(init.Self, this); }
 	}
 
-	sealed class ChangesHealth : ConditionalTrait<ChangesHealthInfo>, ITick, INotifyDamage, ISync
+	sealed class ChangesHealth : ConditionalTrait<ChangesHealthInfo>, ITick, INotifyDamage, ISync, ISaveState
 	{
+		const string TicksKey = "Ticks";
+		const string DamageTicksKey = "DamageTicks";
+
 		readonly IHealth health;
 
 		[VerifySync]
@@ -85,6 +90,27 @@ namespace OpenRA.Mods.Common.Traits
 		{
 			if (e.Damage.Value > 0)
 				damageTicks = Info.DamageCooldown;
+		}
+
+		TraitInfo ISaveState.SaveStateInfo => Info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
+		{
+			return
+			[
+				new(TicksKey, FieldSaver.FormatValue(ticks)),
+				new(DamageTicksKey, FieldSaver.FormatValue(damageTicks))
+			];
+		}
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
+		{
+			var nodes = data.ToDictionary();
+			if (nodes.TryGetValue(TicksKey, out var t))
+				ticks = FieldLoader.GetValue<int>(TicksKey, t.Value);
+
+			if (nodes.TryGetValue(DamageTicksKey, out var dt))
+				damageTicks = FieldLoader.GetValue<int>(DamageTicksKey, dt.Value);
 		}
 	}
 }

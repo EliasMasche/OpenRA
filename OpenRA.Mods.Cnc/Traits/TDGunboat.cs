@@ -12,6 +12,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using OpenRA.Activities;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common;
 using OpenRA.Mods.Common.Traits;
 using OpenRA.Primitives;
@@ -55,8 +56,10 @@ namespace OpenRA.Mods.Cnc.Traits
 	}
 
 	public class TDGunboat : ITick, ISync, IFacing, IPositionable, IMove, IDeathActorInitModifier,
-		INotifyCreated, INotifyAddedToWorld, INotifyRemovedFromWorld, IActorPreviewInitModifier
+		INotifyCreated, INotifyAddedToWorld, INotifyRemovedFromWorld, IActorPreviewInitModifier, ISaveState
 	{
+		const string CachedLocationKey = "CachedLocation";
+
 		public readonly TDGunboatInfo Info;
 		readonly Actor self;
 		static readonly WAngle Left = new(256);
@@ -237,6 +240,20 @@ namespace OpenRA.Mods.Cnc.Traits
 		{
 			if (!inits.Contains<DynamicFacingInit>() && !inits.Contains<FacingInit>())
 				inits.Add(new DynamicFacingInit(() => Facing));
+		}
+
+		TraitInfo ISaveState.SaveStateInfo => Info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
+		{
+			return [new(CachedLocationKey, FieldSaver.FormatValue(cachedLocation))];
+		}
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
+		{
+			var node = data.NodeWithKeyOrDefault(CachedLocationKey);
+			if (node != null)
+				cachedLocation = FieldLoader.GetValue<CPos>(CachedLocationKey, node.Value.Value);
 		}
 	}
 }

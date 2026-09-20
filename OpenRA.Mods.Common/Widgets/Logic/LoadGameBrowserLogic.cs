@@ -15,6 +15,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using OpenRA.GameSaves;
 using OpenRA.Network;
 using OpenRA.Primitives;
 using OpenRA.Traits;
@@ -25,61 +26,6 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 	[IncludeStaticFluentReferences(typeof(GameSaveUtils))]
 	public class LoadGameBrowserLogic : ChromeLogic
 	{
-		enum SaveType
-		{
-			Any,
-			Autosave,
-			Manual
-		}
-
-		enum DateType
-		{
-			Any,
-			Today,
-			LastWeek,
-			LastFortnight,
-			LastMonth
-		}
-
-		enum DurationType
-		{
-			Any,
-			VeryShort,
-			Short,
-			Medium,
-			Long
-		}
-
-		sealed class SaveEntry
-		{
-			public string Path;
-			public DateTime LastWrite;
-			public DateTime CreationTime;
-			public TimeSpan? Duration;
-			public string MapTitle;
-			public IReadOnlyList<string> Factions = [];
-			public bool Visible = true;
-			public ScrollItemWidget Item;
-		}
-
-		sealed class Filter
-		{
-			public SaveType Type;
-			public DateType Date;
-			public DurationType Duration;
-			public string SaveName;
-			public string MapName;
-			public string Faction;
-
-			public bool IsEmpty =>
-				Type == default
-				&& Date == default
-				&& Duration == default
-				&& string.IsNullOrEmpty(SaveName)
-				&& string.IsNullOrEmpty(MapName)
-				&& string.IsNullOrEmpty(Faction);
-		}
-
 		[FluentReference]
 		const string RenameSaveTitle = "dialog-rename-save.title";
 
@@ -155,7 +101,11 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 		[FluentReference]
 		const string HumanPlayer = "label-load-game-browser-panel-human-player";
 
-		static Filter filter = new();
+		[FluentReference]
+		const string CannotLoadDifferentMap = "notification-cannot-load-different-map";
+
+		[FluentReference]
+		const string CannotLoadMapUnavailable = "notification-cannot-load-map-unavailable";
 
 		readonly Widget panel;
 		readonly ScrollPanelWidget gameList;
@@ -164,22 +114,29 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 		readonly ScrollItemWidget playerHeader;
 		readonly ScrollItemWidget gameTemplate;
 		readonly ScrollItemWidget dateHeaderTemplate;
-		readonly List<SaveEntry> saves = [];
 		readonly Action onStart;
 		readonly ModData modData;
-		readonly string baseSavePath;
+
+		readonly SaveListModel saveList;
+
+		readonly Dictionary<string, ScrollItemWidget> saveItems = [];
 
 		MapPreview map;
-		string selectedPath;
-		GameSave selectedSave;
+		SaveFileInfo selectedSave;
 		bool filtersVisible;
 
-		[ObjectCreator.UseCtor]
-		public LoadGameBrowserLogic(Widget widget, ModData modData, Action onExit, Action onStart)
-		{
-			// Reset filters to their neutral state every time the panel opens.
-			filter = new Filter();
+		readonly string sessionMapUid;
 
+		readonly Action<string, string> loadAction;
+
+		[ObjectCreator.UseCtor]
+		public LoadGameBrowserLogic(Widget widget, ModData modData, Action onExit, Action onStart,
+			Action<string, string> loadAction, string sessionMapUid = null)
+		{
+			this.loadAction = loadAction;
+			this.sessionMapUid = sessionMapUid;
+
+			// Reset filters to their neutral state every time the panel opens.
 			map = MapCache.UnknownMap;
 			panel = widget;
 
@@ -187,8 +144,13 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 			this.onStart = onStart;
 			Game.BeforeGameStart += OnGameStart;
 
-			var mod = modData.Manifest;
-			baseSavePath = Path.Combine(Platform.SupportDir, "Saves", mod.Id, mod.Metadata.Version);
+			saveList = new SaveListModel(SavePaths.BaseSaveDirectory(modData.Manifest),
+				uid => modData.MapCache[uid].Title);
+
+			saveList.SelectionChanged += OnSelectionChanged;
+
+			saveList.DeleteFailed += savePath =>
+				TextNotificationsManager.Debug(FluentProvider.GetMessage(SaveDeletionFailed, "savePath", savePath));
 
 			panel.Get<ButtonWidget>("CANCEL_BUTTON").OnClick = () =>
 			{
@@ -206,24 +168,24 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 			loadButton.OnClick = Load;
 
 			var mapPreviewRoot = panel.Get("MAP_PREVIEW_ROOT");
-			mapPreviewRoot.IsVisible = () => selectedPath != null;
+			mapPreviewRoot.IsVisible = () => saveList.SelectedPath != null;
 			var saveInfo = panel.Get("SAVE_INFO");
-			saveInfo.IsVisible = () => selectedPath != null;
+			saveInfo.IsVisible = () => saveList.SelectedPath != null;
 
 			var incompatibleTitleLabel = saveInfo.Get<LabelWidget>("INCOMPATIBLE_TITLE_LABEL");
-			incompatibleTitleLabel.IsVisible = () => selectedPath != null && selectedSave == null;
+			incompatibleTitleLabel.IsVisible = () => saveList.SelectedPath != null && selectedSave == null;
 
 			var incompatibleLabelA = saveInfo.Get<LabelWidget>("INCOMPATIBLE_LABEL_A");
-			incompatibleLabelA.IsVisible = () => selectedPath != null && selectedSave == null;
+			incompatibleLabelA.IsVisible = () => saveList.SelectedPath != null && selectedSave == null;
 
 			var incompatibleLabelB = saveInfo.Get<LabelWidget>("INCOMPATIBLE_LABEL_B");
-			incompatibleLabelB.IsVisible = () => selectedPath != null && selectedSave == null;
+			incompatibleLabelB.IsVisible = () => saveList.SelectedPath != null && selectedSave == null;
 
 			var savegameInfoDate = saveInfo.GetOrNull<LabelWidget>("SAVEGAME_INFO_DATE");
 			if (savegameInfoDate != null)
 			{
-				savegameInfoDate.GetText = () => selectedSave != null && selectedPath != null
-					? "Date created: " + File.GetCreationTime(selectedPath).ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)
+				savegameInfoDate.GetText = () => selectedSave != null && saveList.SelectedPath != null
+					? "Date created: " + File.GetCreationTime(saveList.SelectedPath).ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)
 					: string.Empty;
 				savegameInfoDate.IsVisible = () => selectedSave != null;
 			}
@@ -236,9 +198,9 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 			}
 
 			var playerListWidget = saveInfo.Get<ScrollPanelWidget>("PLAYER_LIST");
-			playerListWidget.IsVisible = () => selectedPath != null;
+			playerListWidget.IsVisible = () => saveList.SelectedPath != null;
 
-			var spawnOccupants = new CachedTransform<GameSave, Dictionary<int, SpawnOccupant>>(_ => GetSpawnOccupants());
+			var spawnOccupants = new CachedTransform<SaveFileInfo, Dictionary<int, SpawnOccupant>>(_ => GetSpawnOccupants());
 
 			Ui.LoadWidget("MAP_PREVIEW", mapPreviewRoot, new WidgetArgs
 			{
@@ -259,24 +221,20 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 			SetupFilters();
 			SetupManagement(onExit);
 
-			if (Directory.Exists(baseSavePath))
-				LoadGames(gameTemplate, dateHeaderTemplate);
+			LoadGames();
 
 			SetupSaveDependentFilters();
-			ApplyFilter();
+			saveList.ApplyFilter();
 		}
 
-		void LoadGames(ScrollItemWidget gameTemplate, ScrollItemWidget dateHeaderTemplate)
+		void LoadGames()
 		{
 			gameList.RemoveChildren();
+			saveItems.Clear();
 
-			var savePaths = Directory.GetFiles(baseSavePath, "*.orasav")
-				.OrderByDescending(File.GetLastWriteTime)
-				.ToList();
+			saveList.Reload();
 
-			var byDate = savePaths
-				.GroupBy(p => File.GetLastWriteTime(p).Date)
-				.OrderByDescending(g => g.Key);
+			var byDate = saveList.Saves.GroupBy(s => s.LastWrite.Date);
 
 			foreach (var group in byDate)
 			{
@@ -290,39 +248,16 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 				header.IsVisible = () => groupEntries.Any(e => e.Visible);
 				gameList.AddChild(header);
 
-				foreach (var savePath in group)
+				foreach (var entry in group)
 				{
-					GameSave save = null;
-					try
-					{
-						save = new GameSave(savePath);
-					}
-					catch
-					{
-					}
-
-					var lastWrite = File.GetLastWriteTime(savePath);
-					var creationTime = File.GetCreationTime(savePath);
-					var entry = new SaveEntry
-					{
-						Path = savePath,
-						LastWrite = lastWrite,
-						CreationTime = creationTime,
-						Duration = GameSaveUtils.GetGameDuration(save),
-						MapTitle = save != null ? modData.MapCache[save.GlobalSettings.Map].Title : null,
-						Factions = save?.SlotClients.Values
-							.Select(sc => sc.Faction)
-							.Where(f => !string.IsNullOrEmpty(f))
-							.ToList() ?? []
-					};
-
-					saves.Add(entry);
+					var savePath = entry.Path;
+					var save = SaveFileInfo.Read(savePath);
 					groupEntries.Add(entry);
 
 					var item = gameTemplate.Clone();
 					item.ItemKey = savePath;
-					item.IsSelected = () => selectedPath == item.ItemKey;
-					item.OnClick = () => SelectSave(item.ItemKey);
+					item.IsSelected = () => saveList.SelectedPath == item.ItemKey;
+					item.OnClick = () => saveList.SelectSave(item.ItemKey);
 					item.OnDoubleClick = Load;
 
 					var title = Path.GetFileNameWithoutExtension(savePath);
@@ -338,7 +273,7 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 						creationTimeLabel.IsVisible = () => item.IsSelected();
 					}
 
-					entry.Item = item;
+					saveItems[savePath] = item;
 					item.IsVisible = () => entry.Visible;
 
 					gameList.AddChild(item);
@@ -348,6 +283,8 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 
 		void SetupFilters()
 		{
+			saveList.ResetFilter();
+
 			TextFieldWidget nameInput = null;
 
 			// Save name
@@ -355,17 +292,17 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 				nameInput = panel.GetOrNull<TextFieldWidget>("FLT_NAME_INPUT");
 				if (nameInput != null)
 				{
-					nameInput.Text = filter.SaveName ?? string.Empty;
+					nameInput.Text = saveList.Filter.SaveName ?? string.Empty;
 					nameInput.OnEscKey = _ =>
 					{
-						filter.SaveName = nameInput.Text = null;
-						ApplyFilter();
+						saveList.Filter.SaveName = nameInput.Text = null;
+						saveList.ApplyFilter();
 						return true;
 					};
 					nameInput.OnTextEdited = () =>
 					{
-						filter.SaveName = string.IsNullOrEmpty(nameInput.Text) ? null : nameInput.Text;
-						ApplyFilter();
+						saveList.Filter.SaveName = string.IsNullOrEmpty(nameInput.Text) ? null : nameInput.Text;
+						saveList.ApplyFilter();
 					};
 				}
 			}
@@ -384,15 +321,15 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 
 					var lookup = options.ToFrozenDictionary(kvp => kvp.SaveType, kvp => kvp.Text);
 
-					ddb.GetText = () => lookup[filter.Type];
+					ddb.GetText = () => lookup[saveList.Filter.Type];
 					ddb.OnMouseDown = _ =>
 					{
 						ScrollItemWidget SetupItem((SaveType SaveType, string Text) option, ScrollItemWidget tpl)
 						{
 							var item = ScrollItemWidget.Setup(
 								tpl,
-								() => filter.Type == option.SaveType,
-								() => { filter.Type = option.SaveType; ApplyFilter(); });
+								() => saveList.Filter.Type == option.SaveType,
+								() => { saveList.Filter.Type = option.SaveType; saveList.ApplyFilter(); });
 							item.Get<LabelWidget>("LABEL").GetText = () => option.Text;
 							return item;
 						}
@@ -418,15 +355,15 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 
 					var lookup = options.ToFrozenDictionary(kvp => kvp.DateType, kvp => kvp.Text);
 
-					ddb.GetText = () => lookup[filter.Date];
+					ddb.GetText = () => lookup[saveList.Filter.Date];
 					ddb.OnMouseDown = _ =>
 					{
 						ScrollItemWidget SetupItem((DateType DateType, string Text) option, ScrollItemWidget tpl)
 						{
 							var item = ScrollItemWidget.Setup(
 								tpl,
-								() => filter.Date == option.DateType,
-								() => { filter.Date = option.DateType; ApplyFilter(); });
+								() => saveList.Filter.Date == option.DateType,
+								() => { saveList.Filter.Date = option.DateType; saveList.ApplyFilter(); });
 							item.Get<LabelWidget>("LABEL").GetText = () => option.Text;
 							return item;
 						}
@@ -452,15 +389,15 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 
 					var lookup = options.ToFrozenDictionary(kvp => kvp.DurationType, kvp => kvp.Text);
 
-					ddb.GetText = () => lookup[filter.Duration];
+					ddb.GetText = () => lookup[saveList.Filter.Duration];
 					ddb.OnMouseDown = _ =>
 					{
 						ScrollItemWidget SetupItem((DurationType DurationType, string Text) option, ScrollItemWidget tpl)
 						{
 							var item = ScrollItemWidget.Setup(
 								tpl,
-								() => filter.Duration == option.DurationType,
-								() => { filter.Duration = option.DurationType; ApplyFilter(); });
+								() => saveList.Filter.Duration == option.DurationType,
+								() => { saveList.Filter.Duration = option.DurationType; saveList.ApplyFilter(); });
 							item.Get<LabelWidget>("LABEL").GetText = () => option.Text;
 							return item;
 						}
@@ -473,14 +410,14 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 			// Reset
 			{
 				var button = panel.Get<ButtonWidget>("FLT_RESET_BUTTON");
-				button.IsDisabled = () => filter.IsEmpty;
+				button.IsDisabled = () => saveList.Filter.IsEmpty;
 				button.OnClick = () =>
 				{
-					filter = new Filter();
+					saveList.ResetFilter();
 					if (nameInput != null)
 						nameInput.Text = string.Empty;
 					SetupSaveDependentFilters();
-					ApplyFilter();
+					saveList.ApplyFilter();
 				};
 			}
 		}
@@ -492,7 +429,7 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 				var ddb = panel.GetOrNull<DropDownButtonWidget>("FLT_MAPNAME_DROPDOWNBUTTON");
 				if (ddb != null)
 				{
-					var mapNames = saves
+					var mapNames = saveList.Saves
 						.Select(s => s.MapTitle)
 						.Where(t => t != null)
 						.Distinct(StringComparer.OrdinalIgnoreCase)
@@ -502,15 +439,15 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 					mapNames.Insert(0, null);
 
 					var anyText = ddb.GetText();
-					ddb.GetText = () => string.IsNullOrEmpty(filter.MapName) ? anyText : filter.MapName;
+					ddb.GetText = () => string.IsNullOrEmpty(saveList.Filter.MapName) ? anyText : saveList.Filter.MapName;
 					ddb.OnMouseDown = _ =>
 					{
 						ScrollItemWidget SetupItem(string option, ScrollItemWidget tpl)
 						{
 							var item = ScrollItemWidget.Setup(
 								tpl,
-								() => string.Equals(filter.MapName, option, StringComparison.CurrentCultureIgnoreCase),
-								() => { filter.MapName = option; ApplyFilter(); });
+								() => string.Equals(saveList.Filter.MapName, option, StringComparison.CurrentCultureIgnoreCase),
+								() => { saveList.Filter.MapName = option; saveList.ApplyFilter(); });
 							item.Get<LabelWidget>("LABEL").GetText = () => option ?? anyText;
 							return item;
 						}
@@ -534,7 +471,7 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 					string ResolveFactionName(string internalName) =>
 						factionDisplayNames.GetValueOrDefault(internalName, internalName);
 
-					var factions = saves
+					var factions = saveList.Saves
 						.SelectMany(s => s.Factions)
 						.Distinct(StringComparer.OrdinalIgnoreCase)
 						.OrderBy(ResolveFactionName, StringComparer.CurrentCultureIgnoreCase)
@@ -543,15 +480,15 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 					factions.Insert(0, null);
 
 					var anyText = ddb.GetText();
-					ddb.GetText = () => string.IsNullOrEmpty(filter.Faction) ? anyText : ResolveFactionName(filter.Faction);
+					ddb.GetText = () => string.IsNullOrEmpty(saveList.Filter.Faction) ? anyText : ResolveFactionName(saveList.Filter.Faction);
 					ddb.OnMouseDown = _ =>
 					{
 						ScrollItemWidget SetupItem(string option, ScrollItemWidget tpl)
 						{
 							var item = ScrollItemWidget.Setup(
 								tpl,
-								() => string.Equals(filter.Faction, option, StringComparison.CurrentCultureIgnoreCase),
-								() => { filter.Faction = option; ApplyFilter(); });
+								() => string.Equals(saveList.Filter.Faction, option, StringComparison.CurrentCultureIgnoreCase),
+								() => { saveList.Filter.Faction = option; saveList.ApplyFilter(); });
 							var label = option != null ? ResolveFactionName(option) : anyText;
 							item.Get<LabelWidget>("LABEL").GetText = () => label;
 							return item;
@@ -563,117 +500,14 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 			}
 		}
 
-		static bool EvaluateSaveVisibility(SaveEntry entry)
-		{
-			// Save type
-			if (filter.Type != SaveType.Any)
-			{
-				var isAutosave = Path.GetFileNameWithoutExtension(entry.Path)
-					.StartsWith("autosave", StringComparison.OrdinalIgnoreCase);
-
-				if (filter.Type == SaveType.Autosave && !isAutosave)
-					return false;
-
-				if (filter.Type == SaveType.Manual && isAutosave)
-					return false;
-			}
-
-			// Date
-			if (filter.Date != DateType.Any)
-			{
-				TimeSpan t;
-				switch (filter.Date)
-				{
-					case DateType.Today:
-						t = TimeSpan.FromDays(1d);
-						break;
-
-					case DateType.LastWeek:
-						t = TimeSpan.FromDays(7d);
-						break;
-
-					case DateType.LastFortnight:
-						t = TimeSpan.FromDays(14d);
-						break;
-
-					case DateType.LastMonth:
-					default:
-						t = TimeSpan.FromDays(30d);
-						break;
-				}
-
-				if (entry.LastWrite < DateTime.Now - t)
-					return false;
-			}
-
-			// Duration
-			if (filter.Duration != DurationType.Any)
-			{
-				if (!entry.Duration.HasValue)
-					return true;
-
-				var minutes = entry.Duration.Value.TotalMinutes;
-				switch (filter.Duration)
-				{
-					case DurationType.VeryShort:
-						if (minutes >= 5)
-							return false;
-						break;
-
-					case DurationType.Short:
-						if (minutes < 5 || minutes >= 20)
-							return false;
-						break;
-
-					case DurationType.Medium:
-						if (minutes < 20 || minutes >= 60)
-							return false;
-						break;
-
-					case DurationType.Long:
-						if (minutes < 60)
-							return false;
-						break;
-				}
-			}
-
-			// Save name
-			if (!string.IsNullOrEmpty(filter.SaveName))
-			{
-				var saveName = Path.GetFileNameWithoutExtension(entry.Path);
-				if (!saveName.Contains(filter.SaveName, StringComparison.OrdinalIgnoreCase))
-					return false;
-			}
-
-			// Map name
-			if (!string.IsNullOrEmpty(filter.MapName) &&
-				!string.Equals(filter.MapName, entry.MapTitle, StringComparison.CurrentCultureIgnoreCase))
-				return false;
-
-			// Faction
-			if (!string.IsNullOrEmpty(filter.Faction) &&
-				!entry.Factions.Any(f => string.Equals(filter.Faction, f, StringComparison.CurrentCultureIgnoreCase)))
-				return false;
-
-			return true;
-		}
-
 		void ApplyFilter()
 		{
-			foreach (var entry in saves)
-				entry.Visible = EvaluateSaveVisibility(entry);
-
-			if (selectedPath == null)
-				SelectFirstVisible();
-			else if (saves.All(s => s.Path != selectedPath || !s.Visible))
-			{
-				var firstVisible = saves.FirstOrDefault(s => s.Visible);
-				if (firstVisible != null)
-					SelectSave(firstVisible.Path);
-			}
+			saveList.ApplyFilter();
 
 			gameList.Layout.AdjustChildren();
 			gameList.ScrollToSelectedItem();
+
+			OnSelectionChanged();
 		}
 
 		void SetupFiltersToggle()
@@ -719,7 +553,7 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 
 				if (reloadGames)
 				{
-					LoadGames(gameTemplate, dateHeaderTemplate);
+					LoadGames();
 					ApplyFilter();
 				}
 			}
@@ -740,10 +574,10 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 			SetupFiltersToggle();
 
 			var renameButton = panel.Get<ButtonWidget>("RENAME_BUTTON");
-			renameButton.IsDisabled = () => selectedPath == null;
+			renameButton.IsDisabled = () => saveList.SelectedPath == null;
 			renameButton.OnClick = () =>
 			{
-				var initialName = Path.GetFileNameWithoutExtension(selectedPath);
+				var initialName = Path.GetFileNameWithoutExtension(saveList.SelectedPath);
 
 				ConfirmationDialogs.TextInputPrompt(modData,
 					RenameSaveTitle,
@@ -753,38 +587,38 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 					onCancel: null,
 					acceptText: RenameSaveAccept,
 					cancelText: null,
-					inputValidator: newName => GameSaveUtils.IsValidNewSaveName(newName, initialName, baseSavePath));
+					inputValidator: newName => GameSaveUtils.IsValidNewSaveName(newName, initialName, saveList.BaseSavePath));
 			};
 
 			var deleteButton = panel.Get<ButtonWidget>("DELETE_BUTTON");
-			deleteButton.IsDisabled = () => selectedPath == null;
+			deleteButton.IsDisabled = () => saveList.SelectedPath == null;
 			deleteButton.OnClick = () =>
 			{
 				ConfirmationDialogs.ButtonPrompt(modData,
 					title: DeleteSaveTitle,
 					text: DeleteSavePrompt,
-					textArguments: ["save", Path.GetFileNameWithoutExtension(selectedPath)],
+					textArguments: ["save", Path.GetFileNameWithoutExtension(saveList.SelectedPath)],
 					onConfirm: () =>
 					{
-						Delete(selectedPath);
+						Delete(saveList.SelectedPath);
 
-						if (!saves.Any(s => s.Visible))
+						if (!saveList.Saves.Any(s => s.Visible))
 						{
 							Ui.CloseWindow();
 							onExit();
 						}
 						else
-							SelectFirstVisible();
+							saveList.SelectFirstVisible();
 					},
 					confirmText: DeleteSaveAccept,
 					onCancel: () => { });
 			};
 
 			var deleteAllButton = panel.Get<ButtonWidget>("DELETE_ALL_BUTTON");
-			deleteAllButton.IsDisabled = () => !saves.Any(s => s.Visible);
+			deleteAllButton.IsDisabled = () => !saveList.Saves.Any(s => s.Visible);
 			deleteAllButton.OnClick = () =>
 			{
-				var visible = saves.Where(s => s.Visible).ToList();
+				var visible = saveList.Saves.Where(s => s.Visible).ToList();
 
 				ConfirmationDialogs.ButtonPrompt(modData,
 					title: DeleteAllSavesTitle,
@@ -795,7 +629,7 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 						foreach (var s in visible)
 							Delete(s.Path);
 
-						if (!saves.Any(s => s.Visible))
+						if (!saveList.Saves.Any(s => s.Visible))
 						{
 							Ui.CloseWindow();
 							onExit();
@@ -808,81 +642,45 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 
 		void Rename(string oldName, string newName)
 		{
-			try
+			var oldPath = Path.Combine(saveList.BaseSavePath, oldName + SaveListModel.Extension);
+			var newPath = saveList.Rename(oldName, newName);
+			if (newPath == null)
+				return;
+
+			if (saveItems.Remove(oldPath, out var item))
 			{
-				var oldPath = Path.Combine(baseSavePath, oldName + ".orasav");
-				var newPath = Path.Combine(baseSavePath, newName + ".orasav");
-				File.Move(oldPath, newPath);
-
-				var entry = saves.First(s => s.Path == oldPath);
-				entry.Path = newPath;
-
-				foreach (var c in gameList.Children)
-				{
-					if (c is not ScrollItemWidget item || item.ItemKey != oldPath)
-						continue;
-
-					item.ItemKey = newPath;
-					item.Get<LabelWidget>("TITLE").GetText = () => newName;
-				}
-
-				if (selectedPath == oldPath)
-					selectedPath = newPath;
-			}
-			catch (Exception ex)
-			{
-				Log.Write("debug", ex.ToString());
+				item.ItemKey = newPath;
+				item.Get<LabelWidget>("TITLE").GetText = () => newName;
+				saveItems[newPath] = item;
 			}
 		}
 
 		void Delete(string savePath)
 		{
-			try
+			if (saveItems.Remove(savePath, out var item))
+				gameList.RemoveChild(item);
+
+			if (!saveList.Delete(savePath) && item != null)
 			{
-				File.Delete(savePath);
+				saveItems[savePath] = item;
+				gameList.AddChild(item);
 			}
-			catch (Exception ex)
-			{
-				TextNotificationsManager.Debug(FluentProvider.GetMessage(SaveDeletionFailed, "savePath", savePath));
-				Log.Write("debug", ex.ToString());
-			}
-
-			if (File.Exists(savePath))
-				return;
-
-			if (savePath == selectedPath)
-				SelectSave(null);
-
-			var entry = saves.First(s => s.Path == savePath);
-			gameList.RemoveChild(entry.Item);
-			saves.Remove(entry);
 		}
 
-		void SelectFirstVisible()
+		void OnSelectionChanged()
 		{
-			SelectSave(saves.FirstOrDefault(s => s.Visible)?.Path);
-		}
-
-		void SelectSave(string savePath)
-		{
-			selectedPath = savePath;
 			playerList.RemoveChildren();
 
-			if (savePath == null)
+			if (saveList.SelectedPath == null)
 			{
 				selectedSave = null;
 				map = MapCache.UnknownMap;
 				return;
 			}
 
-			try
+			selectedSave = SaveFileInfo.Read(saveList.SelectedPath);
+			if (selectedSave == null)
 			{
-				selectedSave = new GameSave(savePath);
-			}
-			catch (Exception ex)
-			{
-				Log.Write("debug", $"Failed to load save file '{savePath}': {ex}");
-				selectedSave = null;
 				map = MapCache.UnknownMap;
 				return;
 			}
@@ -998,15 +796,30 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 			if (mapPreview.Status != MapStatus.Available)
 				return;
 
+			var refusal = LoadPolicy.CanRestoreInto(
+				selectedSave.GlobalSettings.Map,
+				sessionMapUid,
+				saveMapAvailable: true);
+
+			if (refusal != LoadRefusal.None)
+			{
+				Log.Write("debug", $"Refused a load of '{saveList.SelectedPath}': {refusal}.");
+				TextNotificationsManager.AddSystemLine(refusal == LoadRefusal.DifferentMap
+					? CannotLoadDifferentMap
+					: CannotLoadMapUnavailable);
+				return;
+			}
+
+			if (loadAction == null)
+			{
+				Log.Write("debug", $"Refused a load of '{saveList.SelectedPath}': this panel was opened without a " +
+					"load action, so there is nothing to do with the chosen save.");
+				return;
+			}
+
 			Ui.CloseWindow();
 
-			var orders = new List<Order>
-			{
-				Order.FromTargetString("LoadGameSave", Path.GetFileName(selectedPath), true),
-				Order.Command($"state {Session.ClientState.Ready}")
-			};
-
-			Game.CreateAndStartLocalServer(mapPreview.Uid, orders);
+			loadAction(saveList.SelectedPath, mapPreview.Uid);
 		}
 
 		void OnGameStart()
@@ -1029,7 +842,7 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 
 		public static bool IsLoadPanelEnabled(Manifest mod)
 		{
-			var baseSavePath = Path.Combine(Platform.SupportDir, "Saves", mod.Id, mod.Metadata.Version);
+			var baseSavePath = SavePaths.BaseSaveDirectory(mod);
 			if (!Directory.Exists(baseSavePath))
 				return false;
 

@@ -12,6 +12,7 @@
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
+using OpenRA.GameSaves;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Traits
@@ -26,9 +27,10 @@ namespace OpenRA.Mods.Common.Traits
 	}
 
 	[TraitLocation(SystemActors.World | SystemActors.EditorWorld)]
-	public class ControlGroups : IControlGroups, ITick, IGameSaveTraitData
+	public class ControlGroups : IControlGroups, ITick, ISaveState
 	{
 		readonly World world;
+		readonly ControlGroupsInfo info;
 		public ImmutableArray<string> Groups { get; }
 
 		readonly List<Actor>[] controlGroups;
@@ -36,6 +38,7 @@ namespace OpenRA.Mods.Common.Traits
 		public ControlGroups(World world, ControlGroupsInfo info)
 		{
 			this.world = world;
+			this.info = info;
 			Groups = info.Groups;
 			controlGroups = Enumerable.Range(0, Groups.Length).Select(_ => new List<Actor>()).ToArray();
 		}
@@ -114,7 +117,9 @@ namespace OpenRA.Mods.Common.Traits
 			}
 		}
 
-		List<MiniYamlNode> IGameSaveTraitData.IssueTraitData(Actor self)
+		TraitInfo ISaveState.SaveStateInfo => info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
 		{
 			var groups = new List<MiniYamlNode>();
 			for (var i = 0; i < controlGroups.Length; i++)
@@ -133,16 +138,20 @@ namespace OpenRA.Mods.Common.Traits
 			];
 		}
 
-		void IGameSaveTraitData.ResolveTraitData(Actor self, MiniYaml data)
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
 		{
 			var groupsNode = data.NodeWithKeyOrDefault("Groups");
 			if (groupsNode != null)
 			{
 				foreach (var n in groupsNode.Value.Nodes)
 				{
-					var group = FieldLoader.GetValue<uint[]>(n.Key, n.Value.Value)
-						.Select(self.World.GetActorById).Where(a => a != null);
-					controlGroups[Exts.ParseInt32Invariant(n.Key)].AddRange(group);
+					var group = controlGroups[Exts.ParseInt32Invariant(n.Key)];
+					foreach (var actorID in FieldLoader.GetValue<uint[]>(n.Key, n.Value.Value))
+						r.DeferActor(SnapshotRefs.FormatActorID(actorID), a =>
+						{
+							if (a != null)
+								group.Add(a);
+						});
 				}
 			}
 		}

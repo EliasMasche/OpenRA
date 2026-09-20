@@ -8,10 +8,26 @@ button-quit = Quit
 ## Server Orders
 notification-custom-rules = This map contains custom rules. Game experience may change.
 notification-two-humans-required = This server requires at least two human players to start a match.
+notification-snapshot-transfer-failed = The saved game could not be transferred. Try saving again.
+notification-snapshot-does-not-match = The saved game does not match this match and was not kept. (frame { $frame })
+notification-snapshot-not-written = The server could not write the saved game.
+notification-snapshot-only-host = Only the host can save the game.
+notification-snapshot-loading = { $player } is loading the saved game { $save }.
+notification-snapshot-pick-slots = Saved game loaded. Choose your slots to continue.
+notification-snapshot-map-unavailable = The saved game is for a map this server does not have.
+notification-snapshot-not-found = The server does not have that saved game.
+notification-snapshot-load-failed = { $player } could not load a saved game: { $reason }.
+notification-snapshot-start-failed = { $player } could not start the loaded game and has left the match.
+notification-snapshot-received = Everyone has received the saved game { $save }.
+notification-snapshot-load-in-game = Only the host can load a saved game, and only when the game is not shutting down.
+notification-snapshot-load-waiting = Sending the saved game { $save } to every player before the match is restarted.
+notification-snapshot-load-abandoned = The saved game { $save } was not loaded: { $reason } The match continues.
+notification-snapshot-no-lobby = The saved game does not carry the session it was taken from.
 notification-unknown-server-command = Unknown server command: { $command }.
 notification-admin-start-game = Only the host can start the game.
 notification-no-start-until-required-slots-full = Unable to start the game until required slots are full.
 notification-no-start-without-players = Game cannot start without players.
+notification-no-start-without-seated-players = Players must choose their slots before the saved game can start.
 notification-insufficient-enabled-spawn-points = Unable to start the game until more spawn points are enabled.
 notification-malformed-command = Malformed { $command } command.
 notification-state-unchanged-ready = Cannot change state when marked as ready.
@@ -89,6 +105,10 @@ notification-lobby-disconnected = { $player } has left.
 notification-game-has-started = The game has started.
 notification-game-paused = The game has been paused by { $player }.
 notification-game-unpaused = The game has been un-paused by { $player }.
+notification-cannot-start-map-unavailable = Cannot start: you do not have this map.
+notification-cannot-start-snapshot-not-received = Cannot start: the saved game was not received. Ask the host to save again.
+notification-cannot-start-snapshot-missing-file = Cannot start: this computer does not have the saved game { $file } in its save folder.
+notification-save-failed = Could not save { $file }: { $reason }
 
 ## Server
 notification-game-started = Game started.

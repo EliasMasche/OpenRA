@@ -11,6 +11,7 @@
 
 using System.Collections.Generic;
 using System.Linq;
+using OpenRA.GameSaves;
 using OpenRA.Network;
 using OpenRA.Traits;
 
@@ -45,8 +46,10 @@ namespace OpenRA.Mods.Common.Traits
 		public override object Create(ActorInitializer init) { return new StrategicVictoryConditions(init.Self, this); }
 	}
 
-	public class StrategicVictoryConditions : ITick, ISync, INotifyWinStateChanged, INotifyTimeLimit
+	public class StrategicVictoryConditions : ITick, ISync, INotifyWinStateChanged, INotifyTimeLimit, ISaveState
 	{
+		const string TicksLeftKey = "TicksLeft";
+
 		[FluentReference("player")]
 		const string PlayerIsVictorious = "notification-player-is-victorious";
 
@@ -70,6 +73,20 @@ namespace OpenRA.Mods.Common.Traits
 			player = self.Owner;
 			mo = self.Trait<MissionObjectives>();
 			shortGame = player.World.WorldActor.Trait<MapOptions>().ShortGame;
+		}
+
+		TraitInfo ISaveState.SaveStateInfo => info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
+		{
+			return [new(TicksLeftKey, FieldSaver.FormatValue(TicksLeft))];
+		}
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
+		{
+			var node = data.NodeWithKeyOrDefault(TicksLeftKey);
+			if (node != null)
+				TicksLeft = FieldLoader.GetValue<int>(TicksLeftKey, node.Value.Value);
 		}
 
 		public IEnumerable<Actor> AllPoints => player.World.ActorsHavingTrait<StrategicPoint>();

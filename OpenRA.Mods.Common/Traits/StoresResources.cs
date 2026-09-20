@@ -1,4 +1,4 @@
-#region Copyright & License Information
+﻿#region Copyright & License Information
 /*
  * Copyright (c) The OpenRA Developers and Contributors
  * This file is part of OpenRA, which is free software. It is made
@@ -12,6 +12,8 @@
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Collections.ObjectModel;
+using System.Linq;
+using OpenRA.GameSaves;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Traits
@@ -31,8 +33,10 @@ namespace OpenRA.Mods.Common.Traits
 		public override object Create(ActorInitializer init) { return new StoresResources(init.Self, this); }
 	}
 
-	public class StoresResources : IStoresResources, ISync
+	public class StoresResources : IStoresResources, ISync, ISaveState
 	{
+		const string ContentsKey = "Contents";
+
 		readonly Dictionary<string, int> contents = [];
 		readonly StoresResourcesInfo info;
 
@@ -102,6 +106,42 @@ namespace OpenRA.Mods.Common.Traits
 			contents[resourceType] -= value;
 			ContentsSum -= value;
 			return 0;
+		}
+
+		TraitInfo ISaveState.SaveStateInfo => info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
+		{
+			if (ContentsSum == 0)
+				return null;
+
+			var nodes = contents
+				.Where(kv => kv.Value != 0)
+				.Select(kv => new MiniYamlNode(kv.Key, FieldSaver.FormatValue(kv.Value)))
+				.ToList();
+
+			return [new(ContentsKey, new MiniYaml("", nodes))];
+		}
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
+		{
+			var node = data.NodeWithKeyOrDefault(ContentsKey);
+			if (node == null)
+				return;
+
+			foreach (var kv in contents.Keys.ToList())
+				contents[kv] = 0;
+
+			ContentsSum = 0;
+			foreach (var stored in node.Value.Nodes)
+			{
+				if (!contents.ContainsKey(stored.Key))
+					continue;
+
+				var amount = FieldLoader.GetValue<int>(stored.Key, stored.Value.Value);
+				contents[stored.Key] = amount;
+				ContentsSum += amount;
+			}
 		}
 	}
 }

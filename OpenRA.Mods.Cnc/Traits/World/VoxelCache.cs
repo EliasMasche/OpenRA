@@ -33,6 +33,9 @@ namespace OpenRA.Mods.Cnc.Traits
 
 		public VoxelCache(VoxelCacheInfo info, Actor self)
 		{
+			if (!self.World.HasRenderer)
+				return;
+
 			var map = self.World.Map;
 			loader = new VoxelLoader(map, info.SheetSize);
 			foreach (var kv in map.Rules.ModelSequences)
@@ -108,7 +111,7 @@ namespace OpenRA.Mods.Cnc.Traits
 
 		public void Dispose()
 		{
-			loader.Dispose();
+			loader?.Dispose();
 		}
 
 		void INotifyActorDisposing.Disposing(Actor a)

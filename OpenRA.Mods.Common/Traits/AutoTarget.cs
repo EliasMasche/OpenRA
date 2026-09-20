@@ -13,6 +13,7 @@ using System;
 using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Linq;
+using OpenRA.GameSaves;
 using OpenRA.Primitives;
 using OpenRA.Traits;
 
@@ -133,8 +134,12 @@ namespace OpenRA.Mods.Common.Traits
 		}
 	}
 
-	public class AutoTarget : ConditionalTrait<AutoTargetInfo>, INotifyIdle, INotifyDamage, ITick, IResolveOrder, ISync, INotifyOwnerChanged
+	public class AutoTarget : ConditionalTrait<AutoTargetInfo>, INotifyIdle, INotifyDamage, ITick, IResolveOrder, ISync, INotifyOwnerChanged, ISaveState
 	{
+		const string NextScanTimeKey = "NextScanTime";
+		const string StanceKey = "Stance";
+		const string AggressorKey = "Aggressor";
+
 		public readonly IEnumerable<AttackBase> ActiveAttackBases;
 
 		readonly bool allowMovement;
@@ -215,6 +220,32 @@ namespace OpenRA.Mods.Common.Traits
 			SetStance(self, self.Owner.IsBot || !self.Owner.Playable ? Info.InitialStanceAI : Info.InitialStance);
 		}
 
+		TraitInfo ISaveState.SaveStateInfo => Info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
+		{
+			return
+			[
+				new(NextScanTimeKey, FieldSaver.FormatValue(nextScanTime)),
+				new(StanceKey, FieldSaver.FormatValue(Stance)),
+				new(AggressorKey, w.ActorRef(Aggressor))
+			];
+		}
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
+		{
+			var nodes = data.ToDictionary();
+
+			if (nodes.TryGetValue(NextScanTimeKey, out var scan))
+				nextScanTime = FieldLoader.GetValue<int>(NextScanTimeKey, scan.Value);
+
+			if (nodes.TryGetValue(StanceKey, out var stance))
+				SetStance(self, FieldLoader.GetValue<UnitStance>(StanceKey, stance.Value));
+
+			if (nodes.TryGetValue(AggressorKey, out var aggressor))
+				r.DeferActor(aggressor.Value, a => Aggressor = a);
+		}
+
 		void IResolveOrder.ResolveOrder(Actor self, Order order)
 		{
 			if (order.OrderString == "SetUnitStance" && Info.EnableStances)
@@ -290,6 +321,9 @@ namespace OpenRA.Mods.Common.Traits
 
 			if (nextScanTime > 0)
 				--nextScanTime;
+
+			if (Aggressor != null && Aggressor.Disposed)
+				Aggressor = null;
 		}
 
 		public Target ScanForTarget(Actor self, bool allowMove, bool allowTurn, bool ignoreScanInterval = false)

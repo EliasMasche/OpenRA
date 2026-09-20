@@ -10,6 +10,8 @@
 #endregion
 
 using System;
+using System.Collections.Generic;
+using OpenRA.GameSaves;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Traits
@@ -29,8 +31,13 @@ namespace OpenRA.Mods.Common.Traits
 		public override object Create(ActorInitializer init) { return new ParaDrop(init.Self, this); }
 	}
 
-	public class ParaDrop : ITick, ISync, INotifyRemovedFromWorld
+	public class ParaDrop : ITick, ISync, INotifyRemovedFromWorld, ISaveState
 	{
+		const string InDropRangeKey = "InDropRange";
+		const string TargetKey = "Target";
+		const string DropDelayKey = "DropDelay";
+		const string CheckForSuitableCellKey = "CheckForSuitableCell";
+
 		readonly ParaDropInfo info;
 		readonly Actor self;
 		readonly Cargo cargo;
@@ -116,6 +123,35 @@ namespace OpenRA.Mods.Common.Traits
 		void INotifyRemovedFromWorld.RemovedFromWorld(Actor self)
 		{
 			OnRemovedFromWorld(self);
+		}
+
+		TraitInfo ISaveState.SaveStateInfo => info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
+		{
+			return
+			[
+				new(InDropRangeKey, FieldSaver.FormatValue(inDropRange)),
+				new(TargetKey, w.TargetRef(target)),
+				new(DropDelayKey, FieldSaver.FormatValue(dropDelay)),
+				new(CheckForSuitableCellKey, FieldSaver.FormatValue(checkForSuitableCell))
+			];
+		}
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
+		{
+			var nodes = data.ToDictionary();
+			if (nodes.TryGetValue(InDropRangeKey, out var inRange))
+				inDropRange = FieldLoader.GetValue<bool>(InDropRangeKey, inRange.Value);
+
+			if (nodes.TryGetValue(DropDelayKey, out var delay))
+				dropDelay = FieldLoader.GetValue<int>(DropDelayKey, delay.Value);
+
+			if (nodes.TryGetValue(CheckForSuitableCellKey, out var check))
+				checkForSuitableCell = FieldLoader.GetValue<bool>(CheckForSuitableCellKey, check.Value);
+
+			if (nodes.TryGetValue(TargetKey, out var targetNode))
+				r.DeferTarget(targetNode.Value, t => target = t);
 		}
 	}
 }

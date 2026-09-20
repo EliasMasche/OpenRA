@@ -12,7 +12,7 @@
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
-using OpenRA.Effects;
+using OpenRA.GameSaves;
 using OpenRA.Primitives;
 using OpenRA.Traits;
 
@@ -41,8 +41,19 @@ namespace OpenRA.Mods.Common.Traits
 		public override object Create(ActorInitializer init) { return new BridgeHut(init.World, this); }
 	}
 
-	public class BridgeHut : INotifyCreated, IDemolishable, ITick
+	public class BridgeHut : INotifyCreated, IDemolishable, ITick, ISaveState
 	{
+		const string RepairStepKey = "RepairStep";
+		const string RepairDelayKey = "RepairDelay";
+		const string RepairRepairerKey = "RepairRepairer";
+		const string DemolishStepKey = "DemolishStep";
+		const string DemolishDelayKey = "DemolishDelay";
+		const string DemolishSaboteurKey = "DemolishSaboteur";
+		const string DemolishDamageTypesKey = "DemolishDamageTypes";
+		const string DemolishTriggerKey = "DemolishTrigger";
+		const string DemolishTriggerDelayKey = "DemolishTriggerDelay";
+		const string DemolishTriggerDamageTypesKey = "DemolishTriggerDamageTypes";
+
 		public readonly BridgeHutInfo Info;
 		readonly BridgeLayer bridgeLayer;
 
@@ -63,6 +74,10 @@ namespace OpenRA.Mods.Common.Traits
 		int demolishDelay;
 		Actor demolishSaboteur;
 		BitSet<DamageType> demolishDamageTypes;
+
+		int demolishTriggerDelay = -1;
+		Actor demolishTrigger;
+		BitSet<DamageType> demolishTriggerDamageTypes;
 
 		public BridgeHut(World world, BridgeHutInfo info)
 		{
@@ -111,6 +126,9 @@ namespace OpenRA.Mods.Common.Traits
 
 			foreach (var c in dirtyLocations)
 				segments[c] = bridgeLayer[c].TraitOrDefault<IBridgeSegment>();
+
+			if (demolishTriggerDelay >= 0 && --demolishTriggerDelay < 0)
+				StartDemolition(self);
 
 			if (repairStep < segmentLocations.Count && --repairDelay <= 0)
 				RepairStep();
@@ -175,30 +193,37 @@ namespace OpenRA.Mods.Common.Traits
 
 		void IDemolishable.Demolish(Actor self, Actor saboteur, int delay, BitSet<DamageType> damageTypes)
 		{
-			// TODO: Handle using ITick
-			self.World.Add(new DelayedAction(delay, () =>
+			demolishTriggerDelay = delay;
+			demolishTrigger = saboteur;
+			demolishTriggerDamageTypes = damageTypes;
+		}
+
+		void StartDemolition(Actor self)
+		{
+			var saboteur = demolishTrigger;
+			var damageTypes = demolishTriggerDamageTypes;
+			demolishTrigger = null;
+
+			if (self.IsDead)
+				return;
+
+			var modifiers = self.TraitsImplementing<IDamageModifier>()
+				.Concat(self.Owner.PlayerActor.TraitsImplementing<IDamageModifier>())
+				.Select(t => t.GetDamageModifier(self, null));
+
+			if (Util.ApplyPercentageModifiers(100, modifiers) <= 0)
+				return;
+
+			if (Info.DemolishPropagationDelay > 0)
 			{
-				if (self.IsDead)
-					return;
-
-				var modifiers = self.TraitsImplementing<IDamageModifier>()
-					.Concat(self.Owner.PlayerActor.TraitsImplementing<IDamageModifier>())
-					.Select(t => t.GetDamageModifier(self, null));
-
-				if (Util.ApplyPercentageModifiers(100, modifiers) > 0)
-				{
-					if (Info.DemolishPropagationDelay > 0)
-					{
-						demolishStep = 0;
-						demolishSaboteur = saboteur;
-						demolishDamageTypes = damageTypes;
-						DemolishStep();
-					}
-					else
-						foreach (var s in segments.Values)
-							s.Demolish(saboteur, damageTypes);
-				}
-			}));
+				demolishStep = 0;
+				demolishSaboteur = saboteur;
+				demolishDamageTypes = damageTypes;
+				DemolishStep();
+			}
+			else
+				foreach (var s in segments.Values)
+					s.Demolish(saboteur, damageTypes);
 		}
 
 		public void DemolishStep()
@@ -238,5 +263,76 @@ namespace OpenRA.Mods.Common.Traits
 		}
 
 		public bool Repairing => repairStep < segmentLocations.Count;
+
+		TraitInfo ISaveState.SaveStateInfo => Info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
+		{
+			var repairing = repairStep < segmentLocations.Count;
+			var demolishing = demolishStep < segmentLocations.Count;
+			if (!repairing && !demolishing && demolishTrigger == null)
+				return null;
+
+			var nodes = new List<MiniYamlNode>();
+
+			if (repairing)
+			{
+				nodes.Add(new(RepairStepKey, FieldSaver.FormatValue(repairStep)));
+				nodes.Add(new(RepairDelayKey, FieldSaver.FormatValue(repairDelay)));
+				nodes.Add(new(RepairRepairerKey, w.ActorRef(repairRepairer)));
+			}
+
+			if (demolishing)
+			{
+				nodes.Add(new(DemolishStepKey, FieldSaver.FormatValue(demolishStep)));
+				nodes.Add(new(DemolishDelayKey, FieldSaver.FormatValue(demolishDelay)));
+				nodes.Add(new(DemolishSaboteurKey, w.ActorRef(demolishSaboteur)));
+				nodes.Add(new(DemolishDamageTypesKey, FieldSaver.FormatValue(demolishDamageTypes)));
+			}
+
+			if (demolishTrigger != null)
+			{
+				nodes.Add(new(DemolishTriggerKey, w.ActorRef(demolishTrigger)));
+				nodes.Add(new(DemolishTriggerDelayKey, FieldSaver.FormatValue(demolishTriggerDelay)));
+				nodes.Add(new(DemolishTriggerDamageTypesKey, FieldSaver.FormatValue(demolishTriggerDamageTypes)));
+			}
+
+			return nodes;
+		}
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
+		{
+			var nodes = data.ToDictionary();
+
+			if (nodes.TryGetValue(RepairStepKey, out var repair))
+				repairStep = FieldLoader.GetValue<int>(RepairStepKey, repair.Value);
+
+			if (nodes.TryGetValue(RepairDelayKey, out var repairWait))
+				repairDelay = FieldLoader.GetValue<int>(RepairDelayKey, repairWait.Value);
+
+			if (nodes.TryGetValue(RepairRepairerKey, out var repairer))
+				r.DeferActor(repairer.Value, a => repairRepairer = a);
+
+			if (nodes.TryGetValue(DemolishStepKey, out var demolish))
+				demolishStep = FieldLoader.GetValue<int>(DemolishStepKey, demolish.Value);
+
+			if (nodes.TryGetValue(DemolishDelayKey, out var demolishWait))
+				demolishDelay = FieldLoader.GetValue<int>(DemolishDelayKey, demolishWait.Value);
+
+			if (nodes.TryGetValue(DemolishSaboteurKey, out var saboteur))
+				r.DeferActor(saboteur.Value, a => demolishSaboteur = a);
+
+			if (nodes.TryGetValue(DemolishDamageTypesKey, out var types))
+				demolishDamageTypes = FieldLoader.GetValue<BitSet<DamageType>>(DemolishDamageTypesKey, types.Value);
+
+			if (nodes.TryGetValue(DemolishTriggerKey, out var trigger))
+				r.DeferActor(trigger.Value, a => demolishTrigger = a);
+
+			if (nodes.TryGetValue(DemolishTriggerDelayKey, out var triggerDelay))
+				demolishTriggerDelay = FieldLoader.GetValue<int>(DemolishTriggerDelayKey, triggerDelay.Value);
+
+			if (nodes.TryGetValue(DemolishTriggerDamageTypesKey, out var triggerTypes))
+				demolishTriggerDamageTypes = FieldLoader.GetValue<BitSet<DamageType>>(DemolishTriggerDamageTypesKey, triggerTypes.Value);
+		}
 	}
 }

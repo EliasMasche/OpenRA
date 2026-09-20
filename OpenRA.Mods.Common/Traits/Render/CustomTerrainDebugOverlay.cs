@@ -53,7 +53,7 @@ namespace OpenRA.Mods.Common.Traits
 
 		public CustomTerrainDebugOverlay(CustomTerrainDebugOverlayInfo info)
 		{
-			font = Game.Renderer.Fonts[info.Font];
+			font = Renderer.FontOrDefault(info.Font);
 		}
 
 		void IWorldLoaded.WorldLoaded(World w, WorldRenderer wr)

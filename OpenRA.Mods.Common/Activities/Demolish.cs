@@ -9,7 +9,9 @@
  */
 #endregion
 
+using System.Collections.Generic;
 using System.Linq;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Effects;
 using OpenRA.Mods.Common.Traits;
 using OpenRA.Primitives;
@@ -17,8 +19,11 @@ using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Activities
 {
+	[SaveableActivity]
 	sealed class Demolish : Enter
 	{
+		const string EnterActorKey = "EnterActor";
+
 		readonly int delay;
 		readonly int flashes;
 		readonly int flashesDelay;
@@ -41,6 +46,42 @@ namespace OpenRA.Mods.Common.Activities
 			this.flashInterval = flashInterval;
 			this.damageTypes = damageTypes;
 			this.enterBehaviour = enterBehaviour;
+		}
+
+		internal Demolish(Actor self, SnapshotReader r, MiniYaml yaml)
+			: base(self, r, yaml)
+		{
+			notifiers = self.TraitsImplementing<INotifyDemolition>().ToArray();
+
+			var n = yaml.ToDictionary();
+			delay = FieldLoader.GetValue<int>("Delay", n["Delay"].Value);
+			flashes = FieldLoader.GetValue<int>("Flashes", n["Flashes"].Value);
+			flashesDelay = FieldLoader.GetValue<int>("FlashesDelay", n["FlashesDelay"].Value);
+			flashInterval = FieldLoader.GetValue<int>("FlashInterval", n["FlashInterval"].Value);
+			damageTypes = FieldLoader.GetValue<BitSet<DamageType>>("DamageTypes", n["DamageTypes"].Value);
+			enterBehaviour = FieldLoader.GetValue<EnterBehaviour>("EnterBehaviour", n["EnterBehaviour"].Value);
+
+			r.DeferActor(yaml.NodeWithKeyOrDefault(EnterActorKey).Value.Value, a =>
+			{
+				enterActor = a;
+				enterDemolishables = a?.TraitsImplementing<IDemolishable>().ToArray();
+			});
+		}
+
+		public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+		{
+			var nodes = base.SaveState(self, w);
+			nodes.AddRange(
+			[
+				new(EnterActorKey, w.ActorRef(enterActor)),
+				new("Delay", FieldSaver.FormatValue(delay)),
+				new("Flashes", FieldSaver.FormatValue(flashes)),
+				new("FlashesDelay", FieldSaver.FormatValue(flashesDelay)),
+				new("FlashInterval", FieldSaver.FormatValue(flashInterval)),
+				new("DamageTypes", FieldSaver.FormatValue(damageTypes)),
+				new("EnterBehaviour", FieldSaver.FormatValue(enterBehaviour))
+			]);
+			return nodes;
 		}
 
 		protected override bool TryStartEnter(Actor self, Actor targetActor)

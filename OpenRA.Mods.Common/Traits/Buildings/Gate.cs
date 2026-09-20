@@ -11,6 +11,7 @@
 
 using System.Collections.Generic;
 using System.Linq;
+using OpenRA.GameSaves;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Traits
@@ -37,8 +38,12 @@ namespace OpenRA.Mods.Common.Traits
 	}
 
 	public class Gate : PausableConditionalTrait<GateInfo>, ITick, ITemporaryBlocker, IBlocksProjectiles,
-		INotifyAddedToWorld, INotifyRemovedFromWorld, INotifyBlockingMove, ISync
+		INotifyAddedToWorld, INotifyRemovedFromWorld, INotifyBlockingMove, ISync, ISaveState, INotifyStateRestored
 	{
+		const string PositionKey = "Position";
+		const string DesiredPositionKey = "DesiredPosition";
+		const string RemainingOpenTimeKey = "RemainingOpenTime";
+
 		readonly Actor self;
 		readonly Building building;
 		IEnumerable<CPos> blockedPositions;
@@ -137,6 +142,37 @@ namespace OpenRA.Mods.Common.Traits
 		bool IsBlocked()
 		{
 			return blockedPositions.Any(loc => self.World.ActorMap.GetActorsAt(loc).Any(a => a != self));
+		}
+
+		TraitInfo ISaveState.SaveStateInfo => Info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
+		{
+			return
+			[
+				new(PositionKey, FieldSaver.FormatValue(Position)),
+				new(DesiredPositionKey, FieldSaver.FormatValue(desiredPosition)),
+				new(RemainingOpenTimeKey, FieldSaver.FormatValue(remainingOpenTime))
+			];
+		}
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
+		{
+			var nodes = data.ToDictionary();
+			if (nodes.TryGetValue(PositionKey, out var position))
+				Position = FieldLoader.GetValue<int>(PositionKey, position.Value);
+
+			if (nodes.TryGetValue(DesiredPositionKey, out var desired))
+				desiredPosition = FieldLoader.GetValue<int>(DesiredPositionKey, desired.Value);
+
+			if (nodes.TryGetValue(RemainingOpenTimeKey, out var remaining))
+				remainingOpenTime = FieldLoader.GetValue<int>(RemainingOpenTimeKey, remaining.Value);
+		}
+
+		void INotifyStateRestored.StateRestored(Actor self)
+		{
+			if (self.IsInWorld && Position == OpenPosition)
+				self.World.ActorMap.RemoveInfluence(self, building);
 		}
 
 		WDist IBlocksProjectiles.BlockingHeight => new(Info.BlocksProjectilesHeight.Length * (OpenPosition - Position) / OpenPosition);

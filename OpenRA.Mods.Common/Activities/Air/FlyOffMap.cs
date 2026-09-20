@@ -9,16 +9,19 @@
  */
 #endregion
 
+using System.Collections.Generic;
 using OpenRA.Activities;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Traits;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Activities
 {
+	[SaveableActivity]
 	public class FlyOffMap : Activity
 	{
 		readonly Aircraft aircraft;
-		readonly Target target;
+		Target target;
 		readonly bool hasTarget;
 		int endingDelay;
 
@@ -34,6 +37,28 @@ namespace OpenRA.Mods.Common.Activities
 		{
 			this.target = target;
 			hasTarget = true;
+		}
+
+		internal FlyOffMap(Actor self, SnapshotReader r, MiniYaml yaml)
+		{
+			aircraft = self.Trait<Aircraft>();
+			ChildHasPriority = false;
+
+			var n = yaml.ToDictionary();
+			endingDelay = FieldLoader.GetValue<int>("EndingDelay", n["EndingDelay"].Value);
+			hasTarget = FieldLoader.GetValue<bool>("HasTarget", n["HasTarget"].Value);
+
+			r.DeferTarget(n["Target"].Value, t => target = t);
+		}
+
+		public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+		{
+			return
+			[
+				new("Target", w.TargetRef(target)),
+				new("HasTarget", FieldSaver.FormatValue(hasTarget)),
+				new("EndingDelay", FieldSaver.FormatValue(endingDelay))
+			];
 		}
 
 		protected override void OnFirstRun(Actor self)

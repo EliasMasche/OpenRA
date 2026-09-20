@@ -1,4 +1,4 @@
-#region Copyright & License Information
+﻿#region Copyright & License Information
 /*
  * Copyright (c) The OpenRA Developers and Contributors
  * This file is part of OpenRA, which is free software. It is made
@@ -15,6 +15,7 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Globalization;
 using System.Linq;
+using OpenRA.GameSaves;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Traits
@@ -78,8 +79,13 @@ namespace OpenRA.Mods.Common.Traits
 		public override object Create(ActorInitializer init) { return new PlayerResources(init.Self, this); }
 	}
 
-	public class PlayerResources : ISync
+	public class PlayerResources : ISync, ISaveState
 	{
+		const string CashKey = "Cash";
+		const string ResourcesKey = "Resources";
+		const string EarnedKey = "Earned";
+		const string SpentKey = "Spent";
+
 		public readonly PlayerResourcesInfo Info;
 		readonly Player owner;
 
@@ -259,6 +265,35 @@ namespace OpenRA.Mods.Common.Traits
 		public int GetCashAndResources()
 		{
 			return Cash + Resources;
+		}
+
+		TraitInfo ISaveState.SaveStateInfo => Info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
+		{
+			return
+			[
+				new(CashKey, FieldSaver.FormatValue(Cash)),
+				new(ResourcesKey, FieldSaver.FormatValue(Resources)),
+				new(EarnedKey, FieldSaver.FormatValue(Earned)),
+				new(SpentKey, FieldSaver.FormatValue(Spent))
+			];
+		}
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
+		{
+			var nodes = data.ToDictionary();
+			if (nodes.TryGetValue(CashKey, out var cash))
+				Cash = FieldLoader.GetValue<int>(CashKey, cash.Value);
+
+			if (nodes.TryGetValue(ResourcesKey, out var resources))
+				Resources = FieldLoader.GetValue<int>(ResourcesKey, resources.Value);
+
+			if (nodes.TryGetValue(EarnedKey, out var earned))
+				Earned = FieldLoader.GetValue<int>(EarnedKey, earned.Value);
+
+			if (nodes.TryGetValue(SpentKey, out var spent))
+				Spent = FieldLoader.GetValue<int>(SpentKey, spent.Value);
 		}
 	}
 }

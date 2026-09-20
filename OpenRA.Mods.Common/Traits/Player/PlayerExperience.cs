@@ -1,4 +1,4 @@
-#region Copyright & License Information
+﻿#region Copyright & License Information
 /*
  * Copyright (c) The OpenRA Developers and Contributors
  * This file is part of OpenRA, which is free software. It is made
@@ -9,6 +9,8 @@
  */
 #endregion
 
+using System.Collections.Generic;
+using OpenRA.GameSaves;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Traits
@@ -19,17 +21,43 @@ namespace OpenRA.Mods.Common.Traits
 		"Attach this to the player actor.")]
 	public class PlayerExperienceInfo : TraitInfo
 	{
-		public override object Create(ActorInitializer init) { return new PlayerExperience(); }
+		public override object Create(ActorInitializer init) { return new PlayerExperience(this); }
 	}
 
-	public class PlayerExperience : ISync
+	public class PlayerExperience : ISync, ISaveState
 	{
+		const string ExperienceKey = "Experience";
+
+		readonly PlayerExperienceInfo info;
+
 		[VerifySync]
 		public int Experience { get; private set; }
+
+		public PlayerExperience(PlayerExperienceInfo info)
+		{
+			this.info = info;
+		}
 
 		public void GiveExperience(int num)
 		{
 			Experience += num;
+		}
+
+		TraitInfo ISaveState.SaveStateInfo => info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
+		{
+			if (Experience == 0)
+				return null;
+
+			return [new(ExperienceKey, FieldSaver.FormatValue(Experience))];
+		}
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
+		{
+			var node = data.NodeWithKeyOrDefault(ExperienceKey);
+			if (node != null)
+				Experience = FieldLoader.GetValue<int>(ExperienceKey, node.Value.Value);
 		}
 	}
 }

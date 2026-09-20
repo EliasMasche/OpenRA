@@ -144,6 +144,21 @@ function Check-Command
 
 		Write-Host "Checking for incorrect conditional trait interface overrides..." -ForegroundColor Cyan
 		InvokeCommand "$utilityPath all --check-conditional-trait-interface-overrides"
+
+		Write-Host "Checking that saveable activities can be restored..." -ForegroundColor Cyan
+		InvokeCommand "$utilityPath all --check-activity-restore"
+
+		Write-Host "Checking that saveable effects can be restored..." -ForegroundColor Cyan
+		InvokeCommand "$utilityPath ra --check-effect-restore"
+		InvokeCommand "$utilityPath cnc --check-effect-restore"
+		InvokeCommand "$utilityPath d2k --check-effect-restore"
+
+		Write-Host "Checking that a snapshot restores to the world it was saved from..." -ForegroundColor Cyan
+		InvokeCommand "$utilityPath ra --verify-snapshot mods/ra/maps/agenda.oramap 60"
+		InvokeCommand "$utilityPath ra --verify-snapshot mods/ra/maps/snapshot-stress 40"
+		InvokeCommand "$utilityPath cnc --verify-snapshot mods/cnc/maps/snapshot-stress 40"
+		InvokeCommand "$utilityPath d2k --verify-snapshot mods/d2k/maps/snapshot-stress 40"
+		InvokeCommand "$utilityPath ts --verify-snapshot mods/ts/maps/snapshot-stress 40"
 	}
 }
 

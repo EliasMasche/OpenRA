@@ -410,6 +410,7 @@ namespace OpenRA.Mods.Common.UtilityCommands.Documentation
 			{ "Color", "color" },
 			{ "Actor", "actor" },
 			{ "Player", "player" },
+			{ "IProjectileScriptInfo", "projectile" },
 		}.ToFrozenDictionary();
 
 		public static string EmmyLuaString(this Type type, string notSupportedExceptionContext)

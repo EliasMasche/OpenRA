@@ -1,0 +1,8 @@
+World:
+	LuaScript:
+		Scripts: lua-snapshot-test.lua
+
+	# Both are kept out so a snapshot is taken when the tester asks for one, and so the only state that
+	# changes is the state the script owns.
+	-AutoSave:
+	-CrateSpawner:

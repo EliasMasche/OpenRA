@@ -1,4 +1,4 @@
-#region Copyright & License Information
+﻿#region Copyright & License Information
 /*
  * Copyright (c) The OpenRA Developers and Contributors
  * This file is part of OpenRA, which is free software. It is made
@@ -13,6 +13,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
+using OpenRA.GameSaves;
 using OpenRA.Primitives;
 using OpenRA.Traits;
 
@@ -65,8 +66,12 @@ namespace OpenRA.Mods.Common.Traits
 		public override object Create(ActorInitializer init) { return new RepairableBuilding(init.Self, this); }
 	}
 
-	public class RepairableBuilding : ConditionalTrait<RepairableBuildingInfo>, ITick, ISync
+	public class RepairableBuilding : ConditionalTrait<RepairableBuildingInfo>, ITick, ISync, ISaveState
 	{
+		const string RepairersKey = "Repairers";
+		const string RemainingTicksKey = "RemainingTicks";
+		const string RepairActiveKey = "RepairActive";
+
 		readonly IHealth health;
 		readonly Predicate<Player> isNotActiveAlly;
 		readonly Stack<int> repairTokens = [];
@@ -203,6 +208,43 @@ namespace OpenRA.Mods.Common.Traits
 			}
 			else
 				--remainingTicks;
+		}
+
+		TraitInfo ISaveState.SaveStateInfo => Info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
+		{
+			if (Repairers.Count == 0 && !RepairActive)
+				return null;
+
+			return
+			[
+				new(RepairersKey, Repairers.Select(w.PlayerRef).JoinWith(", ")),
+				new(RemainingTicksKey, FieldSaver.FormatValue(remainingTicks)),
+				new(RepairActiveKey, FieldSaver.FormatValue(RepairActive))
+			];
+		}
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
+		{
+			var nodes = data.ToDictionary();
+			if (nodes.TryGetValue(RepairersKey, out var repairers) && !string.IsNullOrEmpty(repairers.Value))
+			{
+				foreach (var name in repairers.Value.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+				{
+					var player = r.ResolvePlayer(name);
+					if (player != null)
+						Repairers.Add(player);
+				}
+			}
+
+			if (nodes.TryGetValue(RemainingTicksKey, out var ticks))
+				remainingTicks = FieldLoader.GetValue<int>(RemainingTicksKey, ticks.Value);
+
+			if (nodes.TryGetValue(RepairActiveKey, out var active))
+				RepairActive = FieldLoader.GetValue<bool>(RepairActiveKey, active.Value);
+
+			UpdateCondition(self);
 		}
 	}
 }

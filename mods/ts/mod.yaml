@@ -166,6 +166,7 @@ ChromeLayout:
 	common|chrome/replaybrowser.yaml
 	common|chrome/gamesave-browser.yaml
 	common|chrome/load-game-browser.yaml
+	common|chrome/lobby-load-save.yaml
 	common|chrome/gamesave-loading.yaml
 	ts|chrome/dropdowns.yaml
 	common|chrome/musicplayer.yaml

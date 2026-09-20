@@ -9,11 +9,14 @@
  */
 #endregion
 
+using System.Collections.Generic;
 using OpenRA.Activities;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Traits;
 
 namespace OpenRA.Mods.Common.Activities
 {
+	[SaveableActivity]
 	public class TakeOff : Activity
 	{
 		readonly Aircraft aircraft;
@@ -21,6 +24,16 @@ namespace OpenRA.Mods.Common.Activities
 		public TakeOff(Actor self)
 		{
 			aircraft = self.Trait<Aircraft>();
+		}
+
+		internal TakeOff(Actor self, SnapshotReader _1, MiniYaml _2)
+		{
+			aircraft = self.Trait<Aircraft>();
+		}
+
+		public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+		{
+			return [];
 		}
 
 		protected override void OnFirstRun(Actor self)

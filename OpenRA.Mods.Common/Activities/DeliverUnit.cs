@@ -11,12 +11,14 @@
 
 using System.Collections.Generic;
 using OpenRA.Activities;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Traits;
 using OpenRA.Primitives;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Activities
 {
+	[SaveableActivity]
 	public class DeliverUnit : Activity
 	{
 		readonly Carryall carryall;
@@ -39,6 +41,32 @@ namespace OpenRA.Mods.Common.Activities
 			this.targetLineColor = targetLineColor;
 
 			carryall = self.Trait<Carryall>();
+		}
+
+		internal DeliverUnit(Actor self, SnapshotReader r, MiniYaml yaml)
+		{
+			carryall = self.Trait<Carryall>();
+
+			var n = yaml.ToDictionary();
+			deliverRange = FieldLoader.GetValue<WDist>("DeliverRange", n["DeliverRange"].Value);
+			assignTargetOnFirstRun = FieldLoader.GetValue<bool>("AssignTargetOnFirstRun", n["AssignTargetOnFirstRun"].Value);
+
+			var color = n["TargetLineColor"].Value;
+			if (!string.IsNullOrEmpty(color))
+				targetLineColor = FieldLoader.GetValue<Color>("TargetLineColor", color);
+
+			r.DeferTarget(n["Destination"].Value, t => destination = t);
+		}
+
+		public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+		{
+			return
+			[
+				new("Destination", w.TargetRef(destination)),
+				new("DeliverRange", FieldSaver.FormatValue(deliverRange)),
+				new("AssignTargetOnFirstRun", FieldSaver.FormatValue(assignTargetOnFirstRun)),
+				new("TargetLineColor", targetLineColor.HasValue ? FieldSaver.FormatValue(targetLineColor.Value) : "")
+			];
 		}
 
 		protected override void OnFirstRun(Actor self)
@@ -64,6 +92,7 @@ namespace OpenRA.Mods.Common.Activities
 				yield return new TargetLineNode(destination, targetLineColor.Value);
 		}
 
+		[SaveableActivity]
 		sealed class ReleaseUnit : Activity
 		{
 			readonly Carryall carryall;
@@ -75,6 +104,18 @@ namespace OpenRA.Mods.Common.Activities
 				facing = self.Trait<IFacing>();
 				carryall = self.Trait<Carryall>();
 				body = self.Trait<BodyOrientation>();
+			}
+
+			internal ReleaseUnit(Actor self, SnapshotReader _1, MiniYaml _2)
+			{
+				facing = self.Trait<IFacing>();
+				carryall = self.Trait<Carryall>();
+				body = self.Trait<BodyOrientation>();
+			}
+
+			public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+			{
+				return [];
 			}
 
 			protected override void OnFirstRun(Actor self)

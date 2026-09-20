@@ -49,13 +49,22 @@ namespace OpenRA.Mods.Common.Warheads
 			if (target.Type == TargetType.Invalid)
 				return;
 
-			var firedBy = args.SourceActor;
-			var map = firedBy.World.Map;
+			var firedByActor = args.SourceActor;
+			if (firedByActor == null)
+				return;
+
+			var firedBy = args.SourceOwner;
+			var world = args.World;
+
+			if (firedBy == null)
+				return;
+
+			var map = world.Map;
 			var targetCell = map.CellContaining(target.CenterPosition);
 
 			var targetCells = CellsMatching(targetCell, false);
 			foreach (var c in targetCells)
-				FireProjectileAtCell(map, firedBy, target, c, args);
+				FireProjectileAtCell(map, firedBy, firedByActor, target, c, args);
 
 			if (RandomClusterCount != 0)
 			{
@@ -63,15 +72,15 @@ namespace OpenRA.Mods.Common.Warheads
 				var clusterCount = RandomClusterCount < 0 ? randomTargetCells.Count : RandomClusterCount;
 				if (randomTargetCells.Count != 0)
 					for (var i = 0; i < clusterCount; i++)
-						FireProjectileAtCell(map, firedBy, target, randomTargetCells.Random(firedBy.World.SharedRandom), args);
+						FireProjectileAtCell(map, firedBy, firedByActor, target, randomTargetCells.Random(world.SharedRandom), args);
 			}
 		}
 
-		void FireProjectileAtCell(Map map, Actor firedBy, Target target, CPos targetCell, WarheadArgs args)
+		void FireProjectileAtCell(Map map, Player firedBy, Actor firedByActor, Target target, CPos targetCell, WarheadArgs args)
 		{
-			var tc = Target.FromCell(firedBy.World, targetCell);
+			var tc = Target.FromCell(args.World, targetCell);
 
-			if (!weapon.IsValidAgainst(tc, firedBy.World, firedBy))
+			if (!weapon.IsValidAgainst(tc, args.World, firedByActor))
 				return;
 
 			var projectileArgs = new ProjectileArgs
@@ -86,7 +95,9 @@ namespace OpenRA.Mods.Common.Warheads
 
 				Source = target.CenterPosition,
 				CurrentSource = () => target.CenterPosition,
-				SourceActor = firedBy,
+				World = args.World,
+				SourceActor = firedByActor,
+				SourceOwner = firedBy,
 				PassiveTarget = map.CenterOfCell(targetCell),
 				GuidedTarget = tc
 			};
@@ -95,10 +106,10 @@ namespace OpenRA.Mods.Common.Warheads
 			{
 				var projectile = projectileArgs.Weapon.Projectile.Create(projectileArgs);
 				if (projectile != null)
-					firedBy.World.AddFrameEndTask(w => w.Add(projectile));
+					args.World.AddFrameEndTask(w => w.Add(projectile));
 
 				if (projectileArgs.Weapon.Report != null && projectileArgs.Weapon.Report.Length > 0)
-					Game.Sound.Play(SoundType.World, projectileArgs.Weapon.Report, firedBy.World, target.CenterPosition);
+					Game.Sound.Play(SoundType.World, projectileArgs.Weapon.Report, args.World, target.CenterPosition);
 			}
 		}
 

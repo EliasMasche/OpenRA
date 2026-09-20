@@ -15,6 +15,7 @@ using Eluant;
 using OpenRA.Activities;
 using OpenRA.Mods.Common.Activities;
 using OpenRA.Mods.Common.Effects;
+using OpenRA.Mods.Common.Scripting.Snapshot;
 using OpenRA.Mods.Common.Traits;
 using OpenRA.Primitives;
 using OpenRA.Scripting;
@@ -92,12 +93,8 @@ namespace OpenRA.Mods.Common.Scripting
 				Activity queuedActivity = null;
 				if (af != null)
 				{
-					queuedActivity = new CallFunc(() =>
-					{
-						using (af)
-						using (var a = actor.ToLuaValue(Context))
-							af.Call(a);
-					});
+					using (af)
+						queuedActivity = new LuaCallWithSelf(af, Context);
 				}
 
 				// We need to exclude the spawn location from the movement path
@@ -148,13 +145,7 @@ namespace OpenRA.Mods.Common.Scripting
 
 			if (actionFunc != null)
 			{
-				var af = (LuaFunction)actionFunc.CopyReference();
-				transport.QueueActivity(new CallFunc(() =>
-				{
-					using (af)
-					using (LuaValue t = transport.ToLuaValue(Context), p = passengers.ToArray().ToLuaValue(Context))
-						af.Call(t, p);
-				}));
+				transport.QueueActivity(new LuaCallWithCargo(passengers, actionFunc, Context));
 			}
 			else
 			{
@@ -171,13 +162,7 @@ namespace OpenRA.Mods.Common.Scripting
 
 			if (exitFunc != null)
 			{
-				var ef = (LuaFunction)exitFunc.CopyReference();
-				transport.QueueActivity(new CallFunc(() =>
-				{
-					using (ef)
-					using (var t = transport.ToLuaValue(Context))
-						ef.Call(t);
-				}));
+				transport.QueueActivity(new LuaCallWithSelf(exitFunc, Context));
 			}
 			else if (exitPath != null)
 			{

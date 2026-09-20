@@ -21,7 +21,7 @@ namespace OpenRA.Mods.Common.Graphics
 
 		public int Length => trail.Length;
 
-		readonly Actor owner;
+		readonly Player owner;
 		readonly World world;
 		readonly Color startColor;
 		readonly bool usePlayerStartColor;
@@ -37,13 +37,13 @@ namespace OpenRA.Mods.Common.Graphics
 		readonly int skip;
 
 		public ContrailRenderable(
-			World world, Actor owner, Color startcolor, bool usePlayerStartColor, Color endcolor, bool usePlayerEndColor,
+			World world, Player owner, Color startcolor, bool usePlayerStartColor, Color endcolor, bool usePlayerEndColor,
 			WDist startWidth, WDist endWidth, int length, int skip, int zOffset)
 			: this(world, owner, new WPos[length], startWidth, endWidth, 0, 0, skip,
 				  startcolor, usePlayerStartColor, endcolor, usePlayerEndColor, zOffset)
 		{ }
 
-		ContrailRenderable(World world, Actor owner, WPos[] trail, WDist startWidth, WDist endWidth,
+		ContrailRenderable(World world, Player owner, WPos[] trail, WDist startWidth, WDist endWidth,
 			int next, int length, int skip, Color startColor, bool usePlayerStartColor, Color endColor, bool usePlayerEndColor, int zOffset)
 		{
 			this.world = world;
@@ -93,12 +93,12 @@ namespace OpenRA.Mods.Common.Graphics
 			var wcr = Game.Renderer.WorldRgbaColorRenderer;
 
 			var startColor = this.startColor;
-			if (usePlayerStartColor)
-				startColor = Color.FromArgb(this.startColor.A, owner.OwnerColor());
+			if (usePlayerStartColor && owner != null)
+				startColor = Color.FromArgb(this.startColor.A, owner.Color);
 
 			var endColor = this.endColor;
-			if (usePlayerEndColor)
-				endColor = Color.FromArgb(this.endColor.A, owner.OwnerColor());
+			if (usePlayerEndColor && owner != null)
+				endColor = Color.FromArgb(this.endColor.A, owner.Color);
 
 			// Start of the first line segment is the tail of the list - don't smooth it.
 			var curPos = trail[Index(next - skip - 1)];

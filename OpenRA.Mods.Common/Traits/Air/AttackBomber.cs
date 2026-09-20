@@ -10,8 +10,10 @@
 #endregion
 
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using OpenRA.Activities;
+using OpenRA.GameSaves;
 using OpenRA.Primitives;
 using OpenRA.Traits;
 
@@ -25,6 +27,10 @@ namespace OpenRA.Mods.Common.Traits
 
 	public class AttackBomber : AttackBase, ITick, ISync, INotifyRemovedFromWorld
 	{
+		const string TargetKey = "Target";
+		const string InAttackRangeKey = "InAttackRange";
+		const string FacingTargetKey = "FacingTarget";
+
 		readonly AttackBomberInfo info;
 
 		[VerifySync]
@@ -51,7 +57,7 @@ namespace OpenRA.Mods.Common.Traits
 			var wasInAttackRange = inAttackRange;
 			inAttackRange = false;
 
-			if (self.IsInWorld)
+			if (self.IsInWorld && target.Type != TargetType.Invalid)
 			{
 				var dat = self.World.Map.DistanceAboveTerrain(target.CenterPosition);
 				target = Target.FromPos(target.CenterPosition - new WVec(WDist.Zero, WDist.Zero, dat));
@@ -90,6 +96,32 @@ namespace OpenRA.Mods.Common.Traits
 		public override Activity GetAttackActivity(Actor self, AttackSource source, in Target newTarget, bool allowMove, bool forceAttack, Color? targetLineColor)
 		{
 			throw new NotImplementedException("AttackBomber requires a scripted target");
+		}
+
+		protected override List<MiniYamlNode> SaveState(SnapshotWriter w)
+		{
+			return
+			[
+				.. base.SaveState(w),
+				new(TargetKey, w.TargetRef(target)),
+				new(InAttackRangeKey, FieldSaver.FormatValue(inAttackRange)),
+				new(FacingTargetKey, FieldSaver.FormatValue(facingTarget))
+			];
+		}
+
+		protected override void LoadState(MiniYaml data, SnapshotReader r)
+		{
+			base.LoadState(data, r);
+
+			var nodes = data.ToDictionary();
+			if (nodes.TryGetValue(InAttackRangeKey, out var inRange))
+				inAttackRange = FieldLoader.GetValue<bool>(InAttackRangeKey, inRange.Value);
+
+			if (nodes.TryGetValue(FacingTargetKey, out var facing))
+				facingTarget = FieldLoader.GetValue<bool>(FacingTargetKey, facing.Value);
+
+			if (nodes.TryGetValue(TargetKey, out var targetNode))
+				r.DeferTarget(targetNode.Value, t => target = t);
 		}
 	}
 }

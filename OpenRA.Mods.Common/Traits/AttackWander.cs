@@ -33,7 +33,7 @@ namespace OpenRA.Mods.Common.Traits
 
 		public override void DoAction(Actor self, CPos targetCell)
 		{
-			self.QueueActivity(new AttackMoveActivity(self, () => Move.MoveTo(targetCell, targetLineColor: attackMove.Info.TargetLineColor), false));
+			self.QueueActivity(new AttackMoveActivity(self, MoveSpec.ToCellAt(targetCell, targetLineColor: attackMove.Info.TargetLineColor), false));
 		}
 	}
 }

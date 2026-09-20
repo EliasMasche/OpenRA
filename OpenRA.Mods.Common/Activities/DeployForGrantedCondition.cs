@@ -10,12 +10,15 @@
 #endregion
 
 using System.Collections.Generic;
+using System.Linq;
 using OpenRA.Activities;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Traits;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Activities
 {
+	[SaveableActivity]
 	public class DeployForGrantedCondition : Activity
 	{
 		readonly GrantConditionOnDeploy deploy;
@@ -27,6 +30,28 @@ namespace OpenRA.Mods.Common.Activities
 			this.deploy = deploy;
 			this.moving = moving;
 			canTurn = self.Info.HasTraitInfo<IFacingInfo>();
+		}
+
+		internal DeployForGrantedCondition(Actor self, SnapshotReader _, MiniYaml yaml)
+		{
+			canTurn = self.Info.HasTraitInfo<IFacingInfo>();
+
+			var n = yaml.ToDictionary();
+			moving = FieldLoader.GetValue<bool>("Moving", n["Moving"].Value);
+
+			var index = FieldLoader.GetValue<int>("Deploy", n["Deploy"].Value);
+			var deploys = self.TraitsImplementing<GrantConditionOnDeploy>().ToArray();
+			if (index >= 0 && index < deploys.Length)
+				deploy = deploys[index];
+		}
+
+		public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+		{
+			return
+			[
+				new("Deploy", FieldSaver.FormatValue(self.TraitsImplementing<GrantConditionOnDeploy>().ToList().IndexOf(deploy))),
+				new("Moving", FieldSaver.FormatValue(moving))
+			];
 		}
 
 		protected override void OnFirstRun(Actor self)
@@ -53,8 +78,12 @@ namespace OpenRA.Mods.Common.Activities
 		}
 	}
 
+	[SaveableActivity]
 	public class DeployInner : Activity
 	{
+		const string DeploymentKey = "Deployment";
+		const string InitiatedKey = "Initiated";
+
 		readonly GrantConditionOnDeploy deployment;
 		bool initiated;
 
@@ -64,6 +93,29 @@ namespace OpenRA.Mods.Common.Activities
 
 			// Once deployment animation starts, the animation must finish.
 			IsInterruptible = false;
+		}
+
+		internal DeployInner(Actor self, SnapshotReader _, MiniYaml yaml)
+		{
+			IsInterruptible = false;
+
+			var nodes = yaml.ToDictionary();
+			initiated = FieldLoader.GetValue<bool>(InitiatedKey, nodes[InitiatedKey].Value);
+
+			var index = FieldLoader.GetValue<int>(DeploymentKey, nodes[DeploymentKey].Value);
+			var deployments = self.TraitsImplementing<GrantConditionOnDeploy>().ToArray();
+			if (index >= 0 && index < deployments.Length)
+				deployment = deployments[index];
+		}
+
+		public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+		{
+			var index = self.TraitsImplementing<GrantConditionOnDeploy>().ToList().IndexOf(deployment);
+			return
+			[
+				new(DeploymentKey, FieldSaver.FormatValue(index)),
+				new(InitiatedKey, FieldSaver.FormatValue(initiated))
+			];
 		}
 
 		public override bool Tick(Actor self)

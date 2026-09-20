@@ -9,14 +9,19 @@
  */
 #endregion
 
+using System.Collections.Generic;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Traits;
 using OpenRA.Primitives;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Activities
 {
+	[SaveableActivity]
 	public class CaptureActor : Enter
 	{
+		const string EnterActorKey = "EnterActor";
+
 		readonly CaptureManager manager;
 
 		Actor enterActor;
@@ -26,6 +31,28 @@ namespace OpenRA.Mods.Common.Activities
 			: base(self, target, targetLineColor)
 		{
 			manager = self.Trait<CaptureManager>();
+		}
+
+		internal CaptureActor(Actor self, SnapshotReader r, MiniYaml yaml)
+			: base(self, r, yaml)
+		{
+			manager = self.Trait<CaptureManager>();
+
+			r.DeferActor(yaml.NodeWithKeyOrDefault(EnterActorKey).Value.Value, a =>
+			{
+				enterActor = a;
+				enterCaptureManager = a?.TraitOrDefault<CaptureManager>();
+			});
+		}
+
+		public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+		{
+			var nodes = base.SaveState(self, w);
+			nodes.AddRange(
+			[
+				new(EnterActorKey, w.ActorRef(enterActor))
+			]);
+			return nodes;
 		}
 
 		protected override void TickInner(Actor self, in Target target, bool targetIsDeadOrHiddenActor)

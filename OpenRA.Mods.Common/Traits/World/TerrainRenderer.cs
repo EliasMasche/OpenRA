@@ -76,11 +76,15 @@ namespace OpenRA.Mods.Common.Traits
 			if (terrainInfo == null)
 				throw new InvalidDataException($"{nameof(TerrainRenderer)} can only be used with the {nameof(DefaultTerrain)} parser");
 
-			tileCache = new DefaultTileCache(terrainInfo);
+			if (world.HasRenderer)
+				tileCache = new DefaultTileCache(terrainInfo);
 		}
 
 		void IWorldLoaded.WorldLoaded(World world, WorldRenderer wr)
 		{
+			if (wr == null)
+				return;
+
 			worldRenderer = wr;
 			spriteLayer = new TerrainSpriteLayer(world, wr, tileCache.MissingTile, BlendMode.Alpha, world.Type != WorldType.Editor);
 			foreach (var cell in map.AllCells)
@@ -92,6 +96,9 @@ namespace OpenRA.Mods.Common.Traits
 
 		public void UpdateCell(CPos cell)
 		{
+			if (spriteLayer == null)
+				return;
+
 			var tile = map.Tiles[cell];
 			var palette = terrainInfo.Palette;
 			if (terrainInfo.Templates.TryGetValue(tile.Type, out var template))
@@ -118,9 +125,9 @@ namespace OpenRA.Mods.Common.Traits
 			map.Tiles.CellEntryChanged -= UpdateCell;
 			map.Height.CellEntryChanged -= UpdateCell;
 
-			spriteLayer.Dispose();
+			spriteLayer?.Dispose();
 
-			tileCache.Dispose();
+			tileCache?.Dispose();
 			disposed = true;
 		}
 

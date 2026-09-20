@@ -11,6 +11,7 @@
 
 using System.Collections.Generic;
 using OpenRA.Activities;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Activities;
 using OpenRA.Mods.Common.Traits;
 using OpenRA.Primitives;
@@ -41,6 +42,9 @@ namespace OpenRA.Mods.Cnc.Traits
 
 	sealed class AttackTesla : AttackBase, ITick, INotifyAttack
 	{
+		const string ChargesKey = "Charges";
+		const string TimeToRechargeKey = "TimeToRecharge";
+
 		readonly AttackTeslaInfo info;
 
 		[VerifySync]
@@ -78,16 +82,40 @@ namespace OpenRA.Mods.Cnc.Traits
 
 		void INotifyAttack.PreparingAttack(Actor self, in Target target, Armament a, Barrel barrel) { }
 
+		protected override List<MiniYamlNode> SaveState(SnapshotWriter w)
+		{
+			return
+			[
+				.. base.SaveState(w),
+				new(ChargesKey, FieldSaver.FormatValue(charges)),
+				new(TimeToRechargeKey, FieldSaver.FormatValue(timeToRecharge))
+			];
+		}
+
+		protected override void LoadState(MiniYaml data, SnapshotReader r)
+		{
+			base.LoadState(data, r);
+
+			var nodes = data.ToDictionary();
+			if (nodes.TryGetValue(ChargesKey, out var c))
+				charges = FieldLoader.GetValue<int>(ChargesKey, c.Value);
+
+			if (nodes.TryGetValue(TimeToRechargeKey, out var t))
+				timeToRecharge = FieldLoader.GetValue<int>(TimeToRechargeKey, t.Value);
+		}
+
 		public override Activity GetAttackActivity(
 			Actor self, AttackSource source, in Target newTarget, bool allowMove, bool forceAttack, Color? targetLineColor = null)
 		{
 			return new ChargeAttack(this, newTarget, forceAttack, targetLineColor);
 		}
 
+		[SaveableActivity]
 		sealed class ChargeAttack : Activity, IActivityNotifyStanceChanged
 		{
 			readonly AttackTesla attack;
-			readonly Target target;
+
+			Target target;
 			readonly bool forceAttack;
 			readonly Color? targetLineColor;
 
@@ -97,6 +125,30 @@ namespace OpenRA.Mods.Cnc.Traits
 				this.target = target;
 				this.forceAttack = forceAttack;
 				this.targetLineColor = targetLineColor;
+			}
+
+			internal ChargeAttack(Actor self, SnapshotReader r, MiniYaml yaml)
+			{
+				attack = self.Trait<AttackTesla>();
+
+				var n = yaml.ToDictionary();
+				forceAttack = FieldLoader.GetValue<bool>("ForceAttack", n["ForceAttack"].Value);
+
+				var color = n["TargetLineColor"].Value;
+				if (!string.IsNullOrEmpty(color))
+					targetLineColor = FieldLoader.GetValue<Color>("TargetLineColor", color);
+
+				r.DeferTarget(n["Target"].Value, t => target = t);
+			}
+
+			public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+			{
+				return
+				[
+					new("Target", w.TargetRef(target)),
+					new("ForceAttack", FieldSaver.FormatValue(forceAttack)),
+					new("TargetLineColor", targetLineColor.HasValue ? FieldSaver.FormatValue(targetLineColor.Value) : "")
+				];
 			}
 
 			public override bool Tick(Actor self)
@@ -145,15 +197,28 @@ namespace OpenRA.Mods.Cnc.Traits
 			}
 		}
 
+		[SaveableActivity]
 		sealed class ChargeFire : Activity
 		{
 			readonly AttackTesla attack;
-			readonly Target target;
+
+			Target target;
 
 			public ChargeFire(AttackTesla attack, in Target target)
 			{
 				this.attack = attack;
 				this.target = target;
+			}
+
+			internal ChargeFire(Actor self, SnapshotReader r, MiniYaml yaml)
+			{
+				attack = self.Trait<AttackTesla>();
+				r.DeferTarget(yaml.NodeWithKeyOrDefault("Target").Value.Value, t => target = t);
+			}
+
+			public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+			{
+				return [new("Target", w.TargetRef(target))];
 			}
 
 			public override bool Tick(Actor self)

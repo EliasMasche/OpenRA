@@ -9,14 +9,19 @@
  */
 #endregion
 
+using System.Collections.Generic;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Traits;
 using OpenRA.Primitives;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Activities
 {
+	[SaveableActivity]
 	public sealed class InstantRepair : Enter
 	{
+		const string EnterActorKey = "EnterActor";
+
 		readonly InstantlyRepairsInfo info;
 
 		Actor enterActor;
@@ -27,6 +32,29 @@ namespace OpenRA.Mods.Common.Activities
 			: base(self, target, targetLineColor)
 		{
 			this.info = info;
+		}
+
+		internal InstantRepair(Actor self, SnapshotReader r, MiniYaml yaml)
+			: base(self, r, yaml)
+		{
+			info = self.Info.TraitInfoOrDefault<InstantlyRepairsInfo>();
+
+			r.DeferActor(yaml.NodeWithKeyOrDefault(EnterActorKey).Value.Value, a =>
+			{
+				enterActor = a;
+				enterHealth = a?.TraitOrDefault<IHealth>();
+				enterInstantlyRepariable = a?.TraitOrDefault<InstantlyRepairable>();
+			});
+		}
+
+		public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+		{
+			var nodes = base.SaveState(self, w);
+			nodes.AddRange(
+			[
+				new(EnterActorKey, w.ActorRef(enterActor))
+			]);
+			return nodes;
 		}
 
 		protected override bool TryStartEnter(Actor self, Actor targetActor)

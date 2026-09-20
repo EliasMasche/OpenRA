@@ -76,6 +76,9 @@ namespace OpenRA.Mods.Cnc.Traits
 
 		public ModelRenderer(ModelRendererInfo info, Actor self)
 		{
+			if (!self.World.HasRenderer)
+				return;
+
 			renderer = Game.Renderer;
 			shader = renderer.CreateShader(new ModelShaderBindings());
 			renderer.WorldRenderers = renderer.WorldRenderers.Append(this).ToArray();
@@ -380,6 +383,9 @@ namespace OpenRA.Mods.Cnc.Traits
 
 		public void Dispose()
 		{
+			if (renderer == null)
+				return;
+
 			foreach (var kvp in mappedBuffers.Concat(unmappedBuffers))
 			{
 				kvp.Key.Dispose();

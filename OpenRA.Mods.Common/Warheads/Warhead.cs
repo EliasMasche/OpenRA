@@ -61,12 +61,15 @@ namespace OpenRA.Mods.Common.Warheads
 		public abstract void DoImpact(in Target target, WarheadArgs args);
 
 		/// <summary>Checks if the warhead is valid against (can do something to) the actor.</summary>
-		public virtual bool IsValidAgainst(Actor victim, Actor firedBy)
+		public virtual bool IsValidAgainst(Actor victim, Player firedBy, Actor firedByActor = null)
 		{
-			if (!AffectsParent && victim == firedBy)
+			if (firedBy == null)
 				return false;
 
-			var relationship = firedBy.Owner.RelationshipWith(victim.Owner);
+			if (!AffectsParent && firedByActor != null && victim == firedByActor)
+				return false;
+
+			var relationship = firedBy.RelationshipWith(victim.Owner);
 			if (!ValidRelationships.HasRelationship(relationship))
 				return false;
 
@@ -77,14 +80,16 @@ namespace OpenRA.Mods.Common.Warheads
 			return true;
 		}
 
+		bool IWarhead.IsValidAgainst(Actor victim, Player firedBy) { return IsValidAgainst(victim, firedBy); }
+
 		/// <summary>Checks if the warhead is valid against (can do something to) the frozen actor.</summary>
-		public bool IsValidAgainst(FrozenActor victim, Actor firedBy)
+		public bool IsValidAgainst(FrozenActor victim, Player firedBy)
 		{
 			if (!victim.IsValid)
 				return false;
 
 			// AffectsParent checks do not make sense for FrozenActors, so skip to relationship checks
-			var relationship = firedBy.Owner.RelationshipWith(victim.Owner);
+			var relationship = firedBy.RelationshipWith(victim.Owner);
 			if (!ValidRelationships.HasRelationship(relationship))
 				return false;
 
@@ -94,5 +99,7 @@ namespace OpenRA.Mods.Common.Warheads
 
 			return true;
 		}
+
+		bool IWarhead.IsValidAgainst(FrozenActor victim, Player firedBy) { return IsValidAgainst(victim, firedBy); }
 	}
 }

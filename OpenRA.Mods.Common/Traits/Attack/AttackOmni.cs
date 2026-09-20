@@ -11,6 +11,7 @@
 
 using System.Collections.Generic;
 using OpenRA.Activities;
+using OpenRA.GameSaves;
 using OpenRA.Primitives;
 using OpenRA.Traits;
 
@@ -33,6 +34,7 @@ namespace OpenRA.Mods.Common.Traits
 		}
 
 		// Some 3rd-party mods rely on this being public
+		[SaveableActivity]
 		public class SetTarget : Activity, IActivityNotifyStanceChanged
 		{
 			readonly AttackOmni attack;
@@ -48,6 +50,32 @@ namespace OpenRA.Mods.Common.Traits
 				this.attack = attack;
 				this.allowMove = allowMove;
 				this.forceAttack = forceAttack;
+			}
+
+			internal SetTarget(Actor self, SnapshotReader r, MiniYaml yaml)
+			{
+				attack = self.Trait<AttackOmni>();
+
+				var n = yaml.ToDictionary();
+				allowMove = FieldLoader.GetValue<bool>("AllowMove", n["AllowMove"].Value);
+				forceAttack = FieldLoader.GetValue<bool>("ForceAttack", n["ForceAttack"].Value);
+
+				var color = n["TargetLineColor"].Value;
+				if (!string.IsNullOrEmpty(color))
+					targetLineColor = FieldLoader.GetValue<Color>("TargetLineColor", color);
+
+				r.DeferTarget(n["Target"].Value, t => target = t);
+			}
+
+			public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+			{
+				return
+				[
+					new("Target", w.TargetRef(target)),
+					new("AllowMove", FieldSaver.FormatValue(allowMove)),
+					new("ForceAttack", FieldSaver.FormatValue(forceAttack)),
+					new("TargetLineColor", targetLineColor.HasValue ? FieldSaver.FormatValue(targetLineColor.Value) : "")
+				];
 			}
 
 			public override bool Tick(Actor self)

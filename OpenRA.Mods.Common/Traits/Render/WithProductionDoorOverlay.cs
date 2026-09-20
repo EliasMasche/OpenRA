@@ -81,7 +81,9 @@ namespace OpenRA.Mods.Common.Traits.Render
 		{
 			openExit = exit;
 			exitingActor = other;
-			desiredFrame = door.CurrentSequence.Length - 1;
+
+			if (self.World.Map.Sequences.SpritesLoaded)
+				desiredFrame = door.CurrentSequence.Length - 1;
 		}
 	}
 }

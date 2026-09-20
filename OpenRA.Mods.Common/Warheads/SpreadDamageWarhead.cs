@@ -53,15 +53,16 @@ namespace OpenRA.Mods.Common.Warheads
 				effectiveRange = Exts.MakeArray(Falloff.Length, i => i * Spread).ToImmutableArray();
 		}
 
-		protected override void DoImpact(WPos pos, Actor firedBy, WarheadArgs args)
+		protected override void DoImpact(WPos pos, Player firedBy, Actor firedByActor, WarheadArgs args)
 		{
-			var debugVis = firedBy.World.WorldActor.TraitOrDefault<DebugVisualizations>();
+			var world = args.World;
+			var debugVis = world.WorldActor.TraitOrDefault<DebugVisualizations>();
 			if (debugVis != null && debugVis.CombatGeometry)
-				firedBy.World.WorldActor.Trait<WarheadDebugOverlay>().AddImpact(pos, effectiveRange, DebugOverlayColor);
+				world.WorldActor.Trait<WarheadDebugOverlay>().AddImpact(pos, effectiveRange, DebugOverlayColor);
 
-			foreach (var victim in firedBy.World.FindActorsOnCircle(pos, effectiveRange[^1]))
+			foreach (var victim in world.FindActorsOnCircle(pos, effectiveRange[^1]))
 			{
-				if (!IsValidAgainst(victim, firedBy))
+				if (!IsValidAgainst(victim, firedBy, firedByActor))
 					continue;
 
 				HitShape closestActiveShape = null;
@@ -121,7 +122,7 @@ namespace OpenRA.Mods.Common.Warheads
 					ImpactOrientation = impactOrientation,
 				};
 
-				InflictDamage(victim, firedBy, closestActiveShape, updatedWarheadArgs);
+				InflictDamage(victim, firedBy, firedByActor, closestActiveShape, updatedWarheadArgs);
 			}
 		}
 

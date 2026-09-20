@@ -9,7 +9,9 @@
  */
 #endregion
 
+using System.Collections.Generic;
 using System.Collections.Immutable;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Effects;
 using OpenRA.Traits;
 
@@ -66,8 +68,11 @@ namespace OpenRA.Mods.Common.Traits
 		public override object Create(ActorInitializer init) { return new FloatingSpriteEmitter(init.Self, this); }
 	}
 
-	public class FloatingSpriteEmitter : ConditionalTrait<FloatingSpriteEmitterInfo>, ITick, INotifyDamage
+	public class FloatingSpriteEmitter : ConditionalTrait<FloatingSpriteEmitterInfo>, ITick, INotifyDamage, ISaveState
 	{
+		const string OffsetKey = "Offset";
+		const string DurationKey = "Duration";
+
 		WVec offset;
 		IFacing facing;
 		int ticks;
@@ -117,10 +122,35 @@ namespace OpenRA.Mods.Common.Traits
 			{
 				ticks = Util.RandomInRange(self.World.LocalRandom, Info.SpawnFrequency);
 
+				if (!self.World.Map.Sequences.SpritesLoaded)
+					return;
+
 				var spawnFacing = (!Info.RandomFacing && facing != null) ? facing.Facing : WAngle.FromFacing(self.World.LocalRandom.Next(256));
 				self.World.AddFrameEndTask(w => w.Add(new FloatingSprite(self, Info.Image, Info.Sequences, Info.Palette, Info.IsPlayerPalette,
 					Info.Lifetime, Info.Speed, Info.Gravity, Info.TurnRate, Info.RandomRate, self.CenterPosition + offset, spawnFacing)));
 			}
+		}
+
+		TraitInfo ISaveState.SaveStateInfo => Info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
+		{
+			return
+			[
+				new(OffsetKey, FieldSaver.FormatValue(offset)),
+				new(DurationKey, FieldSaver.FormatValue(duration))
+			];
+		}
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
+		{
+			var nodes = data.ToDictionary();
+
+			if (nodes.TryGetValue(OffsetKey, out var o))
+				offset = FieldLoader.GetValue<WVec>(OffsetKey, o.Value);
+
+			if (nodes.TryGetValue(DurationKey, out var d))
+				duration = FieldLoader.GetValue<int>(DurationKey, d.Value);
 		}
 	}
 }

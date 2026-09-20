@@ -79,6 +79,9 @@ namespace OpenRA.Mods.Cnc.Traits
 
 		void ITick.Tick(Actor self)
 		{
+			if (worldRenderer == null)
+				return;
+
 			if (--ticks > 0)
 				return;
 

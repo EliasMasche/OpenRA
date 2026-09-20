@@ -9,9 +9,11 @@
  */
 #endregion
 
+using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
 using OpenRA.GameRules;
+using OpenRA.GameSaves;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Traits
@@ -48,8 +50,10 @@ namespace OpenRA.Mods.Common.Traits
 		}
 	}
 
-	public class FireWarheads : PausableConditionalTrait<FireWarheadsInfo>, ITick, ISync
+	public class FireWarheads : PausableConditionalTrait<FireWarheadsInfo>, ITick, ISync, ISaveState
 	{
+		const string CooldownKey = "Cooldown";
+
 		[VerifySync]
 		int cooldown = 0;
 
@@ -81,6 +85,20 @@ namespace OpenRA.Mods.Common.Traits
 		protected override void TraitDisabled(Actor self)
 		{
 			cooldown = Info.StartCooldown;
+		}
+
+		TraitInfo ISaveState.SaveStateInfo => Info;
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
+		{
+			return [new(CooldownKey, FieldSaver.FormatValue(cooldown))];
+		}
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
+		{
+			var node = data.NodeWithKeyOrDefault(CooldownKey);
+			if (node != null)
+				cooldown = FieldLoader.GetValue<int>(CooldownKey, node.Value.Value);
 		}
 	}
 }

@@ -11,14 +11,22 @@
 
 using System.Collections.Generic;
 using OpenRA.Activities;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Traits;
 using OpenRA.Primitives;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Activities
 {
+	[SaveableActivity]
 	public class Drag : Activity
 	{
+		const string StartKey = "Start";
+		const string EndKey = "End";
+		const string LengthKey = "Length";
+		const string TicksKey = "Ticks";
+		const string DesiredFacingKey = "DesiredFacing";
+
 		readonly IPositionable positionable;
 		readonly IDisabledTrait disableable;
 		readonly WPos start;
@@ -36,6 +44,22 @@ namespace OpenRA.Mods.Common.Activities
 			this.length = length;
 			desiredFacing = facing;
 			IsInterruptible = false;
+		}
+
+		protected Drag(Actor self, SnapshotReader r, MiniYaml yaml)
+		{
+			positionable = self.Trait<IPositionable>();
+			disableable = self.TraitOrDefault<IMove>() as IDisabledTrait;
+
+			var nodes = yaml.ToDictionary();
+			start = FieldLoader.GetValue<WPos>(StartKey, nodes[StartKey].Value);
+			end = FieldLoader.GetValue<WPos>(EndKey, nodes[EndKey].Value);
+			length = FieldLoader.GetValue<int>(LengthKey, nodes[LengthKey].Value);
+			ticks = FieldLoader.GetValue<int>(TicksKey, nodes[TicksKey].Value);
+
+			var facing = nodes[DesiredFacingKey].Value;
+			if (!string.IsNullOrEmpty(facing))
+				desiredFacing = FieldLoader.GetValue<WAngle>(DesiredFacingKey, facing);
 		}
 
 		protected override void OnFirstRun(Actor self)
@@ -68,6 +92,19 @@ namespace OpenRA.Mods.Common.Activities
 		public override IEnumerable<TargetLineNode> TargetLineNodes(Actor self)
 		{
 			yield return new TargetLineNode(Target.FromPos(end), Color.Green);
+		}
+
+		public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+		{
+			return
+			[
+				new(StartKey, FieldSaver.FormatValue(start)),
+				new(EndKey, FieldSaver.FormatValue(end)),
+				new(LengthKey, FieldSaver.FormatValue(length)),
+				new(TicksKey, FieldSaver.FormatValue(ticks)),
+
+				new(DesiredFacingKey, desiredFacing.HasValue ? FieldSaver.FormatValue(desiredFacing.Value) : "")
+			];
 		}
 	}
 }

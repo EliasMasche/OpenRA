@@ -12,6 +12,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using OpenRA.Mods.Common.Lint;
 using OpenRA.Widgets;
 
@@ -33,6 +34,12 @@ namespace OpenRA.Mods.Common.Widgets.Logic.Ingame.Hotkeys
 
 		protected override bool OnHotkeyActivated(KeyInput e)
 		{
+			if (!world.LobbyInfo.GlobalSettings.EnableGameSaves || world.IsReplay)
+				return true;
+
+			if (world.LobbyInfo.NonBotClients.Count() > 1 && !Game.IsHost)
+				return true;
+
 			var dateTime = DateTime.UtcNow.ToString("yyyy-MM-ddTHHmmssZ", CultureInfo.InvariantCulture);
 			var fileName = $"{QuickSavePattern}{dateTime}{SaveFileExtension}";
 			world.RequestGameSave(fileName, false);

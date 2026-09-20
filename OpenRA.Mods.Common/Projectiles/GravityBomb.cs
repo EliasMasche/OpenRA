@@ -13,8 +13,10 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Numerics;
 using OpenRA.GameRules;
+using OpenRA.GameSaves;
 using OpenRA.Graphics;
 using OpenRA.Primitives;
+using OpenRA.Scripting;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Projectiles
@@ -54,8 +56,14 @@ namespace OpenRA.Mods.Common.Projectiles
 		public IProjectile Create(ProjectileArgs args) { return new GravityBomb(this, args); }
 	}
 
-	public class GravityBomb : IProjectile, ISync
+	[SaveableEffect]
+	public class GravityBomb : IProjectile, ISync, ISaveableEffect, IProjectileScriptInfo
 	{
+		const string ArgsKey = "Args";
+		const string PosKey = "Pos";
+		const string LastPosKey = "LastPos";
+		const string VelocityKey = "Velocity";
+
 		readonly GravityBombInfo info;
 		readonly Animation anim;
 		readonly ProjectileArgs args;
@@ -93,6 +101,47 @@ namespace OpenRA.Mods.Common.Projectiles
 			shadowAlpha = sColor.W;
 		}
 
+		internal GravityBomb(World world, SnapshotReader r, MiniYaml yaml)
+		{
+			var nodes = yaml.ToDictionary();
+
+			args = ProjectileArgsCodec.Load(nodes[ArgsKey], world, r);
+
+			info = (GravityBombInfo)args.Weapon.Projectile;
+
+			acceleration = new WVec(info.Acceleration.Y, -info.Acceleration.X, info.Acceleration.Z);
+
+			pos = FieldLoader.GetValue<WPos>(PosKey, nodes[PosKey].Value);
+			lastPos = FieldLoader.GetValue<WPos>(LastPosKey, nodes[LastPosKey].Value);
+			velocity = FieldLoader.GetValue<WVec>(VelocityKey, nodes[VelocityKey].Value);
+
+			if (!string.IsNullOrEmpty(info.Image))
+			{
+				anim = new Animation(world, info.Image, () => args.Facing);
+
+				anim.PlayRepeating(info.Sequences[0]);
+			}
+
+			var restoredColor = info.ShadowColor.ToVector4();
+			shadowColor = restoredColor.AsVector3();
+			shadowAlpha = restoredColor.W;
+		}
+
+		List<MiniYamlNode> ISaveableEffect.SaveState(World world, SnapshotWriter w)
+		{
+			var argNodes = ProjectileArgsCodec.Save(args, world, w);
+			if (argNodes == null)
+				return null;
+
+			return
+			[
+				new(ArgsKey, new MiniYaml("", argNodes)),
+				new(PosKey, FieldSaver.FormatValue(pos)),
+				new(LastPosKey, FieldSaver.FormatValue(lastPos)),
+				new(VelocityKey, FieldSaver.FormatValue(velocity))
+			];
+		}
+
 		public void Tick(World world)
 		{
 			lastPos = pos;
@@ -121,12 +170,12 @@ namespace OpenRA.Mods.Common.Projectiles
 			if (anim == null)
 				yield break;
 
-			var world = args.SourceActor.World;
+			var world = args.World;
 			if (!world.FogObscures(pos))
 			{
 				var paletteName = info.Palette;
 				if (paletteName != null && info.IsPlayerPalette)
-					paletteName += args.SourceActor.Owner.InternalName;
+					paletteName += args.SourceOwner.InternalName;
 
 				var palette = wr.Palette(paletteName);
 
@@ -144,5 +193,11 @@ namespace OpenRA.Mods.Common.Projectiles
 					yield return r;
 			}
 		}
+
+		WPos IProjectileScriptInfo.Position => pos;
+		WPos IProjectileScriptInfo.TargetPosition => args.PassiveTarget;
+		ScriptProjectileInterface IProjectileScriptInfo.LuaInterface { get; set; }
+		Actor IProjectileScriptInfo.SourceActor => args.SourceActor;
+		WeaponInfo IProjectileScriptInfo.Weapon => args.Weapon;
 	}
 }

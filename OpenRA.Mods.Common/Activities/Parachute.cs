@@ -9,13 +9,18 @@
  */
 #endregion
 
+using System.Collections.Generic;
 using OpenRA.Activities;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Traits;
 
 namespace OpenRA.Mods.Common.Activities
 {
+	[SaveableActivity]
 	public class Parachute : Activity
 	{
+		const string GroundLevelKey = "GroundLevel";
+
 		readonly IPositionable pos;
 		readonly WVec fallVector;
 
@@ -26,6 +31,20 @@ namespace OpenRA.Mods.Common.Activities
 			pos = self.OccupiesSpace as IPositionable;
 			fallVector = new WVec(0, 0, self.Info.TraitInfo<ParachutableInfo>().FallRate);
 			IsInterruptible = false;
+		}
+
+		internal Parachute(Actor self, SnapshotReader _, MiniYaml yaml)
+		{
+			pos = self.OccupiesSpace as IPositionable;
+			fallVector = new WVec(0, 0, self.Info.TraitInfo<ParachutableInfo>().FallRate);
+			IsInterruptible = false;
+
+			groundLevel = FieldLoader.GetValue<int>(GroundLevelKey, yaml.NodeWithKeyOrDefault(GroundLevelKey).Value.Value);
+		}
+
+		public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+		{
+			return [new(GroundLevelKey, FieldSaver.FormatValue(groundLevel))];
 		}
 
 		protected override void OnFirstRun(Actor self)

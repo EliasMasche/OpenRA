@@ -89,7 +89,7 @@ namespace OpenRA.Mods.Common.Traits
 
 		void ITick.Tick(Actor self)
 		{
-			if (IsTraitDisabled || !enabled)
+			if (IsTraitDisabled || !enabled || self.World.IsRestoringSnapshot)
 				return;
 
 			if (--initialDelay > 0)

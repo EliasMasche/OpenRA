@@ -10,12 +10,17 @@
 #endregion
 
 using System;
+using System.Collections.Generic;
 using OpenRA.Activities;
+using OpenRA.GameSaves;
 
 namespace OpenRA.Mods.Common.Activities
 {
+	[SaveableActivity]
 	public class Wait : Activity
 	{
+		const string RemainingTicksKey = "RemainingTicks";
+
 		int remainingTicks;
 
 		public Wait(int period) { remainingTicks = period; }
@@ -25,12 +30,22 @@ namespace OpenRA.Mods.Common.Activities
 			IsInterruptible = interruptible;
 		}
 
+		protected Wait(Actor self, SnapshotReader r, MiniYaml yaml)
+		{
+			remainingTicks = FieldLoader.GetValue<int>(RemainingTicksKey, yaml.NodeWithKeyOrDefault(RemainingTicksKey)?.Value.Value);
+		}
+
 		public override bool Tick(Actor self)
 		{
 			if (IsCanceling)
 				return true;
 
 			return remainingTicks-- == 0;
+		}
+
+		public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+		{
+			return [new(RemainingTicksKey, FieldSaver.FormatValue(remainingTicks))];
 		}
 	}
 

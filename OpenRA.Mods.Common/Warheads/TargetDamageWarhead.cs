@@ -21,18 +21,19 @@ namespace OpenRA.Mods.Common.Warheads
 		[Desc("Damage will be applied to actors in this area. A value of zero means only targeted actor will be damaged.")]
 		public readonly WDist Spread = WDist.Zero;
 
-		protected override void DoImpact(WPos pos, Actor firedBy, WarheadArgs args)
+		protected override void DoImpact(WPos pos, Player firedBy, Actor firedByActor, WarheadArgs args)
 		{
 			if (Spread == WDist.Zero)
 				return;
 
-			var debugVis = firedBy.World.WorldActor.TraitOrDefault<DebugVisualizations>();
+			var world = args.World;
+			var debugVis = world.WorldActor.TraitOrDefault<DebugVisualizations>();
 			if (debugVis != null && debugVis.CombatGeometry)
-				firedBy.World.WorldActor.Trait<WarheadDebugOverlay>().AddImpact(pos, [WDist.Zero, Spread], DebugOverlayColor);
+				world.WorldActor.Trait<WarheadDebugOverlay>().AddImpact(pos, [WDist.Zero, Spread], DebugOverlayColor);
 
-			foreach (var victim in firedBy.World.FindActorsOnCircle(pos, Spread))
+			foreach (var victim in world.FindActorsOnCircle(pos, Spread))
 			{
-				if (!IsValidAgainst(victim, firedBy))
+				if (!IsValidAgainst(victim, firedBy, firedByActor))
 					continue;
 
 				HitShape closestActiveShape = null;
@@ -60,7 +61,7 @@ namespace OpenRA.Mods.Common.Warheads
 				if (closestDistance > Spread.Length)
 					continue;
 
-				InflictDamage(victim, firedBy, closestActiveShape, args);
+				InflictDamage(victim, firedBy, firedByActor, closestActiveShape, args);
 			}
 		}
 	}

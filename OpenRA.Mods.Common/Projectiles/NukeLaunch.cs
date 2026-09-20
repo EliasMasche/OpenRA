@@ -13,16 +13,45 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using OpenRA.Effects;
 using OpenRA.GameRules;
+using OpenRA.GameSaves;
 using OpenRA.Graphics;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Effects
 {
-	public class NukeLaunch : IProjectile, ISpatiallyPartitionable
+	[SaveableEffect]
+	public class NukeLaunch : IProjectile, ISpatiallyPartitionable, ISaveableEffect, IRequiresRestoredReferences
 	{
+		const string FiredByKey = "FiredBy";
+		const string WeaponKey = "Weapon";
+		const string ImageKey = "Image";
+		const string WeaponPaletteKey = "WeaponPalette";
+		const string UpSequenceKey = "UpSequence";
+		const string DownSequenceKey = "DownSequence";
+		const string AscendSourceKey = "AscendSource";
+		const string AscendTargetKey = "AscendTarget";
+		const string DescendSourceKey = "DescendSource";
+		const string DescendTargetKey = "DescendTarget";
+		const string DetonationAltitudeKey = "DetonationAltitude";
+		const string RemoveOnDetonationKey = "RemoveOnDetonation";
+		const string ImpactDelayKey = "ImpactDelay";
+		const string TurnKey = "Turn";
+		const string TrailImageKey = "TrailImage";
+		const string TrailSequencesKey = "TrailSequences";
+		const string TrailPaletteKey = "TrailPalette";
+		const string TrailIntervalKey = "TrailInterval";
+		const string TrailDelayKey = "TrailDelay";
+		const string PosKey = "Pos";
+		const string TicksKey = "Ticks";
+		const string TrailTicksKey = "TrailTicks";
+		const string LaunchDelayKey = "LaunchDelay";
+		const string IsLaunchedKey = "IsLaunched";
+		const string DetonatedKey = "Detonated";
+
 		readonly Player firedBy;
 		readonly Animation anim;
 		readonly WeaponInfo weapon;
+		readonly string image;
 		readonly string weaponPalette;
 		readonly string upSequence;
 		readonly string downSequence;
@@ -54,6 +83,7 @@ namespace OpenRA.Mods.Common.Effects
 		{
 			this.firedBy = firedBy;
 			this.weapon = weapon;
+			this.image = image;
 			this.weaponPalette = weaponPalette;
 			this.upSequence = upSequence;
 			this.downSequence = downSequence;
@@ -84,6 +114,97 @@ namespace OpenRA.Mods.Common.Effects
 			pos = skipAscent ? descendSource : ascendSource;
 		}
 
+		internal NukeLaunch(World world, SnapshotReader r, MiniYaml yaml)
+		{
+			var nodes = yaml.ToDictionary();
+
+			weapon = WeaponRefs.ResolveWeapon(world, nodes[WeaponKey].Value);
+			image = nodes[ImageKey].Value;
+			weaponPalette = nodes[WeaponPaletteKey].Value;
+			upSequence = nodes[UpSequenceKey].Value;
+			downSequence = nodes[DownSequenceKey].Value;
+
+			ascendSource = FieldLoader.GetValue<WPos>(AscendSourceKey, nodes[AscendSourceKey].Value);
+			ascendTarget = FieldLoader.GetValue<WPos>(AscendTargetKey, nodes[AscendTargetKey].Value);
+			descendSource = FieldLoader.GetValue<WPos>(DescendSourceKey, nodes[DescendSourceKey].Value);
+			descendTarget = FieldLoader.GetValue<WPos>(DescendTargetKey, nodes[DescendTargetKey].Value);
+			detonationAltitude = FieldLoader.GetValue<WDist>(DetonationAltitudeKey, nodes[DetonationAltitudeKey].Value);
+			removeOnDetonation = FieldLoader.GetValue<bool>(RemoveOnDetonationKey, nodes[RemoveOnDetonationKey].Value);
+			impactDelay = FieldLoader.GetValue<int>(ImpactDelayKey, nodes[ImpactDelayKey].Value);
+
+			turn = FieldLoader.GetValue<int>(TurnKey, nodes[TurnKey].Value);
+
+			trailImage = nodes[TrailImageKey].Value;
+			trailPalette = nodes[TrailPaletteKey].Value;
+			trailInterval = FieldLoader.GetValue<int>(TrailIntervalKey, nodes[TrailIntervalKey].Value);
+			trailDelay = FieldLoader.GetValue<int>(TrailDelayKey, nodes[TrailDelayKey].Value);
+
+			var sequences = nodes[TrailSequencesKey].Value;
+			trailSequences = string.IsNullOrEmpty(sequences)
+				? []
+				: [.. FieldLoader.GetValue<string[]>(TrailSequencesKey, sequences)];
+
+			pos = FieldLoader.GetValue<WPos>(PosKey, nodes[PosKey].Value);
+			ticks = FieldLoader.GetValue<int>(TicksKey, nodes[TicksKey].Value);
+			trailTicks = FieldLoader.GetValue<int>(TrailTicksKey, nodes[TrailTicksKey].Value);
+			launchDelay = FieldLoader.GetValue<int>(LaunchDelayKey, nodes[LaunchDelayKey].Value);
+			isLaunched = FieldLoader.GetValue<bool>(IsLaunchedKey, nodes[IsLaunchedKey].Value);
+			detonated = FieldLoader.GetValue<bool>(DetonatedKey, nodes[DetonatedKey].Value);
+
+			firedBy = r.ResolvePlayer(nodes[FiredByKey].Value);
+
+			if (!string.IsNullOrEmpty(image))
+			{
+				anim = new Animation(world, image);
+
+				if (isLaunched)
+				{
+					anim.PlayRepeating(ticks >= turn ? downSequence : upSequence);
+
+					if (world.Map.Sequences.SpritesLoaded)
+						world.ScreenMap.Add(this, pos, anim.Image);
+				}
+			}
+		}
+
+		bool IRequiresRestoredReferences.ReferencesRestored => firedBy != null;
+
+		List<MiniYamlNode> ISaveableEffect.SaveState(World world, SnapshotWriter w)
+		{
+			var weaponKey = WeaponRefs.WeaponKeyOf(world, weapon);
+			if (weaponKey == null)
+				return null;
+
+			return
+			[
+				new(FiredByKey, w.PlayerRef(firedBy)),
+				new(WeaponKey, weaponKey),
+				new(ImageKey, image ?? ""),
+				new(WeaponPaletteKey, weaponPalette ?? ""),
+				new(UpSequenceKey, upSequence ?? ""),
+				new(DownSequenceKey, downSequence ?? ""),
+				new(AscendSourceKey, FieldSaver.FormatValue(ascendSource)),
+				new(AscendTargetKey, FieldSaver.FormatValue(ascendTarget)),
+				new(DescendSourceKey, FieldSaver.FormatValue(descendSource)),
+				new(DescendTargetKey, FieldSaver.FormatValue(descendTarget)),
+				new(DetonationAltitudeKey, FieldSaver.FormatValue(detonationAltitude)),
+				new(RemoveOnDetonationKey, FieldSaver.FormatValue(removeOnDetonation)),
+				new(ImpactDelayKey, FieldSaver.FormatValue(impactDelay)),
+				new(TurnKey, FieldSaver.FormatValue(turn)),
+				new(TrailImageKey, trailImage ?? ""),
+				new(TrailSequencesKey, trailSequences.JoinWith(",")),
+				new(TrailPaletteKey, trailPalette ?? ""),
+				new(TrailIntervalKey, FieldSaver.FormatValue(trailInterval)),
+				new(TrailDelayKey, FieldSaver.FormatValue(trailDelay)),
+				new(PosKey, FieldSaver.FormatValue(pos)),
+				new(TicksKey, FieldSaver.FormatValue(ticks)),
+				new(TrailTicksKey, FieldSaver.FormatValue(trailTicks)),
+				new(LaunchDelayKey, FieldSaver.FormatValue(launchDelay)),
+				new(IsLaunchedKey, FieldSaver.FormatValue(isLaunched)),
+				new(DetonatedKey, FieldSaver.FormatValue(detonated))
+			];
+		}
+
 		public void Tick(World world)
 		{
 			if (launchDelay-- > 0)
@@ -97,7 +218,9 @@ namespace OpenRA.Mods.Common.Effects
 				if (anim != null)
 				{
 					anim.PlayRepeating(upSequence);
-					world.ScreenMap.Add(this, pos, anim.Image);
+
+					if (world.Map.Sequences.SpritesLoaded)
+						world.ScreenMap.Add(this, pos, anim.Image);
 				}
 
 				isLaunched = true;
@@ -132,7 +255,7 @@ namespace OpenRA.Mods.Common.Effects
 			if (ticks == impactDelay || (isDescending && dat <= detonationAltitude))
 				Explode(world, ticks == impactDelay || removeOnDetonation);
 
-			if (anim != null)
+			if (anim != null && world.Map.Sequences.SpritesLoaded)
 				world.ScreenMap.Update(this, pos, anim.Image);
 
 			ticks++;
@@ -151,7 +274,10 @@ namespace OpenRA.Mods.Common.Effects
 			{
 				Weapon = weapon,
 				Source = target.CenterPosition,
-				SourceActor = firedBy.PlayerActor,
+				World = world,
+
+				SourceOwner = firedBy,
+				SourceActor = firedBy?.PlayerActor,
 				WeaponTarget = target
 			};
 

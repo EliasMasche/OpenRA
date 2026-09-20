@@ -11,14 +11,22 @@
 
 using System.Collections.Generic;
 using OpenRA.Activities;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Traits;
 using OpenRA.Primitives;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Activities
 {
-	public class MoveAdjacentTo : Activity
+	[SaveableActivity]
+	public class MoveAdjacentTo : Activity, IProvidesMovePath
 	{
+		protected const string TargetKey = "Target";
+		protected const string LastVisibleTargetKey = "LastVisibleTarget";
+		protected const string LastVisibleTargetLocationKey = "LastVisibleTargetLocation";
+		protected const string UseLastVisibleTargetKey = "UseLastVisibleTarget";
+		protected const string TargetLineColorKey = "TargetLineColor";
+
 		protected readonly Mobile Mobile;
 		readonly Color? targetLineColor;
 
@@ -51,6 +59,23 @@ namespace OpenRA.Mods.Common.Activities
 			}
 		}
 
+		protected MoveAdjacentTo(Actor self, SnapshotReader r, MiniYaml yaml)
+		{
+			Mobile = self.Trait<Mobile>();
+			ChildHasPriority = false;
+
+			var nodes = yaml.ToDictionary();
+			lastVisibleTargetLocation = FieldLoader.GetValue<CPos>(LastVisibleTargetLocationKey, nodes[LastVisibleTargetLocationKey].Value);
+			useLastVisibleTarget = FieldLoader.GetValue<bool>(UseLastVisibleTargetKey, nodes[UseLastVisibleTargetKey].Value);
+
+			var color = nodes[TargetLineColorKey].Value;
+			if (!string.IsNullOrEmpty(color))
+				targetLineColor = FieldLoader.GetValue<Color>(TargetLineColorKey, color);
+
+			r.DeferTarget(nodes[TargetKey].Value, t => target = t);
+			r.DeferTarget(nodes[LastVisibleTargetKey].Value, t => lastVisibleTarget = t);
+		}
+
 		protected virtual bool ShouldStop(Actor self)
 		{
 			return false;
@@ -68,7 +93,7 @@ namespace OpenRA.Mods.Common.Activities
 
 		protected override void OnFirstRun(Actor self)
 		{
-			QueueChild(Mobile.MoveTo(check => CalculatePathToTarget(self, check)));
+			QueueChild(Mobile.MoveTo(check => CalculatePathToTarget(self, check), parentSupplied: true));
 		}
 
 		public override bool Tick(Actor self)
@@ -96,7 +121,7 @@ namespace OpenRA.Mods.Common.Activities
 			{
 				// Target has moved, but is still valid.
 				ChildActivity?.Cancel(self);
-				QueueChild(Mobile.MoveTo(check => CalculatePathToTarget(self, check)));
+				QueueChild(Mobile.MoveTo(check => CalculatePathToTarget(self, check), parentSupplied: true));
 			}
 
 			// The last queued child activity is guaranteed to be the inner move,
@@ -154,6 +179,24 @@ namespace OpenRA.Mods.Common.Activities
 		{
 			if (targetLineColor.HasValue)
 				yield return new TargetLineNode(useLastVisibleTarget ? lastVisibleTarget : target, targetLineColor.Value);
+		}
+
+		public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+		{
+			return
+			[
+				new(TargetKey, w.TargetRef(target)),
+				new(LastVisibleTargetKey, w.TargetRef(lastVisibleTarget)),
+				new(LastVisibleTargetLocationKey, FieldSaver.FormatValue(lastVisibleTargetLocation)),
+				new(UseLastVisibleTargetKey, FieldSaver.FormatValue(useLastVisibleTarget)),
+				new(TargetLineColorKey, targetLineColor.HasValue ? FieldSaver.FormatValue(targetLineColor.Value) : "")
+			];
+		}
+
+		void IProvidesMovePath.ProvideMovePath(Actor self, Activity child)
+		{
+			if (child is Move move)
+				move.RestorePathFunc(check => CalculatePathToTarget(self, check));
 		}
 	}
 }

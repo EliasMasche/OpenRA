@@ -25,9 +25,13 @@ namespace OpenRA.Mods.Common.Warheads
 
 		public override void DoImpact(in Target target, WarheadArgs args)
 		{
-			var firedBy = args.SourceActor;
+			var firedBy = args.SourceOwner;
+
+			if (firedBy == null)
+				return;
+
 			var actors = target.Type == TargetType.Actor ? [target.Actor] :
-				firedBy.World.FindActorsInCircle(target.CenterPosition, Range);
+				args.World.FindActorsInCircle(target.CenterPosition, Range);
 
 			foreach (var a in actors)
 			{
@@ -35,18 +39,18 @@ namespace OpenRA.Mods.Common.Warheads
 					continue;
 
 				// Don't do anything on friendly fire
-				if (a.Owner == firedBy.Owner)
+				if (a.Owner == firedBy)
 					continue;
 
 				if (Duration == 0)
-					a.ChangeOwner(firedBy.Owner); // Permanent
+					a.ChangeOwner(firedBy); // Permanent
 				else
 				{
 					var tempOwnerManager = a.TraitOrDefault<TemporaryOwnerManager>();
 					if (tempOwnerManager == null)
 						continue;
 
-					tempOwnerManager.ChangeOwner(a, firedBy.Owner, Duration);
+					tempOwnerManager.ChangeOwner(a, firedBy, Duration);
 				}
 
 				// Stop shooting, you have new enemies

@@ -11,11 +11,13 @@
 
 using System.Collections.Generic;
 using OpenRA.GameRules;
+using OpenRA.GameSaves;
 using OpenRA.Graphics;
 using OpenRA.Mods.Common.Effects;
 using OpenRA.Mods.Common.Graphics;
 using OpenRA.Mods.Common.Traits;
 using OpenRA.Primitives;
+using OpenRA.Scripting;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Projectiles
@@ -106,8 +108,18 @@ namespace OpenRA.Mods.Common.Projectiles
 		}
 	}
 
-	public class LaserZap : IProjectile, ISync
+	[SaveableEffect]
+	public class LaserZap : IProjectile, ISync, ISaveableEffect, IProjectileScriptInfo
 	{
+		const string ArgsKey = "Args";
+		const string TargetKey = "Target";
+		const string SourceKey = "Source";
+		const string TicksKey = "Ticks";
+		const string IntervalKey = "Interval";
+		const string ShowHitAnimKey = "ShowHitAnim";
+		const string ColorKey = "Color";
+		const string SecondaryColorKey = "SecondaryColor";
+
 		readonly ProjectileArgs args;
 		readonly LaserZapInfo info;
 		readonly Animation hitanim;
@@ -148,6 +160,48 @@ namespace OpenRA.Mods.Common.Projectiles
 			hasLaunchEffect = !string.IsNullOrEmpty(info.LaunchEffectImage) && !string.IsNullOrEmpty(info.LaunchEffectSequence);
 		}
 
+		internal LaserZap(World world, SnapshotReader r, MiniYaml yaml)
+		{
+			var nodes = yaml.ToDictionary();
+
+			args = ProjectileArgsCodec.Load(nodes[ArgsKey], world, r);
+
+			info = (LaserZapInfo)args.Weapon.Projectile;
+
+			target = FieldLoader.GetValue<WPos>(TargetKey, nodes[TargetKey].Value);
+			source = FieldLoader.GetValue<WPos>(SourceKey, nodes[SourceKey].Value);
+			ticks = FieldLoader.GetValue<int>(TicksKey, nodes[TicksKey].Value);
+			interval = FieldLoader.GetValue<int>(IntervalKey, nodes[IntervalKey].Value);
+			showHitAnim = FieldLoader.GetValue<bool>(ShowHitAnimKey, nodes[ShowHitAnimKey].Value);
+
+			color = FieldLoader.GetValue<Color>(ColorKey, nodes[ColorKey].Value);
+			secondaryColor = FieldLoader.GetValue<Color>(SecondaryColorKey, nodes[SecondaryColorKey].Value);
+
+			if (!string.IsNullOrEmpty(info.HitAnim))
+				hitanim = new Animation(world, info.HitAnim);
+
+			hasLaunchEffect = !string.IsNullOrEmpty(info.LaunchEffectImage) && !string.IsNullOrEmpty(info.LaunchEffectSequence);
+		}
+
+		List<MiniYamlNode> ISaveableEffect.SaveState(World world, SnapshotWriter w)
+		{
+			var argNodes = ProjectileArgsCodec.Save(args, world, w);
+			if (argNodes == null)
+				return null;
+
+			return
+			[
+				new(ArgsKey, new MiniYaml("", argNodes)),
+				new(TargetKey, FieldSaver.FormatValue(target)),
+				new(SourceKey, FieldSaver.FormatValue(source)),
+				new(TicksKey, FieldSaver.FormatValue(ticks)),
+				new(IntervalKey, FieldSaver.FormatValue(interval)),
+				new(ShowHitAnimKey, FieldSaver.FormatValue(showHitAnim)),
+				new(ColorKey, FieldSaver.FormatValue(color)),
+				new(SecondaryColorKey, FieldSaver.FormatValue(secondaryColor))
+			];
+		}
+
 		public void Tick(World world)
 		{
 			source = args.CurrentSource();
@@ -157,11 +211,11 @@ namespace OpenRA.Mods.Common.Projectiles
 					info.LaunchEffectImage, info.LaunchEffectSequence, info.LaunchEffectPalette)));
 
 			// Beam tracks target
-			if (info.TrackTarget && args.GuidedTarget.IsValidFor(args.SourceActor))
+			if (info.TrackTarget && args.GuidedTarget.IsValidFor(args.SourceOwner))
 				target = args.Weapon.TargetActorCenter ? args.GuidedTarget.CenterPosition : args.GuidedTarget.Positions.ClosestToIgnoringPath(source);
 
 			// Check for blocking actors
-			if (info.Blockable && BlocksProjectiles.AnyBlockingActorsBetween(world, args.SourceActor.Owner, source, target, info.Width, out var blockedPos))
+			if (info.Blockable && BlocksProjectiles.AnyBlockingActorsBetween(world, args.SourceOwner, source, target, info.Width, out var blockedPos))
 			{
 				target = blockedPos;
 			}
@@ -213,5 +267,11 @@ namespace OpenRA.Mods.Common.Projectiles
 				foreach (var r in hitanim.Render(target, wr.Palette(info.HitAnimPalette)))
 					yield return r;
 		}
+
+		WPos IProjectileScriptInfo.Position => source;
+		WPos IProjectileScriptInfo.TargetPosition => target;
+		ScriptProjectileInterface IProjectileScriptInfo.LuaInterface { get; set; }
+		Actor IProjectileScriptInfo.SourceActor => args.SourceActor;
+		WeaponInfo IProjectileScriptInfo.Weapon => args.Weapon;
 	}
 }
