@@ -26,7 +26,7 @@ namespace OpenRA.Mods.D2k.Traits
 		[Desc("Amount to scale the visuals within the effect circle.")]
 		public readonly float Zoom = 2.5f;
 
-		public override object Create(ActorInitializer init) { return new SonicBlastRenderer(this); }
+		public override object Create(ActorInitializer init) { return new SonicBlastRenderer(this, init.Self); }
 	}
 
 	public sealed class SonicBlastRenderer : IRenderPostProcessPass, INotifyActorDisposing
@@ -38,10 +38,14 @@ namespace OpenRA.Mods.D2k.Traits
 		readonly IVertexBuffer<RenderPostProcessPassTexturedVertex> buffer;
 		readonly List<Vector3> positions = [];
 
-		public SonicBlastRenderer(SonicBlastRendererInfo info)
+		public SonicBlastRenderer(SonicBlastRendererInfo info, Actor self)
 		{
 			Info = info;
 			renderer = Game.Renderer;
+
+			if (!self.World.HasRenderer)
+				return;
+
 			shader = renderer.CreateShader(new RenderPostProcessPassTexturedShaderBindings("sonic"));
 
 			var r = 0.5f * info.Size;
@@ -90,7 +94,7 @@ namespace OpenRA.Mods.D2k.Traits
 
 		void INotifyActorDisposing.Disposing(Actor self)
 		{
-			buffer.Dispose();
+			buffer?.Dispose();
 		}
 	}
 }

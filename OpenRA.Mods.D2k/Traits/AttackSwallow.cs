@@ -12,6 +12,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using OpenRA.Activities;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Activities;
 using OpenRA.Mods.Common.Traits;
 using OpenRA.Mods.D2k.Activities;
@@ -78,10 +79,14 @@ namespace OpenRA.Mods.D2k.Traits
 			return new SwallowTarget(self, newTarget, allowMove, forceAttack);
 		}
 
+		[SaveableActivity]
 		public sealed class SwallowTarget : Attack
 		{
 			public SwallowTarget(Actor self, in Target target, bool allowMovement, bool forceAttack)
 				: base(self, target, allowMovement, forceAttack) { }
+
+			internal SwallowTarget(Actor self, SnapshotReader r, MiniYaml yaml)
+				: base(self, r, yaml) { }
 
 			protected override Target RecalculateTarget(Actor self, out bool targetIsHiddenActor)
 			{

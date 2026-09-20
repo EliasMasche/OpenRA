@@ -15,6 +15,7 @@ using System.Collections.Immutable;
 using System.Linq;
 using OpenRA.Effects;
 using OpenRA.GameRules;
+using OpenRA.GameSaves;
 using OpenRA.Graphics;
 using OpenRA.Mods.Common.Graphics;
 using OpenRA.Mods.Common.Traits;
@@ -152,7 +153,9 @@ namespace OpenRA.Mods.D2k.Traits
 
 					Source = self.CenterPosition,
 					CurrentSource = () => self.CenterPosition,
+					World = self.World,
 					SourceActor = self,
+					SourceOwner = self.Owner,
 					PassiveTarget = self.World.Map.CenterOfCell(cell)
 				});
 			}
@@ -167,8 +170,13 @@ namespace OpenRA.Mods.D2k.Traits
 		}
 	}
 
-	public class FireProjectilesEffect : IEffect
+	[SaveableEffect]
+	public class FireProjectilesEffect : IEffect, ISaveableEffect
 	{
+		const string DelayKey = "Delay";
+		const string DelayInfoKey = "DelayInfo";
+		const string ProjectilesKey = "Projectiles";
+
 		readonly Stack<ProjectileArgs> projectiles = [];
 		int delay = 1;
 		readonly int delayInfo = 1;
@@ -177,6 +185,40 @@ namespace OpenRA.Mods.D2k.Traits
 			this.projectiles = projectiles;
 			delay = delayInfo;
 			this.delayInfo = delayInfo;
+		}
+
+		internal FireProjectilesEffect(World world, SnapshotReader r, MiniYaml yaml)
+		{
+			var nodes = yaml.ToDictionary();
+
+			delay = FieldLoader.GetValue<int>(DelayKey, nodes[DelayKey].Value);
+			delayInfo = FieldLoader.GetValue<int>(DelayInfoKey, nodes[DelayInfoKey].Value);
+
+			var saved = nodes[ProjectilesKey].Nodes;
+			for (var i = saved.Length - 1; i >= 0; i--)
+				projectiles.Push(ProjectileArgsCodec.Load(saved[i].Value, world, r));
+		}
+
+		List<MiniYamlNode> ISaveableEffect.SaveState(World world, SnapshotWriter w)
+		{
+			var saved = new List<MiniYamlNode>();
+			var index = 0;
+			foreach (var args in projectiles)
+			{
+				var argNodes = ProjectileArgsCodec.Save(args, world, w);
+				if (argNodes == null)
+					return null;
+
+				saved.Add(new MiniYamlNode(index.ToStringInvariant(), new MiniYaml("", argNodes)));
+				index++;
+			}
+
+			return
+			[
+				new(DelayKey, FieldSaver.FormatValue(delay)),
+				new(DelayInfoKey, FieldSaver.FormatValue(delayInfo)),
+				new(ProjectilesKey, new MiniYaml("", saved))
+			];
 		}
 
 		public void Tick(World world)

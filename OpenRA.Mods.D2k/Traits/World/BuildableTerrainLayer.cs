@@ -58,6 +58,9 @@ namespace OpenRA.Mods.D2k.Traits
 
 		void IWorldLoaded.WorldLoaded(World w, WorldRenderer wr)
 		{
+			if (wr == null)
+				return;
+
 			render = new TerrainSpriteLayer(w, wr, terrainRenderer.MissingTile, BlendMode.Alpha, true);
 			paletteReference = wr.Palette(info.Palette);
 		}
@@ -149,7 +152,7 @@ namespace OpenRA.Mods.D2k.Traits
 			if (disposed)
 				return;
 
-			render.Dispose();
+			render?.Dispose();
 			disposed = true;
 		}
 	}

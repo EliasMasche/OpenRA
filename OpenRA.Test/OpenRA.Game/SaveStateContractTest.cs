@@ -153,13 +153,11 @@ namespace OpenRA.Test
 				yield return assembly;
 		}
 
-		// The audits below cover the assemblies this build ships. Loading one that is absent throws
-		// FileNotFoundException and reports as a broken contract, so a tier that carries fewer mods
-		// must narrow this list rather than let it fail.
 		static IEnumerable<Assembly> EffectAssemblies()
 		{
 			yield return Assembly.Load("OpenRA.Mods.Common");
 			yield return Assembly.Load("OpenRA.Mods.Cnc");
+			yield return Assembly.Load("OpenRA.Mods.D2k");
 		}
 	}
 }

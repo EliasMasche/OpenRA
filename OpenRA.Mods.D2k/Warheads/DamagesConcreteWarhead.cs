@@ -28,8 +28,7 @@ namespace OpenRA.Mods.D2k.Warheads
 			if (target.Type == TargetType.Invalid)
 				return;
 
-			var firedBy = args.SourceActor;
-			var world = firedBy.World;
+			var world = args.World;
 			var layer = world.WorldActor.Trait<BuildableTerrainLayer>();
 			var cell = world.Map.CellContaining(target.CenterPosition);
 			layer.HitTile(cell, Damage);

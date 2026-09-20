@@ -13,11 +13,13 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
 using OpenRA.GameRules;
+using OpenRA.GameSaves;
 using OpenRA.Graphics;
 using OpenRA.Mods.Common;
 using OpenRA.Mods.Common.Traits;
 using OpenRA.Mods.D2k.Graphics;
 using OpenRA.Mods.D2k.Traits;
+using OpenRA.Scripting;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.D2k.Projectiles
@@ -61,8 +63,17 @@ namespace OpenRA.Mods.D2k.Projectiles
 		}
 	}
 
-	public class SonicBlast : IProjectile, ISync
+	[SaveableEffect]
+	public class SonicBlast : IProjectile, ISync, ISaveableEffect, IProjectileScriptInfo
 	{
+		const string ArgsKey = "Args";
+		const string PosKey = "Pos";
+		const string LastPosKey = "LastPos";
+		const string TargetKey = "Target";
+		const string SpeedKey = "Speed";
+		const string LengthKey = "Length";
+		const string TicksKey = "Ticks";
+
 		readonly SonicBlastInfo info;
 		readonly ProjectileArgs args;
 
@@ -104,6 +115,42 @@ namespace OpenRA.Mods.D2k.Projectiles
 			length = Math.Max((target - pos).Length / speed.Length, 1);
 		}
 
+		internal SonicBlast(World world, SnapshotReader r, MiniYaml yaml)
+		{
+			var nodes = yaml.ToDictionary();
+
+			args = ProjectileArgsCodec.Load(nodes[ArgsKey], world, r);
+
+			info = (SonicBlastInfo)args.Weapon.Projectile;
+			renderer = world.WorldActor.Trait<SonicBlastRenderer>();
+
+			speed = FieldLoader.GetValue<WDist>(SpeedKey, nodes[SpeedKey].Value);
+			target = FieldLoader.GetValue<WPos>(TargetKey, nodes[TargetKey].Value);
+
+			pos = FieldLoader.GetValue<WPos>(PosKey, nodes[PosKey].Value);
+			lastPos = FieldLoader.GetValue<WPos>(LastPosKey, nodes[LastPosKey].Value);
+			length = FieldLoader.GetValue<int>(LengthKey, nodes[LengthKey].Value);
+			ticks = FieldLoader.GetValue<int>(TicksKey, nodes[TicksKey].Value);
+		}
+
+		List<MiniYamlNode> ISaveableEffect.SaveState(World world, SnapshotWriter w)
+		{
+			var argNodes = ProjectileArgsCodec.Save(args, world, w);
+			if (argNodes == null)
+				return null;
+
+			return
+			[
+				new(ArgsKey, new MiniYaml("", argNodes)),
+				new(PosKey, FieldSaver.FormatValue(pos)),
+				new(LastPosKey, FieldSaver.FormatValue(lastPos)),
+				new(TargetKey, FieldSaver.FormatValue(target)),
+				new(SpeedKey, FieldSaver.FormatValue(speed)),
+				new(LengthKey, FieldSaver.FormatValue(length)),
+				new(TicksKey, FieldSaver.FormatValue(ticks))
+			];
+		}
+
 		public void Tick(World world)
 		{
 			if (ticks++ >= length)
@@ -112,7 +159,7 @@ namespace OpenRA.Mods.D2k.Projectiles
 			lastPos = pos;
 			pos = WPos.LerpQuadratic(args.Source, target, WAngle.Zero, ticks, length);
 
-			if (info.Blockable && BlocksProjectiles.AnyBlockingActorsBetween(world, args.SourceActor.Owner, lastPos, pos, info.Width, out var blockedPos))
+			if (info.Blockable && BlocksProjectiles.AnyBlockingActorsBetween(world, args.SourceOwner, lastPos, pos, info.Width, out var blockedPos))
 			{
 				pos = blockedPos;
 				length = Math.Min(ticks, length);
@@ -153,5 +200,11 @@ namespace OpenRA.Mods.D2k.Projectiles
 
 			return SpriteRenderable.None;
 		}
+
+		WPos IProjectileScriptInfo.Position => pos;
+		WPos IProjectileScriptInfo.TargetPosition => args.PassiveTarget;
+		ScriptProjectileInterface IProjectileScriptInfo.LuaInterface { get; set; }
+		Actor IProjectileScriptInfo.SourceActor => args.SourceActor;
+		WeaponInfo IProjectileScriptInfo.Weapon => args.Weapon;
 	}
 }

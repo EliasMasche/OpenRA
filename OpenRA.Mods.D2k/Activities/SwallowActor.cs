@@ -13,6 +13,7 @@ using System.Collections.Generic;
 using System.Linq;
 using OpenRA.Activities;
 using OpenRA.GameRules;
+using OpenRA.GameSaves;
 using OpenRA.Mods.Common.Effects;
 using OpenRA.Mods.Common.Traits;
 using OpenRA.Mods.D2k.Traits;
@@ -23,14 +24,17 @@ namespace OpenRA.Mods.D2k.Activities
 {
 	enum AttackState { Uninitialized, Burrowed, Attacking }
 
+	[SaveableActivity]
 	sealed class SwallowActor : Activity
 	{
 		const int NearEnough = 1;
 
-		readonly Target target;
 		readonly Sandworm sandworm;
+
 		readonly WeaponInfo weapon;
 		readonly Armament armament;
+
+		Target target;
 		readonly AttackSwallow swallow;
 		readonly IPositionable positionable;
 		readonly IFacing facing;
@@ -49,6 +53,42 @@ namespace OpenRA.Mods.D2k.Activities
 			sandworm = self.Trait<Sandworm>();
 			positionable = self.Trait<Mobile>();
 			swallow = self.Trait<AttackSwallow>();
+		}
+
+		internal SwallowActor(Actor self, SnapshotReader r, MiniYaml yaml)
+		{
+			sandworm = self.Trait<Sandworm>();
+			positionable = self.Trait<IPositionable>();
+			swallow = self.Trait<AttackSwallow>();
+			facing = self.Trait<IFacing>();
+
+			var n = yaml.ToDictionary();
+			countdown = FieldLoader.GetValue<int>("Countdown", n["Countdown"].Value);
+			burrowLocation = FieldLoader.GetValue<CPos>("BurrowLocation", n["BurrowLocation"].Value);
+			stance = FieldLoader.GetValue<AttackState>("Stance", n["Stance"].Value);
+
+			var index = FieldLoader.GetValue<int>("Armament", n["Armament"].Value);
+			var armaments = self.TraitsImplementing<Armament>().ToArray();
+			armament = index >= 0 && index < armaments.Length ? armaments[index] : armaments.FirstOrDefault();
+			weapon = armament?.Weapon;
+
+			if (FieldLoader.GetValue<bool>("Attacking", n["Attacking"].Value))
+				attackingToken = self.GrantCondition(swallow.Info.AttackingCondition);
+
+			r.DeferTarget(n["Target"].Value, t => target = t);
+		}
+
+		public override List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+		{
+			return
+			[
+				new("Target", w.TargetRef(target)),
+				new("Countdown", FieldSaver.FormatValue(countdown)),
+				new("BurrowLocation", FieldSaver.FormatValue(burrowLocation)),
+				new("Stance", FieldSaver.FormatValue(stance)),
+				new("Armament", FieldSaver.FormatValue(self.TraitsImplementing<Armament>().ToList().IndexOf(armament))),
+				new("Attacking", FieldSaver.FormatValue(attackingToken != Actor.InvalidConditionToken))
+			];
 		}
 
 		bool AttackTargets(Actor self, IReadOnlyCollection<Actor> targets)
