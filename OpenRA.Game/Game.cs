@@ -19,6 +19,7 @@ using System.Linq;
 using System.Net;
 using System.Runtime;
 using System.Threading;
+using OpenRA.GameSaves;
 using OpenRA.Graphics;
 using OpenRA.Network;
 using OpenRA.Primitives;
@@ -28,7 +29,7 @@ using OpenRA.Widgets;
 
 namespace OpenRA
 {
-	[IncludeStaticFluentReferences(typeof(Server.Server), typeof(Player), typeof(UnitOrders), typeof(OrderManager))]
+	[IncludeStaticFluentReferences(typeof(Server.Server), typeof(Player), typeof(UnitOrders), typeof(OrderManager), typeof(World))]
 	public static class Game
 	{
 		[FluentReference("filename")]
@@ -50,12 +51,25 @@ namespace OpenRA
 		internal static OrderManager OrderManager;
 		static Server.Server server;
 
-		public static MersenneTwister CosmeticRandom = new(); // not synced
+		public static MersenneTwister CosmeticRandom = new();
 
 		public static Renderer Renderer;
 		public static Sound Sound;
 
 		public static string EngineVersion { get; private set; }
+
+		internal static void LoadEngineVersion()
+		{
+			try
+			{
+				EngineVersion = File.ReadAllText(Path.Combine(Platform.EngineDir, "VERSION")).Trim();
+			}
+			catch { }
+
+			if (string.IsNullOrEmpty(EngineVersion))
+				EngineVersion = "Unknown";
+		}
+
 		public static LocalPlayerProfile LocalPlayerProfile;
 
 		static bool takeScreenshot = false;
@@ -91,7 +105,6 @@ namespace OpenRA
 			// Refresh static classes before the game starts.
 			TextNotificationsManager.Clear();
 			UnitOrders.Clear();
-
 			// HACK: The shellmap World and OrderManager are owned by the main menu's WorldRenderer instead of Game.
 			// This allows us to switch Game.OrderManager from the shellmap to the new network connection when joining
 			// a lobby, while keeping the OrderManager that runs the shellmap intact.
@@ -193,8 +206,12 @@ namespace OpenRA
 			StartGame(preview.ToMap(), type);
 		}
 
-		internal static void StartGame(Map map, WorldType type)
+		internal static bool StartGame(Map map, WorldType type, string snapshotFilename = null, int startingFrame = 1)
 		{
+			FileStream snapshot = null;
+			if (snapshotFilename != null && !TryOpenSnapshot(ModData.Manifest, snapshotFilename, out snapshot))
+				return false;
+
 			// Dispose of the old world before creating a new one.
 			worldRenderer?.Dispose();
 
@@ -217,7 +234,11 @@ namespace OpenRA
 					margin = map.Rules.TerrainInfo.TileSize.Height * map.Grid.MaximumTerrainHeight;
 
 				Renderer.SetDepthMargin(margin);
-				OrderManager.World = new World(map, ModData, OrderManager, type);
+
+				OrderManager.World = new World(map, ModData, OrderManager, type)
+				{
+					IsRestoringSnapshot = snapshotFilename != null
+				};
 			}
 
 			OrderManager.World.GameOver += FinishBenchmark;
@@ -230,16 +251,25 @@ namespace OpenRA
 			using (new PerfTimer("LoadComplete"))
 				OrderManager.World.LoadComplete(worldRenderer);
 
+			if (snapshotFilename != null)
+			{
+				using (snapshot)
+				{
+					if (!RestoreSnapshot(OrderManager.World, snapshot, snapshotFilename))
+						return false;
+				}
+			}
+
 			// Proactively collect memory during loading to reduce peak memory.
 			GC.Collect();
 
-			if (OrderManager.GameStarted)
-				return;
+			if (OrderManager.GameStarted && startingFrame == 1)
+				return true;
 
 			Ui.MouseFocusWidget = null;
 			Ui.KeyboardFocusWidget = null;
 
-			OrderManager.StartGame();
+			OrderManager.StartGame(startingFrame);
 			worldRenderer.RefreshPalette();
 			Cursor.SetCursor(ChromeMetrics.Get<string>("DefaultCursor"));
 
@@ -258,6 +288,71 @@ namespace OpenRA
 			OrderManager.World.PostLoadComplete(worldRenderer);
 
 			AfterGameStart();
+			return true;
+		}
+
+		static bool TryOpenSnapshot(Manifest mod, string filename, out FileStream snapshot)
+		{
+			snapshot = null;
+
+			string path;
+			try
+			{
+				path = SavePaths.ResolveSaveFile(mod, filename);
+			}
+			catch (Exception e)
+			{
+				Log.Write("debug", $"Refused the save name '{filename}': {e.Message}");
+				return false;
+			}
+
+			Log.Write("debug", $"Restoring '{filename}' from '{path}' (exists: {File.Exists(path)}).");
+
+			try
+			{
+				snapshot = File.OpenRead(path);
+				return true;
+			}
+			catch (Exception e)
+			{
+				Log.Write("debug", $"Cannot restore the saved game '{filename}':");
+				Log.Write("debug", e);
+				return false;
+			}
+		}
+
+		static bool RestoreSnapshot(World world, FileStream snapshot, string filename)
+		{
+			using (new PerfTimer("RestoreSnapshot"))
+			{
+				SnapshotReader reader;
+				try
+				{
+					reader = new SnapshotReader(snapshot, false, world);
+				}
+				catch (Exception e)
+				{
+					Log.Write("debug", $"Cannot read the saved game '{filename}' as a snapshot:");
+					Log.Write("debug", e);
+					return false;
+				}
+
+				using (reader)
+				{
+					var mode = OrderManager.SnapshotReceivedFromServer
+						? WorldLoadMode.RestoredRemoteSave
+						: WorldLoadMode.RestoredLocalSave;
+
+					var restorer = new WorldRestorer(world, reader, ModData.ActivityRegistry, ModData.EffectRegistry)
+					{
+						Diagnostics = Settings.Debug.SnapshotDiagnostics
+					};
+
+					restorer.Restore(Settings.Debug.SnapshotLenient, mode);
+				}
+
+				return true;
+			}
 		}
 
 		public static void RestartGame()
@@ -323,6 +418,8 @@ namespace OpenRA
 			}
 		}
 
+		public static ServerType? CurrentServerType => server?.Type;
+
 		static Modifiers modifiers;
 		public static Modifiers GetModifierKeys() { return modifiers; }
 		internal static void HandleModifierKeys(Modifiers mods) { modifiers = mods; }
@@ -353,16 +450,9 @@ namespace OpenRA
 
 			Console.WriteLine($"Platform is {Platform.CurrentPlatform} ({Platform.CurrentArchitecture})");
 
+			LoadEngineVersion();
+
 			// Load the engine version as early as possible so it can be written to exception logs
-			try
-			{
-				EngineVersion = File.ReadAllText(Path.Combine(Platform.EngineDir, "VERSION")).Trim();
-			}
-			catch { }
-
-			if (string.IsNullOrEmpty(EngineVersion))
-				EngineVersion = "Unknown";
-
 			Console.WriteLine($"Engine version is {EngineVersion}");
 			Console.WriteLine($"Runtime: {Platform.RuntimeVersion}");
 
@@ -386,6 +476,16 @@ namespace OpenRA
 			Log.AddChannel("geoip", "geoip.log");
 			Log.AddChannel("nat", "nat.log");
 			Log.AddChannel("client", "client.log");
+
+			Log.Write("debug", $"Paths: support '{Platform.SupportDir}', engine '{Platform.EngineDir}', " +
+				$"bin '{Platform.BinDir}', settings '{Path.Combine(Platform.SupportDir, "settings.yaml")}'.");
+			if (string.IsNullOrEmpty(engineDirArg))
+				Log.Write("debug", "Paths: Engine.EngineDir was not given, so the engine directory is the binary " +
+					"directory and mods are looked for under it. Launchers pass it; a direct binary run does not.");
+			if (string.IsNullOrEmpty(supportDirArg))
+				Log.Write("debug", "Paths: Engine.SupportDir was not given, so the support directory is " +
+					$"'{Platform.SupportDir}' - the engine directory's Support folder when that folder exists, " +
+					"otherwise this user's OpenRA folder. Two processes resolve this separately.");
 
 			Nat.Initialize();
 
@@ -657,6 +757,9 @@ namespace OpenRA
 
 					if (orderManager.TryTick())
 					{
+						if (!ReferenceEquals(orderManager.World, world))
+							return;
+
 						Sync.RunUnsynced(world, () => world.OrderGenerator.Tick(world));
 
 						world.Tick();
@@ -790,7 +893,6 @@ namespace OpenRA
 			// framerates.
 			// It's not possible at the moment because the render buffer is cleared
 			// before rendering and we don't keep the last rendered world buffer.
-
 			// When the logic has fallen behind by this much, skip the pending
 			// updates and start fresh.
 			// For example, if we want to update logic every 10 ms but each loop

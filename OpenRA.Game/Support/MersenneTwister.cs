@@ -32,6 +32,21 @@ namespace OpenRA.Support
 				mt[i] = 1812433253u * (mt[i - 1] ^ (mt[i - 1] >> 30)) + i;
 		}
 
+		public MersenneTwisterState SaveState()
+		{
+			return new MersenneTwisterState(mt, index, Last, TotalCount);
+		}
+
+		public void RestoreState(MersenneTwisterState state)
+		{
+			ArgumentNullException.ThrowIfNull(state);
+
+			state.GetStateVector().CopyTo(mt, 0);
+			index = state.Index;
+			Last = state.Last;
+			TotalCount = state.TotalCount;
+		}
+
 		/// <summary>
 		/// Produces a random unsigned 32-bit integer.
 		/// </summary>

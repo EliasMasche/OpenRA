@@ -85,6 +85,7 @@ namespace OpenRA
 				{ typeof(WVec), ParseWVec },
 				{ typeof(WVec[]), ParseWVecArray },
 				{ typeof(WPos), ParseWPos },
+				{ typeof(WPos[]), ParseWPosArray },
 				{ typeof(WAngle), ParseWAngle },
 				{ typeof(WRot), ParseWRot },
 				{ typeof(CPos), ParseCPos },
@@ -281,6 +282,39 @@ namespace OpenRA
 			return InvalidValueAction(value.Span, fieldType, fieldName);
 		}
 
+		static object ParseWPosArray(string fieldName, Type fieldType, YamlValue value)
+		{
+			if (!value.Span.IsEmpty)
+			{
+				var res = new List<WPos>();
+				var parts = value.Span.Split(Comma);
+				Span<WDist> elements = stackalloc WDist[3];
+				var index = 0;
+				foreach (var part in parts)
+				{
+					var p = part.Trim(); // StringSplitOptions.TrimEntries
+					if (p.IsEmpty) continue; // StringSplitOptions.RemoveEmptyEntries
+
+					if (!WDist.TryParse(p, out var element))
+						return InvalidValueAction(value.Span, fieldType, fieldName);
+
+					elements[index++] = element;
+					if (index == elements.Length)
+					{
+						index = 0;
+						res.Add(new WPos(elements[0], elements[1], elements[2]));
+					}
+				}
+
+				if (index != 0)
+					return InvalidValueAction(value.Span, fieldType, fieldName);
+
+				return res.ToArray();
+			}
+
+			return InvalidValueAction(value.Span, fieldType, fieldName);
+		}
+
 		static object ParseWPos(string fieldName, Type fieldType, YamlValue value)
 		{
 			if (!value.Span.IsEmpty)
@@ -343,35 +377,82 @@ namespace OpenRA
 
 		static object ParseCPosArray(string fieldName, Type fieldType, YamlValue value)
 		{
-			if (!value.Span.IsEmpty)
-			{
-				var res = new List<CPos>();
-				var parts = value.Span.Split(Comma);
-				Span<int> elements = stackalloc int[2];
-				var index = 0;
-				foreach (var part in parts)
-				{
-					var p = part.Trim(); // StringSplitOptions.TrimEntries
-					if (p.IsEmpty) continue; // StringSplitOptions.RemoveEmptyEntries
+			var span = value.Span.Trim();
+			if (span.IsEmpty)
+				return InvalidValueAction(value.Span, fieldType, fieldName);
 
-					if (!Exts.TryParseInt32Invariant(p, out var element))
+			var firstEntryEnd = 0;
+			while (firstEntryEnd < span.Length && !char.IsWhiteSpace(span[firstEntryEnd]))
+				firstEntryEnd++;
+
+			if (!span[..firstEntryEnd].Contains(Comma))
+				return ParseFlatCPosArray(fieldName, fieldType, value);
+
+			var res = new List<CPos>();
+			Span<int> numbers = stackalloc int[3];
+			while (!span.IsEmpty)
+			{
+				var entryEnd = 0;
+				while (entryEnd < span.Length && !char.IsWhiteSpace(span[entryEnd]))
+					entryEnd++;
+
+				var entry = span[..entryEnd];
+				span = span[entryEnd..].TrimStart();
+
+				var count = 0;
+				while (!entry.IsEmpty)
+				{
+					var separator = entry.IndexOf(Comma);
+					var part = (separator < 0 ? entry : entry[..separator]).Trim();
+					entry = separator < 0 ? default : entry[(separator + 1)..];
+
+					if (part.IsEmpty)
+						continue;
+
+					if (count == numbers.Length || !Exts.TryParseInt32Invariant(part, out numbers[count]))
 						return InvalidValueAction(value.Span, fieldType, fieldName);
 
-					elements[index++] = element;
-					if (index == elements.Length)
-					{
-						index = 0;
-						res.Add(new CPos(elements[0], elements[1]));
-					}
+					count++;
 				}
 
-				if (index != 0)
+				if (count == 2)
+					res.Add(new CPos(numbers[0], numbers[1]));
+				else if (count == 3)
+					res.Add(new CPos(numbers[0], numbers[1], (byte)numbers[2]));
+				else
 					return InvalidValueAction(value.Span, fieldType, fieldName);
-
-				return res.ToArray();
 			}
 
-			return InvalidValueAction(value.Span, fieldType, fieldName);
+			return res.ToArray();
+		}
+
+		static object ParseFlatCPosArray(string fieldName, Type fieldType, YamlValue value)
+		{
+			var numbers = new List<int>();
+			var rest = value.Span;
+			while (!rest.IsEmpty)
+			{
+				var separator = rest.IndexOf(Comma);
+				var part = (separator < 0 ? rest : rest[..separator]).Trim();
+				rest = separator < 0 ? default : rest[(separator + 1)..];
+
+				if (part.IsEmpty)
+					continue;
+
+				if (!Exts.TryParseInt32Invariant(part, out var number))
+					return InvalidValueAction(value.Span, fieldType, fieldName);
+
+				numbers.Add(number);
+			}
+
+			if (numbers.Count % 2 != 0)
+				return InvalidValueAction(value.Span, fieldType, fieldName);
+
+			var res = new List<CPos>(numbers.Count / 2);
+			for (var i = 0; i < numbers.Count; i += 2)
+				res.Add(new CPos(numbers[i], numbers[i + 1]));
+
+			return res.ToArray();
 		}
 
 		static object ParseCVec(string fieldName, Type fieldType, YamlValue value)

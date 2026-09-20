@@ -268,4 +268,8 @@ namespace OpenRA
 			throw new NotImplementedException("RuntimeFlagInit cannot be saved");
 		}
 	}
+
+	public class RestoringInit : RuntimeFlagInit, ISingleInstanceInit { }
+
+	public class SpawnedByMapInit : RuntimeFlagInit, ISingleInstanceInit { }
 }

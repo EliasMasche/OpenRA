@@ -9,9 +9,12 @@
  */
 #endregion
 
+using System;
 using System.Collections.Frozen;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using OpenRA.GameSaves;
 using OpenRA.Server;
 using OpenRA.Traits;
 
@@ -36,6 +39,15 @@ namespace OpenRA.Network
 		[FluentReference("player")]
 		const string GameUnpaused = "notification-game-unpaused";
 
+		[FluentReference]
+		const string CannotStartMapUnavailable = "notification-cannot-start-map-unavailable";
+
+		[FluentReference]
+		const string CannotStartSnapshotNotReceived = "notification-cannot-start-snapshot-not-received";
+
+		[FluentReference("file")]
+		const string CannotStartSnapshotMissingFile = "notification-cannot-start-snapshot-missing-file";
+
 		public static int? KickVoteTarget { get; internal set; }
 
 		static Player FindPlayerByClient(this World world, Session.Client c)
@@ -44,6 +56,28 @@ namespace OpenRA.Network
 		}
 
 		static bool OrderNotFromServerOrWorldIsReplay(int clientId, World world) => clientId != 0 || (world != null && world.IsReplay);
+
+		static void FailSnapshotDownload(OrderManager orderManager, string reason)
+		{
+			Log.Write("client", $"Snapshot download failed: {reason}.");
+			orderManager.SnapshotDownload = null;
+			orderManager.SnapshotDownloadFailed = true;
+			TextNotificationsManager.AddSystemLine($"The saved game could not be received: {reason}.");
+
+			var failedFile = orderManager.SnapshotDownloadFilename;
+			orderManager.SnapshotDownloadFilename = null;
+			if (failedFile != null)
+				orderManager.IssueOrder(Order.FromTargetString("SnapshotLoadFailed", failedFile, true));
+		}
+
+		static void AbandonGameStart(OrderManager orderManager, string reason)
+		{
+			Log.Write("client", $"Cannot start the game: {reason}");
+			orderManager.IssueOrder(Order.FromTargetString("SnapshotStartFailed", reason, true));
+
+			Game.Disconnect();
+			Game.LoadShellMap();
+		}
 
 		internal static void ProcessOrder(OrderManager orderManager, World world, int clientId, Order order)
 		{
@@ -170,15 +204,20 @@ namespace OpenRA.Network
 
 				case "StartGame":
 				{
-					if (Game.ModData.MapCache[orderManager.LobbyInfo.GlobalSettings.Map].Status != MapStatus.Available)
-					{
-						Game.Disconnect();
-						Game.LoadShellMap();
+					var restarting = orderManager.GameStarted;
+					if (restarting)
+						orderManager.EndGame();
 
-						// TODO: After adding a startup error dialog, notify the replay load failure.
+					var preview = Game.ModData.MapCache[orderManager.LobbyInfo.GlobalSettings.Map];
+					if (preview.Status != MapStatus.Available)					{
+						TextNotificationsManager.AddSystemLine(CannotStartMapUnavailable);
+						AbandonGameStart(orderManager, "the map is not available on this client");
 						break;
 					}
 
+					var startingFrame = 1;
+
+					string snapshotFilename = null;
 					if (!string.IsNullOrEmpty(order.TargetString))
 					{
 						var data = MiniYaml.FromString(order.TargetString, order.OrderString).ToList();
@@ -191,11 +230,32 @@ namespace OpenRA.Network
 						if (saveSyncFrame != null)
 							orderManager.GameSaveLastSyncFrame =
 								FieldLoader.GetValue<int>("SaveSyncFrame", saveSyncFrame.Value.Value);
+
+						var startingFrameNode = data.FirstOrDefault(n => n.Key == "StartingFrame");
+						if (startingFrameNode != null)
+							startingFrame = FieldLoader.GetValue<int>("StartingFrame", startingFrameNode.Value.Value);
+
+						snapshotFilename = data.FirstOrDefault(n => n.Key == "SnapshotPath")?.Value.Value;
+
+						if (snapshotFilename != null && orderManager.SnapshotDownloadFailed)
+						{
+							TextNotificationsManager.AddSystemLine(CannotStartSnapshotNotReceived);
+							AbandonGameStart(orderManager, "the saved game was not received");
+							break;
+						}
 					}
 					else
 						TextNotificationsManager.AddSystemLine(GameStarted);
 
-					Game.StartGame(orderManager.LobbyInfo.GlobalSettings.Map, WorldType.Regular);
+					if (!Game.StartGame(preview.ToMap(), WorldType.Regular, snapshotFilename, startingFrame))
+					{
+						var looked = SavePaths.ResolveSaveFile(Game.ModData.Manifest, snapshotFilename);
+						TextNotificationsManager.AddSystemLine(CannotStartSnapshotMissingFile, "file", snapshotFilename);
+						Log.Write("debug", $"The load was refused: '{snapshotFilename}' is not at '{looked}'.");
+						AbandonGameStart(orderManager, $"the saved game {snapshotFilename} is not at {looked}");
+						break;
+					}
+
 					break;
 				}
 
@@ -210,9 +270,15 @@ namespace OpenRA.Network
 				}
 
 				case "GameSaved":
-					foreach (var nsr in orderManager.World.WorldActor.TraitsImplementing<INotifyGameSaved>())
-						nsr.GameSaved(orderManager.World, order.ExtraData != 0);
+				{
+					orderManager.NotifyGameSaved(order.TargetString);
+
+					if (world != null)
+						foreach (var nsr in world.WorldActor.TraitsImplementing<INotifyGameSaved>())
+							nsr.GameSaved(world, order.ExtraData != 0);
+
 					break;
+				}
 
 				case "PauseGame":
 				{
@@ -384,6 +450,111 @@ namespace OpenRA.Network
 					break;
 				}
 
+				case "SaveSnapshot":
+				{
+					if (OrderNotFromServerOrWorldIsReplay(clientId, world) || world == null)
+						break;
+
+					int frame;
+					string saveFilename;
+					bool autosave;
+					int uploader;
+					try
+					{
+						var save = new MiniYaml(order.OrderString, MiniYaml.FromString(order.TargetString, order.OrderString));
+						frame = Exts.ParseInt32Invariant(save.NodeWithKey("Frame").Value.Value);
+						saveFilename = save.NodeWithKey("Filename").Value.Value;
+						autosave = bool.Parse(save.NodeWithKey("Autosave").Value.Value);
+						uploader = Exts.ParseInt32Invariant(save.NodeWithKey("Host").Value.Value);
+					}
+					catch (Exception e)
+					{
+						Log.Write("client", $"Ignored a malformed SaveSnapshot order: {e.Message}");
+						break;
+					}
+
+					var upload = orderManager.Connection.LocalClientId == uploader;
+					Log.Write("debug", $"A save was named for frame {frame}: file '{saveFilename}', " +
+						$"autosave {autosave}, uploader {uploader}, this client {orderManager.Connection.LocalClientId}, " +
+						$"uploading {upload}.");
+
+					world.ScheduleSnapshot(frame, w => w.WriteSnapshotNow(saveFilename, autosave, upload));
+					break;
+				}
+
+				case "SnapshotChunk":
+				{
+					if (OrderNotFromServerOrWorldIsReplay(clientId, world))
+						break;
+
+					if (order.ExtraData == 0 || orderManager.SnapshotDownload == null)
+						orderManager.SnapshotDownload = new BlobReassembler();
+
+					if (!orderManager.SnapshotDownload.TryAdd((int)order.ExtraData, order.TargetString, out var chunkError))
+					{
+						Log.Write("client", $"Refused snapshot chunk from server: {chunkError}");
+						orderManager.SnapshotDownload = null;
+					}
+
+					break;
+				}
+
+				case "SnapshotChunkEnd":
+				{
+					if (OrderNotFromServerOrWorldIsReplay(clientId, world))
+						break;
+
+					var download = orderManager.SnapshotDownload;
+					orderManager.SnapshotDownload = null;
+					if (download == null)
+						break;
+
+					int count;
+					int length;
+					string hash;
+					string filename;
+					try
+					{
+						var nodes = new MiniYaml(order.OrderString, MiniYaml.FromString(order.TargetString, order.OrderString));
+						count = Exts.ParseInt32Invariant(nodes.NodeWithKey("Count").Value.Value);
+						length = Exts.ParseInt32Invariant(nodes.NodeWithKey("Length").Value.Value);
+						hash = nodes.NodeWithKey("Hash").Value.Value;
+						filename = SavePaths.SanitizeFileName(nodes.NodeWithKey("Filename").Value.Value);
+					}
+					catch (Exception e)
+					{
+						Log.Write("client", $"Ignored a malformed SnapshotChunkEnd: {e.Message}");
+						break;
+					}
+
+					orderManager.SnapshotDownloadFilename = filename;
+
+					if (!download.TryComplete(count, length, hash, out var payload, out var error))
+					{
+						FailSnapshotDownload(orderManager, $"the transfer was refused ({error})");
+						break;
+					}
+
+					try
+					{
+						var path = SavePaths.ResolveSaveFile(Game.ModData.Manifest, filename);
+						Directory.CreateDirectory(Path.GetDirectoryName(path));
+						WriteSavePayload(path, payload, hash);
+						orderManager.SnapshotReceivedFromServer = true;
+					}
+					catch (Exception e)
+					{
+						FailSnapshotDownload(orderManager, $"the file could not be written ({e.Message})");
+						break;
+					}
+
+					orderManager.SnapshotDownloadFilename = null;
+
+					orderManager.IssueOrder(Order.FromTargetString("SnapshotReceived", filename, true));
+
+					break;
+				}
+
 				case "GenerateMap":
 				{
 					var yaml = new MiniYaml(order.OrderString, MiniYaml.FromString(order.TargetString, order.OrderString));
@@ -411,6 +582,38 @@ namespace OpenRA.Network
 
 					break;
 				}
+			}
+		}
+
+		static void WriteSavePayload(string path, byte[] payload, string payloadHash)
+		{
+			if (MatchesLocalCopy(path, payload, payloadHash))
+				return;
+
+			try
+			{
+				SavePaths.ReplaceFile(path, payload);
+			}
+			catch
+			{
+				SavePaths.DiscardFailedWrite(path);
+				throw;
+			}
+		}
+
+		static bool MatchesLocalCopy(string path, byte[] payload, string payloadHash)
+		{
+			if (!File.Exists(path))
+				return false;
+
+			try
+			{
+				var local = BlobTransfer.Compress(File.ReadAllBytes(path));
+				return string.Equals(CryptoUtil.SHA1Hash(local), payloadHash, StringComparison.Ordinal);
+			}
+			catch (Exception)
+			{
+				return false;
 			}
 		}
 

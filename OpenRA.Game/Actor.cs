@@ -126,7 +126,7 @@ namespace OpenRA
 		IEnumerable<IRenderable> renderables;
 		WorldRenderer lastWorldRenderer;
 
-		internal Actor(World world, string name, TypeDictionary initDict)
+		internal Actor(World world, string name, TypeDictionary initDict, uint? forcedActorID = null)
 		{
 			var duplicateInit = initDict.WithInterface<ISingleInstanceInit>()
 				.CountBy(i => i.GetType())
@@ -140,7 +140,8 @@ namespace OpenRA
 			readOnlyConditionCache = new ReadOnlyDictionary<string, int>(conditionCache);
 
 			World = world;
-			ActorID = world.NextAID();
+
+			ActorID = forcedActorID != null ? world.NextAID(forcedActorID.Value) : world.NextAID();
 			var ownerInit = init.GetOrDefault<OwnerInit>();
 			if (ownerInit != null)
 				Owner = ownerInit.Value(world);
@@ -210,7 +211,7 @@ namespace OpenRA
 			}
 		}
 
-		internal void Initialize(bool addToWorld = true)
+		internal void Initialize(bool addToWorld = true, bool restoring = false)
 		{
 			created = true;
 
@@ -246,23 +247,26 @@ namespace OpenRA
 			// TODO: A post condition initialization notification phase may allow queueing activities instead.
 			// The initial activity should run before any activities queued by INotifyCreated.Created
 			// However, we need to know which traits are enabled (via conditions), so wait for after the calls and insert the activity as the first
-			ICreationActivity creationActivity = null;
-			foreach (var ica in TraitsImplementing<ICreationActivity>())
+			if (!restoring)
 			{
-				if (!ica.IsTraitEnabled())
-					continue;
+				ICreationActivity creationActivity = null;
+				foreach (var ica in TraitsImplementing<ICreationActivity>())
+				{
+					if (!ica.IsTraitEnabled())
+						continue;
 
-				if (creationActivity != null)
-					throw new InvalidOperationException($"More than one enabled ICreationActivity trait: {creationActivity.GetType().Name} and {ica.GetType().Name}");
+					if (creationActivity != null)
+						throw new InvalidOperationException($"More than one enabled ICreationActivity trait: {creationActivity.GetType().Name} and {ica.GetType().Name}");
 
-				var activity = ica.GetCreationActivity();
-				if (activity == null)
-					continue;
+					var activity = ica.GetCreationActivity();
+					if (activity == null)
+						continue;
 
-				creationActivity = ica;
+					creationActivity = ica;
 
-				activity.Queue(CurrentActivity);
-				CurrentActivity = activity;
+					activity.Queue(CurrentActivity);
+					CurrentActivity = activity;
+				}
 			}
 
 			if (addToWorld)
@@ -370,6 +374,11 @@ namespace OpenRA
 		public void CancelActivity()
 		{
 			CurrentActivity?.Cancel(this);
+		}
+
+		internal void RestoreCurrentActivity(Activity activity)
+		{
+			CurrentActivity = activity;
 		}
 
 		public override int GetHashCode()
@@ -547,6 +556,15 @@ namespace OpenRA
 			return false;
 		}
 
+		public bool IsTargetableBy(Player byPlayer)
+		{
+			foreach (var targetable in Targetables)
+				if (targetable.TargetableBy(this, byPlayer))
+					return true;
+
+			return false;
+		}
+
 		public IEnumerable<WPos> GetTargetablePositions()
 		{
 			if (EnabledTargetablePositions.Any())
@@ -644,6 +662,11 @@ namespace OpenRA
 		public bool HasScriptProperty(string name)
 		{
 			return luaInterface.Value.ContainsKey(name);
+		}
+
+		public bool TryGetScriptMember(string name, out ScriptMemberWrapper wrapper)
+		{
+			return luaInterface.Value.TryGetMember(name, out wrapper);
 		}
 
 		#endregion

@@ -16,6 +16,7 @@ using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
 using OpenRA.FileSystem;
+using OpenRA.GameSaves;
 using OpenRA.Graphics;
 using OpenRA.Primitives;
 using OpenRA.Video;
@@ -50,6 +51,14 @@ namespace OpenRA
 
 		readonly Lazy<IReadOnlyDictionary<string, ITerrainInfo>> defaultTerrainInfo;
 		public IReadOnlyDictionary<string, ITerrainInfo> DefaultTerrainInfo => defaultTerrainInfo.Value;
+
+		readonly Lazy<ActivityRegistry> activityRegistry;
+
+		public ActivityRegistry ActivityRegistry => activityRegistry.Value;
+
+		readonly Lazy<EffectRegistry> effectRegistry;
+
+		public EffectRegistry EffectRegistry => effectRegistry.Value;
 
 		readonly TypeDictionary modules = [];
 
@@ -128,6 +137,9 @@ namespace OpenRA
 
 				return (IReadOnlyDictionary<string, ITerrainInfo>)new ReadOnlyDictionary<string, ITerrainInfo>(items);
 			});
+
+			activityRegistry = Exts.Lazy(() => new ActivityRegistry(ObjectCreator));
+			effectRegistry = Exts.Lazy(() => new EffectRegistry(ObjectCreator));
 
 			initialThreadId = Environment.CurrentManagedThreadId;
 		}

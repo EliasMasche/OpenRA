@@ -11,6 +11,8 @@
 
 using System;
 using System.Collections.Generic;
+using System.IO;
+using OpenRA.GameSaves;
 
 namespace OpenRA.Traits
 {
@@ -69,7 +71,7 @@ namespace OpenRA.Traits
 		public override object Create(ActorInitializer init) { return new Shroud(init.Self, this); }
 	}
 
-	public class Shroud : ISync, INotifyCreated, ITick
+	public class Shroud : ISync, INotifyCreated, ITick, IWorldSaveState
 	{
 		public enum SourceType : byte { PassiveVisibility, Shroud, Visibility }
 		public event Action<PPos> OnShroudChanged;
@@ -127,10 +129,14 @@ namespace OpenRA.Traits
 		bool shroudGenerationEnabled;
 		bool passiveVisibilityEnabled;
 
+		readonly string sectionName;
+
 		public Shroud(Actor self, ShroudInfo info)
 		{
 			this.info = info;
 			map = self.World.Map;
+
+			sectionName = "Shroud/" + self.Owner.InternalName;
 
 			passiveVisibleCount = new ProjectedCellLayer<short>(map);
 			visibleCount = new ProjectedCellLayer<short>(map);
@@ -510,5 +516,86 @@ namespace OpenRA.Traits
 
 			return state;
 		}
+
+		#region Snapshot state
+
+		string IWorldSaveState.SectionName => sectionName;
+
+		void IWorldSaveState.SaveState(Actor self, Stream s, SnapshotWriter w)
+		{
+			var writer = new BinaryWriter(s);
+
+			writer.Write(passiveVisibleCount.MaxIndex);
+
+			WriteShorts(writer, passiveVisibleCount);
+			WriteShorts(writer, visibleCount);
+			WriteShorts(writer, generatedShroudCount);
+			WriteBools(writer, explored);
+
+			writer.Write(disabled);
+			writer.Write(fogEnabled);
+			writer.Write(ExploreMapEnabled);
+			writer.Write(shroudGenerationEnabled);
+			writer.Write(passiveVisibilityEnabled);
+			writer.Write(RevealedCells);
+		}
+
+		void IWorldSaveState.LoadState(Actor self, Stream s, SnapshotReader r)
+		{
+			var reader = new BinaryReader(s);
+
+			var count = reader.ReadInt32();
+			if (count != passiveVisibleCount.MaxIndex)
+				throw new InvalidDataException(
+					$"Snapshot holds {count} shroud cells, but this map has {passiveVisibleCount.MaxIndex}.");
+
+			ReadShorts(reader, passiveVisibleCount);
+			ReadShorts(reader, visibleCount);
+			ReadShorts(reader, generatedShroudCount);
+			ReadBools(reader, explored);
+
+			disabled = reader.ReadBoolean();
+			fogEnabled = reader.ReadBoolean();
+			ExploreMapEnabled = reader.ReadBoolean();
+			shroudGenerationEnabled = reader.ReadBoolean();
+			passiveVisibilityEnabled = reader.ReadBoolean();
+			RevealedCells = reader.ReadInt32();
+
+			var maxIndex = touched.MaxIndex;
+			for (var index = 0; index < maxIndex; index++)
+				UpdateCell(index, self);
+
+			touched.SetAll(false);
+			anyCellTouched = false;
+			disabledChanged = false;
+		}
+
+		static void WriteShorts(BinaryWriter writer, ProjectedCellLayer<short> layer)
+		{
+			foreach (var v in layer.AsReadOnlyMemory().Span)
+				writer.Write(v);
+		}
+
+		static void ReadShorts(BinaryReader reader, ProjectedCellLayer<short> layer)
+		{
+			var span = layer.AsMemory().Span;
+			for (var i = 0; i < span.Length; i++)
+				span[i] = reader.ReadInt16();
+		}
+
+		static void WriteBools(BinaryWriter writer, ProjectedCellLayer<bool> layer)
+		{
+			foreach (var v in layer.AsReadOnlyMemory().Span)
+				writer.Write(v);
+		}
+
+		static void ReadBools(BinaryReader reader, ProjectedCellLayer<bool> layer)
+		{
+			var span = layer.AsMemory().Span;
+			for (var i = 0; i < span.Length; i++)
+				span[i] = reader.ReadBoolean();
+		}
+
+		#endregion
 	}
 }

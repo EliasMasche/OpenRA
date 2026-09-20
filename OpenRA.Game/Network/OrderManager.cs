@@ -26,7 +26,7 @@ namespace OpenRA.Network
 		[FluentReference("frame")]
 		const string DesyncCompareLogs = "notification-desync-compare-logs";
 
-		readonly SyncReport syncReport;
+		SyncReport syncReport;
 		readonly Dictionary<int, Queue<(int Frame, OrderPacket Orders)>> pendingOrders = [];
 		readonly Dictionary<int, (int SyncHash, ulong DefeatState)> syncForFrame = [];
 
@@ -54,6 +54,18 @@ namespace OpenRA.Network
 		internal int GameSaveLastFrame = -1;
 		internal int GameSaveLastSyncFrame = -1;
 
+		internal (int Frame, int SyncHash, ulong DefeatState) LastReportedSync { get; private set; }
+
+		internal BlobReassembler SnapshotDownload;
+
+		internal string SnapshotDownloadFilename;
+
+		Queue<Order> pendingChunks;
+
+		internal bool SnapshotDownloadFailed;
+
+		internal bool SnapshotReceivedFromServer;
+
 		readonly List<Order> localOrders = [];
 		readonly List<Order> localImmediateOrders = [];
 
@@ -71,6 +83,13 @@ namespace OpenRA.Network
 		/// </summary>
 		/// <remarks>Should only be set in <see cref="OutOfSync"/>.</remarks>
 		public bool IsOutOfSync { get; private set; } = false;
+
+		public event Action<string> GameSaved;
+
+		internal void NotifyGameSaved(string filename)
+		{
+			GameSaved?.Invoke(filename);
+		}
 
 		public struct ClientOrder
 		{
@@ -95,10 +114,40 @@ namespace OpenRA.Network
 			TextNotificationsManager.AddSystemLine(DesyncCompareLogs, "frame", frame);
 		}
 
-		public void StartGame()
+		public void EndGame()
 		{
-			if (GameStarted)
+			LocalFrameNumber = 0;
+			sentOrdersFrame = 0;
+
+			pendingOrders.Clear();
+			localOrders.Clear();
+			localImmediateOrders.Clear();
+
+			pendingChunks = null;
+
+			SnapshotDownload = null;
+			SnapshotDownloadFilename = null;
+			SnapshotDownloadFailed = false;
+
+			GameSaveLastFrame = -1;
+			GameSaveLastSyncFrame = -1;
+
+			syncReport = new SyncReport(this);
+			LastReportedSync = (-1, 0, 0);
+
+			if (Connection is NetworkConnection recording && recording.Recorder != null)
+				recording.StartRecording(() => Game.TimestampedFilename());
+		}
+
+		public void StartGame(int startingFrame = 1)
+		{
+			if (startingFrame == 1 && GameStarted)
 				return;
+
+			if (startingFrame != 1)
+				syncForFrame.Clear();
+
+			pendingOrders.Clear();
 
 			foreach (var client in LobbyInfo.Clients)
 				if (!client.IsBot)
@@ -108,8 +157,15 @@ namespace OpenRA.Network
 			// other players to compare against if a desync did occur
 			generateSyncReport = Connection is not ReplayConnection && LobbyInfo.GlobalSettings.EnableSyncReports;
 
-			NetFrameNumber = 1;
+			NetFrameNumber = startingFrame;
 			LocalFrameNumber = 0;
+			sentOrdersFrame = 0;
+
+			localOrders.Clear();
+			localImmediateOrders.Clear();
+
+			LastReportedSync = (-1, 0, 0);
+
 			LastTickTime.Value = Game.RunTime;
 
 			Connection.StartGame();
@@ -137,9 +193,60 @@ namespace OpenRA.Network
 				localOrders.Add(order);
 		}
 
+		internal void UploadSnapshot(byte[] payload, string filename, bool isAutosave)
+		{
+			var parts = BlobTransfer.Split(payload);
+
+			var end = new List<MiniYamlNode>
+			{
+				new("Count", parts.Chunks.Count.ToStringInvariant()),
+				new("Length", parts.EncodedLength.ToStringInvariant()),
+				new("Hash", parts.Hash),
+				new("Filename", filename)
+			};
+
+			pendingChunks = new Queue<Order>();
+			for (var i = 0; i < parts.Chunks.Count; i++)
+				pendingChunks.Enqueue(Order.FromTargetString("SnapshotChunk", parts.Chunks[i], true, (uint)i));
+
+			pendingChunks.Enqueue(Order.FromTargetString("SnapshotChunkEnd", end.WriteToString(), true, isAutosave ? 1u : 0u));
+		}
+
+		public void UploadSnapshotThenLoad(byte[] payload, string filename)
+		{
+			UploadSnapshot(payload, filename, isAutosave: false);
+			pendingChunks.Enqueue(Order.FromTargetString("LoadGameSave", filename, true));
+		}
+
+		public void UploadSnapshotThenLoad(byte[] payload, string filename, bool localLoad)
+		{
+			if (!localLoad)
+			{
+				UploadSnapshotThenLoad(payload, filename);
+				return;
+			}
+
+			IssueOrder(Order.FromTargetString("LoadGameSave", filename, true, 1));
+		}
+
+		internal void AbandonSnapshotUpload()
+		{
+			pendingChunks = null;
+		}
+
 		void SendImmediateOrders()
 		{
-			if (localImmediateOrders.Count != 0 && GameSaveLastFrame < NetFrameNumber)
+			var willSend = GameSaveLastFrame < NetFrameNumber;
+
+			if (pendingChunks != null && willSend)
+			{
+				IssueOrder(pendingChunks.Dequeue());
+
+				if (pendingChunks.Count == 0)
+					pendingChunks = null;
+			}
+
+			if (localImmediateOrders.Count != 0 && willSend)
 				Connection.SendImmediate(localImmediateOrders);
 			localImmediateOrders.Clear();
 		}
@@ -231,6 +338,24 @@ namespace OpenRA.Network
 			}
 		}
 
+		void DiscardStaleFrames()
+		{
+			var stale = 0;
+
+			foreach (var (_, queue) in pendingOrders)
+			{
+				while (queue.Count > 0 && queue.Peek().Frame < NetFrameNumber)
+				{
+					queue.Dequeue();
+					stale++;
+				}
+			}
+
+			if (stale > 0)
+				Log.Write("client", $"Discarded {stale} order packet(s) from a game left behind; " +
+					$"this client is on frame {NetFrameNumber}.");
+		}
+
 		void ProcessOrders()
 		{
 			foreach (var (clientId, frameOrders) in pendingOrders)
@@ -269,7 +394,9 @@ namespace OpenRA.Network
 					if (World.Players[i].WinState == WinState.Lost)
 						defeatState |= 1UL << i;
 
-				Connection.SendSync(NetFrameNumber, World.SyncHash(), defeatState);
+				var syncHash = World.SyncHash();
+				LastReportedSync = (NetFrameNumber, syncHash, defeatState);
+				Connection.SendSync(NetFrameNumber, syncHash, defeatState);
 			}
 			else
 				Connection.SendSync(NetFrameNumber, 0, 0);
@@ -312,6 +439,8 @@ namespace OpenRA.Network
 				if (shouldTick)
 					SendOrders();
 			}
+
+			DiscardStaleFrames();
 
 			var willTick = shouldTick;
 			if (willTick && IsNetFrame)

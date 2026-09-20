@@ -98,6 +98,8 @@ namespace OpenRA.Network
 
 	public sealed class NetworkConnection : IConnection
 	{
+		public const int MaxFrameLength = 64 * 1024 * 1024;
+
 		public readonly ConnectionTarget Target;
 		internal ReplayRecorder Recorder { get; private set; }
 		readonly Queue<(int Frame, int SyncHash, ulong DefeatState)> sentSync = [];
@@ -210,6 +212,10 @@ namespace OpenRA.Network
 				{
 					var len = stream.ReadInt32();
 					var client = stream.ReadInt32();
+
+					if (len < 0 || len > MaxFrameLength)
+						throw new InvalidDataException($"Server sent a frame of {len} bytes, which exceeds the {MaxFrameLength} byte limit.");
+
 					var buf = stream.ReadBytes(len);
 					if (len == 0)
 						throw new NotImplementedException();

@@ -174,6 +174,25 @@ namespace OpenRA.Network
 			public bool LockSpawn;
 			public bool Required;
 
+			public static Slot FromPlayerReference(PlayerReference pr)
+			{
+				if (!pr.Playable)
+					return null;
+
+				return new Slot
+				{
+					PlayerReference = pr.Name,
+					Closed = false,
+					AllowBots = pr.AllowBots,
+					LockFaction = pr.LockFaction,
+					LockColor = pr.LockColor,
+					LockTeam = pr.LockTeam,
+					LockHandicap = pr.LockHandicap,
+					LockSpawn = pr.LockSpawn,
+					Required = pr.Required,
+				};
+			}
+
 			public static Slot Deserialize(MiniYaml data)
 			{
 				return FieldLoader.Load<Slot>(data);

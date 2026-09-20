@@ -47,6 +47,8 @@ namespace OpenRA.Graphics
 		readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, ISpriteSequence>> images;
 		public SpriteCache SpriteCache { get; }
 
+		public bool SpritesLoaded { get; private set; }
+
 		public SequenceSet(IReadOnlyFileSystem fileSystem, ModData modData, string tileSet, MiniYaml additionalSequences)
 		{
 			this.modData = modData;
@@ -109,6 +111,8 @@ namespace OpenRA.Graphics
 			foreach (var sequences in images.Values)
 				foreach (var sequence in sequences)
 					sequence.Value.ResolveSprites(SpriteCache);
+
+			SpritesLoaded = true;
 		}
 
 		public void Dispose()

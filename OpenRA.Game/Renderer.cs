@@ -126,6 +126,15 @@ namespace OpenRA
 			Window.SetScaleModifier(scale);
 		}
 
+		public static SpriteFont FontOrDefault(string name)
+		{
+			var fonts = Game.Renderer?.Fonts;
+			if (fonts == null)
+				return null;
+
+			return fonts.TryGetValue(name, out var font) ? font : null;
+		}
+
 		public void InitializeFonts(ModData modData)
 		{
 			if (Fonts != null)

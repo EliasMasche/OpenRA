@@ -539,6 +539,7 @@ namespace OpenRA.Traits
 		// Check IsTraitEnabled or !IsTraitDisabled first
 		BitSet<TargetableType> TargetTypes { get; }
 		bool TargetableBy(Actor self, Actor byActor);
+		bool TargetableBy(Actor self, Player byPlayer);
 		bool RequiresForceFire { get; }
 	}
 
@@ -559,8 +560,9 @@ namespace OpenRA.Traits
 	public interface IWarhead
 	{
 		int Delay { get; }
-		bool IsValidAgainst(Actor victim, Actor firedBy);
-		bool IsValidAgainst(FrozenActor victim, Actor firedBy);
+
+		bool IsValidAgainst(Actor victim, Player firedBy);
+		bool IsValidAgainst(FrozenActor victim, Player firedBy);
 		void DoImpact(in Target target, WarheadArgs args);
 	}
 

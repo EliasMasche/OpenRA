@@ -12,11 +12,14 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Reflection;
 using Eluant;
+using OpenRA.GameRules;
 using OpenRA.Graphics;
 using OpenRA.Primitives;
+using OpenRA.Scripting.Snapshot;
 using OpenRA.Support;
 using OpenRA.Traits;
 
@@ -45,16 +48,33 @@ namespace OpenRA.Scripting
 	[AttributeUsage(AttributeTargets.Property | AttributeTargets.Method)]
 	public sealed class ScriptActorPropertyActivityAttribute : Attribute { }
 
-	public abstract class ScriptActorProperties(ScriptContext context, Actor self)
+	public interface IScriptMemberOwner
+	{
+		object ScriptOwner { get; }
+	}
+
+	public abstract class ScriptActorProperties(ScriptContext context, Actor self) : IScriptMemberOwner
 	{
 		protected readonly Actor Self = self;
 		protected readonly ScriptContext Context = context;
+
+		public object ScriptOwner => Self;
 	}
 
-	public abstract class ScriptPlayerProperties(ScriptContext context, Player player)
+	public abstract class ScriptPlayerProperties(ScriptContext context, Player player) : IScriptMemberOwner
 	{
 		protected readonly Player Player = player;
 		protected readonly ScriptContext Context = context;
+
+		public object ScriptOwner => Player;
+	}
+
+	public abstract class ScriptProjectileProperties(ScriptContext context, IProjectileScriptInfo projectile) : IScriptMemberOwner
+	{
+		protected readonly IProjectileScriptInfo Projectile = projectile;
+		protected readonly ScriptContext Context = context;
+
+		public object ScriptOwner => Projectile;
 	}
 
 	/// <summary>
@@ -128,11 +148,17 @@ namespace OpenRA.Scripting
 		public WorldRenderer WorldRenderer { get; }
 
 		readonly MemoryConstrainedLuaRuntime runtime;
-		readonly LuaFunction tick;
+
+		readonly List<string> engineGlobals = [];
+
+		readonly List<LuaValue> handles = [];
+
+		LuaFunction tick;
 
 		readonly Type[] knownActorCommands;
 		public readonly Cache<ActorInfo, Type[]> ActorCommands;
 		public readonly Type[] PlayerCommands;
+		public readonly Type[] ProjectileCommands;
 
 		public string ErrorMessage;
 
@@ -158,6 +184,10 @@ namespace OpenRA.Scripting
 				.ToArray();
 			PlayerCommands = FilterCommands(world.Map.Rules.Actors[SystemActors.Player], knownPlayerCommands);
 
+			ProjectileCommands = Game.ModData.ObjectCreator
+				.GetTypesImplementing<ScriptProjectileProperties>()
+				.ToArray();
+
 			// Safe functions for http://lua-users.org/wiki/SandBoxes
 			// assert, error have been removed as well as albeit safe
 			var allowedGlobals = new string[]
@@ -173,8 +203,8 @@ namespace OpenRA.Scripting
 
 			var forbiddenMath = new string[]
 			{
-				"random", // not desync safe, unsuitable
-				"randomseed" // maybe unsafe as it affects the host RNG
+				"random",
+				"randomseed"
 			};
 
 			var mathGlobal = (LuaTable)runtime.Globals["math"];
@@ -183,15 +213,15 @@ namespace OpenRA.Scripting
 					mathGlobal[mathFunction] = null;
 
 			// Register globals
-			runtime.Globals["EngineDir"] = Platform.EngineDir;
+			InstallEngineGlobal("EngineDir", Platform.EngineDir);
 
 			using (var fn = runtime.CreateFunctionFromDelegate((Action<string>)FatalError))
-				runtime.Globals["FatalError"] = fn;
+				InstallEngineGlobal("FatalError", fn);
 
-			runtime.Globals["MaxUserScriptInstructions"] = MaxUserScriptInstructions;
+			InstallEngineGlobal("MaxUserScriptInstructions", MaxUserScriptInstructions);
 
 			using (var fn = runtime.CreateFunctionFromDelegate(LogDebugMessage))
-				runtime.Globals["print"] = fn;
+				InstallEngineGlobal("print", fn);
 
 			// Register global tables
 			var bindings = Game.ModData.ObjectCreator.GetTypesImplementing<ScriptGlobal>();
@@ -209,6 +239,8 @@ namespace OpenRA.Scripting
 				var binding = (ScriptGlobal)ctor.Invoke([this]);
 				using (var obj = binding.ToLuaValue(this))
 					runtime.Globals.Add(binding.Name, obj);
+
+				engineGlobals.Add(binding.Name);
 			}
 
 			// System functions do not count towards the memory limit
@@ -216,8 +248,7 @@ namespace OpenRA.Scripting
 
 			try
 			{
-				foreach (var script in scripts)
-					runtime.DoBuffer(world.Map.Open(script).ReadAllText(), script).Dispose();
+				RunScripts(scripts);
 			}
 			catch (Exception e)
 			{
@@ -228,50 +259,73 @@ namespace OpenRA.Scripting
 			tick = runtime.Globals["Tick"] as LuaFunction;
 		}
 
+		public void RunScripts(IEnumerable<string> scripts)
+		{
+			foreach (var script in scripts)
+				runtime.DoBuffer(World.Map.Open(script).ReadAllText(), script).Dispose();
+		}
+
 		void LogDebugMessage(string message)
 		{
 			Console.WriteLine($"Lua debug: {message}");
 			Log.Write("lua", message);
 		}
 
+		void InstallEngineGlobal(string name, LuaValue value)
+		{
+			runtime.Globals[name] = value;
+			engineGlobals.Add(name);
+		}
+
 		public bool FatalErrorOccurred { get; private set; }
 		public void FatalError(Exception e)
 		{
-			ErrorMessage = e.Message;
-
-			Console.WriteLine($"Fatal Lua Error: {e.Message}");
-			Console.WriteLine(e.StackTrace);
-
-			Log.Write("lua", $"Fatal Lua Error: {e.Message}");
-			Log.Write("lua", e.StackTrace);
-
-			FatalErrorOccurred = true;
-
-			World.AddFrameEndTask(w => World.EndGame());
+			ReportFatalError(e.Message, e.StackTrace);
 		}
 
 		void FatalError(string message)
 		{
-			var stacktrace = new StackTrace().ToString();
+			ReportFatalError(message, new StackTrace().ToString());
+		}
+
+		void ReportFatalError(string message, string stackTrace)
+		{
+			ErrorMessage = message;
 
 			Console.WriteLine($"Fatal Lua Error: {message}");
-			Console.WriteLine(stacktrace);
+			Console.WriteLine(stackTrace);
 
-			Log.Write("lua", message);
-			Log.Write("lua", stacktrace);
+			Log.Write("lua", $"Fatal Lua Error: {message}");
+			Log.Write("lua", stackTrace);
+
+			if (!FatalErrorOccurred)
+				World.AddFrameEndTask(_ => World.EndGame());
 
 			FatalErrorOccurred = true;
-
-			World.AddFrameEndTask(w => World.EndGame());
 		}
 
 		public void RegisterMapActor(string name, Actor a)
 		{
-			if (runtime.Globals.ContainsKey(name))
+			RegisterMapActor(name, a, replace: false);
+		}
+
+		public void ReinstallMapActorGlobals(IEnumerable<KeyValuePair<string, Actor>> actors)
+		{
+			ArgumentNullException.ThrowIfNull(actors);
+
+			foreach (var kv in actors)
+				RegisterMapActor(kv.Key, kv.Value, replace: true);
+		}
+
+		void RegisterMapActor(string name, Actor a, bool replace)
+		{
+			ArgumentNullException.ThrowIfNull(a);
+
+			if (runtime.Globals.ContainsKey(name) && !replace)
 				throw new LuaException($"The global name '{name}' is reserved, and may not be used by a map actor");
 
 			using (var obj = a.ToLuaValue(this))
-				runtime.Globals.Add(name, obj);
+				runtime.Globals[name] = obj;
 		}
 
 		public void WorldLoaded()
@@ -342,5 +396,45 @@ namespace OpenRA.Scripting
 		}
 
 		public LuaTable CreateTable() { return runtime.CreateTable(); }
+
+		public int RegisterHandle(LuaFunction function)
+		{
+			handles.Add(function);
+			return handles.Count - 1;
+		}
+
+		public LuaFunction ResolveHandle(int index)
+		{
+			if (index < 0 || index >= handles.Count)
+				throw new InvalidDataException($"The save refers to Lua handle {index}, which this restore did not produce.");
+
+			if (handles[index] is not LuaFunction function)
+				throw new InvalidDataException($"Lua handle {index} is not a function.");
+
+			return function;
+		}
+
+		public void SaveLuaState(Stream stream, ILuaStateSnapshotCodec codec)
+		{
+			LuaStateSnapshot.Save(runtime, stream, codec, engineGlobals, handles);
+			handles.Clear();
+		}
+
+		public void LoadLuaState(Stream stream, ILuaStateSnapshotCodec codec)
+		{
+			runtime.MaxMemoryUse = long.MaxValue;
+
+			try
+			{
+				handles.Clear();
+				handles.AddRange(LuaStateSnapshot.Load(runtime, stream, codec, engineGlobals));
+			}
+			finally
+			{
+				runtime.MaxMemoryUse = runtime.MemoryUse + MaxUserScriptMemory;
+			}
+
+			tick = runtime.Globals["Tick"] as LuaFunction;
+		}
 	}
 }

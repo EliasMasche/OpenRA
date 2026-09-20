@@ -157,6 +157,10 @@ namespace OpenRA.Graphics
 				return false;
 
 			CurrentSequence = GetSequence(sequenceName);
+
+			if (!sequences.SpritesLoaded)
+				return true;
+
 			timeUntilNextFrame = Math.Min(CurrentSequenceTickOrDefault(), timeUntilNextFrame);
 			frame %= CurrentSequence.Length;
 			return true;
@@ -193,8 +197,12 @@ namespace OpenRA.Graphics
 			tickAlways = true;
 			PlaySequence(sequenceName);
 
-			frame = func();
 			tickFunc = () => frame = func();
+
+			if (!sequences.SpritesLoaded)
+				return;
+
+			frame = func();
 		}
 
 		public void PlayFetchDirection(string sequenceName, Func<int> direction)
@@ -222,6 +230,9 @@ namespace OpenRA.Graphics
 
 		public void Tick(int t)
 		{
+			if (!sequences.SpritesLoaded)
+				return;
+
 			if (tickAlways)
 				tickFunc?.Invoke();
 			else
@@ -245,6 +256,41 @@ namespace OpenRA.Graphics
 				if (!ReplaceAnim(CurrentSequence.Name))
 					ReplaceAnim(newAnimIfMissing);
 			}
+		}
+
+		public readonly record struct SequenceState(string Sequence, int Frame, bool Backwards,
+			bool TickAlways, int TimeUntilNextFrame, bool Finished);
+
+		public SequenceState? SaveSequenceState()
+		{
+			if (CurrentSequence == null)
+				return null;
+
+			return new SequenceState(CurrentSequence.Name, frame, backwards, tickAlways,
+				timeUntilNextFrame, tickFunc == null);
+		}
+
+		public void ResumeThen(string sequenceName, Action after, in SequenceState state)
+		{
+			PlayThen(sequenceName, after);
+
+			frame = state.Frame;
+			backwards = state.Backwards;
+			tickAlways = state.TickAlways;
+			timeUntilNextFrame = state.TimeUntilNextFrame;
+
+			if (state.Finished)
+				tickFunc = null;
+		}
+
+		public void ResumeRepeating(string sequenceName, in SequenceState state)
+		{
+			PlayRepeating(sequenceName);
+
+			frame = state.Frame;
+			backwards = state.Backwards;
+			tickAlways = state.TickAlways;
+			timeUntilNextFrame = state.TimeUntilNextFrame;
 		}
 
 		public bool HasSequence(string seq) { return sequences.HasSequence(Name, seq); }

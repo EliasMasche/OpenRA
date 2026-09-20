@@ -1,11 +1,56 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
 		<RootNamespace>OpenRA</RootNamespace>
+
+		<!-- The Eluant package version to reference. -->
+		<EluantVersion Condition="'$(EluantVersion)' == ''">1.0.23</EluantVersion>
+
+		<!--
+			Set to true when EluantVersion names a build that exposes Eluant.LuaSnapshot, which defines
+			LUA_SNAPSHOT. The engine then gains the ability to write a Lua heap into a snapshot, so this and
+			the new binding have to arrive together.
+
+			A build of the fork is supplied either as a published package or from a local folder feed named
+			in nuget.config; a plain assembly reference does not reach the mod assemblies, which also use
+			Eluant.
+		-->
+		<LuaSnapshotEluant Condition="'$(LuaSnapshotEluant)' == ''">false</LuaSnapshotEluant>
 	</PropertyGroup>
+	<PropertyGroup Condition="'$(LuaSnapshotEluant)' == 'true'">
+		<DefineConstants>$(DefineConstants);LUA_SNAPSHOT</DefineConstants>
+	</PropertyGroup>
+	<!--
+		The default Eluant build exposes no Eluant.LuaSnapshot, and the two properties disagreeing about that
+		is silent in both directions:
+
+		  - LuaSnapshotEluant unset or false: LUA_SNAPSHOT stays undefined, and LuaStateSnapshot degrades at
+		    runtime instead of failing. A plain `dotnet build`, and therefore `make`, lands here: an engine
+		    that refuses to write a Lua heap without saying so at build time.
+		  - LuaSnapshotEluant true against an Eluant without the binding: three CS0246 errors inside
+		    LuaStateSnapshot, which name the missing types but not the property that caused them.
+
+		Both are reported below. Enable the code with both properties, against a version whose build carries
+		the binding:
+
+			dotnet build -p:EluantVersion=1.0.29-local -p:LuaSnapshotEluant=true
+
+		These values are the ones the local build and launch scripts already use, and
+		build-local-release.ps1 verifies the resulting assembly really carries the code.
+	-->
+	<Target Name="CheckLuaSnapshotProperties" BeforeTargets="CoreCompile"
+		Condition="'$(Configuration)' == 'Release' and '$(LuaSnapshotEluant)' != 'true'">
+		<Warning Code="OPENRA001"
+			Text="Release build without Lua script state in saves: LuaStateSnapshot refuses at runtime. Pass -p:EluantVersion=1.0.29-local -p:LuaSnapshotEluant=true to enable it, or ignore this if the build does not need to save a campaign." />
+	</Target>
+	<Target Name="CheckLuaSnapshotBinding" BeforeTargets="CoreCompile"
+		Condition="'$(LuaSnapshotEluant)' == 'true' and '$(EluantVersion)' == '1.0.23'">
+		<Error Code="OPENRA002"
+			Text="LuaSnapshotEluant is true but EluantVersion is the default $(EluantVersion), whose build exposes no Eluant.LuaSnapshot. Set -p:EluantVersion to a build that does, or drop LuaSnapshotEluant." />
+	</Target>
 	<ItemGroup>
 		<PackageReference Include="Microsoft.Extensions.DependencyModel" Version="10.0.0" />
 		<PackageReference Include="Linguini.Bundle" Version="0.8.1" />
-		<PackageReference Include="OpenRA-Eluant" Version="1.0.23" />
+		<PackageReference Include="OpenRA-Eluant" Version="$(EluantVersion)" />
 		<PackageReference Include="Mono.NAT" Version="3.0.4" />
 		<PackageReference Include="SharpZipLib" Version="1.4.2" />
 	</ItemGroup>

@@ -71,6 +71,11 @@ namespace OpenRA.Scripting
 
 		public bool ContainsKey(string key) { return members.ContainsKey(key); }
 
+		public bool TryGetMember(string name, out ScriptMemberWrapper wrapper)
+		{
+			return members.TryGetValue(name, out wrapper);
+		}
+
 		public LuaValue this[LuaRuntime runtime, LuaValue keyValue]
 		{
 			get

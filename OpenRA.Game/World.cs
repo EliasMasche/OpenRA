@@ -16,10 +16,12 @@ using System.IO;
 using System.Linq;
 using OpenRA.Effects;
 using OpenRA.FileFormats;
+using OpenRA.GameSaves;
 using OpenRA.Graphics;
 using OpenRA.Network;
 using OpenRA.Orders;
 using OpenRA.Primitives;
+using OpenRA.Scripting.Snapshot;
 using OpenRA.Support;
 using OpenRA.Traits;
 
@@ -29,6 +31,9 @@ namespace OpenRA
 
 	public sealed class World : IDisposable
 	{
+		[FluentReference("file", "reason")]
+		const string SaveFailed = "notification-save-failed";
+
 		internal readonly TraitDictionary TraitDict = new();
 		readonly SortedDictionary<uint, Actor> actors = [];
 		readonly List<IEffect> effects = [];
@@ -38,6 +43,10 @@ namespace OpenRA
 		readonly GameSettings gameSettings;
 
 		readonly Queue<Action<World>> frameEndActions = [];
+
+		Action<World> pendingSnapshot;
+		Action<World> scheduledSnapshot;
+		int scheduledSnapshotFrame = -1;
 
 		public readonly GameSpeed GameSpeed;
 
@@ -74,6 +83,9 @@ namespace OpenRA
 		public bool IsGameOver { get; private set; }
 		public void EndGame()
 		{
+			if (WorldActor.Disposed)
+				return;
+
 			if (!IsGameOver)
 			{
 				SetPauseState(true);
@@ -115,7 +127,9 @@ namespace OpenRA
 
 		public bool IsLoadingGameSave => OrderManager.NetFrameNumber <= OrderManager.GameSaveLastFrame;
 
-		public int GameSaveLoadingPercentage => OrderManager.NetFrameNumber * 100 / OrderManager.GameSaveLastFrame;
+		public int GameSaveLoadingPercentage => IsLoadingGameSave
+			? OrderManager.NetFrameNumber * 100 / OrderManager.GameSaveLastFrame
+			: 100;
 
 		void SetLocalPlayer(Player localPlayer)
 		{
@@ -175,9 +189,22 @@ namespace OpenRA
 
 		bool wasLoadingGameSave;
 
-		internal World(Map map, ModData modData, OrderManager orderManager, WorldType type)
+		public bool IsRestoringSnapshot { get; internal set; }
+
+		public bool WasRestoredFromSnapshot => LoadMode != WorldLoadMode.Normal;
+
+		public WorldLoadMode LoadMode { get; internal set; }
+
+		public bool UseSnapshotSaves { get; }
+
+		public bool HasRenderer { get; }
+
+		internal ObjectCreator ObjectCreator => modData.ObjectCreator;
+
+		internal World(Map map, ModData modData, OrderManager orderManager, WorldType type, bool hasRenderer = true)
 		{
 			Type = type;
+			HasRenderer = hasRenderer;
 			OrderManager = orderManager;
 			this.modData = modData;
 			Map = map;
@@ -200,6 +227,9 @@ namespace OpenRA
 			LocalRandom = new MersenneTwister();
 
 			var worldActorType = type == WorldType.Editor ? SystemActors.EditorWorld : SystemActors.World;
+
+			UseSnapshotSaves = SnapshotPolicy.UsesSnapshotSaves(map.Rules.Actors[worldActorType]);
+
 			WorldActor = CreateActor(worldActorType.ToString(), []);
 			ActorMap = WorldActor.Trait<IActorMap>();
 			ScreenMap = WorldActor.Trait<ScreenMap>();
@@ -262,6 +292,12 @@ namespace OpenRA
 			if (IsLoadingGameSave)
 			{
 				wasLoadingGameSave = true;
+				Game.Sound.DisableAllSounds = true;
+				foreach (var nsr in WorldActor.TraitsImplementing<INotifyGameLoading>())
+					nsr.GameLoading(this);
+			}
+			else if (IsRestoringSnapshot && wr != null)
+			{
 				Game.Sound.DisableAllSounds = true;
 				foreach (var nsr in WorldActor.TraitsImplementing<INotifyGameLoading>())
 					nsr.GameLoading(this);
@@ -331,6 +367,13 @@ namespace OpenRA
 			return a;
 		}
 
+		internal Actor RestoreActor(uint actorID, string name, TypeDictionary initDict)
+		{
+			var a = new Actor(this, name, initDict, actorID);
+			a.Initialize(false, true);
+			return a;
+		}
+
 		public void Add(Actor a)
 		{
 			a.IsInWorld = true;
@@ -382,6 +425,26 @@ namespace OpenRA
 
 		public void AddFrameEndTask(Action<World> a) { frameEndActions.Enqueue(a); }
 
+		internal void RequestSnapshotAtFrameEnd(Action<World> save)
+		{
+			ArgumentNullException.ThrowIfNull(save);
+			pendingSnapshot = save;
+		}
+
+		internal void ScheduleSnapshot(int frame, Action<World> save)
+		{
+			ArgumentNullException.ThrowIfNull(save);
+
+			if (frame <= OrderManager.NetFrameNumber)
+			{
+				Log.Write("debug", $"Ignored a snapshot scheduled for frame {frame}, which has already passed.");
+				return;
+			}
+
+			scheduledSnapshotFrame = frame;
+			scheduledSnapshot = save;
+		}
+
 		public event Action<Actor> ActorAdded = _ => { };
 		public event Action<Actor> ActorRemoved = _ => { };
 
@@ -390,10 +453,80 @@ namespace OpenRA
 
 		public int WorldTick { get; private set; }
 
+		internal void RestoreSimulationState(int worldTick, MersenneTwisterState sharedRandom, bool paused, bool gameOver, uint nextActorID)
+		{
+			WorldTick = worldTick;
+			SharedRandom.RestoreState(sharedRandom);
+			Paused = PredictedPaused = paused;
+			IsGameOver = gameOver;
+
+			if (nextActorID > NextActorID)
+				NextActorID = nextActorID;
+		}
+
+		public void SaveSnapshot(Stream stream, SnapshotFlags flags = SnapshotFlags.None)
+		{
+			ArgumentNullException.ThrowIfNull(stream);
+
+			var lobby = SnapshotLobby.FromSession(LobbyInfo, modData.MapCache[Map.Uid]);
+
+			int droppedActivities;
+			int droppedEffects;
+			using (var scratch = new MemoryStream())
+			{
+				var counter = new WorldSaver(this, modData.ActivityRegistry, modData.EffectRegistry) { Lobby = lobby };
+				using (var w = new SnapshotWriter(scratch, BuildHeader(flags, 0, 0)))
+					counter.Save(w);
+
+				droppedActivities = counter.DroppedActivities;
+				droppedEffects = counter.DroppedEffects;
+			}
+
+			var saver = new WorldSaver(this, modData.ActivityRegistry, modData.EffectRegistry)
+			{
+				Lobby = lobby,
+				Diagnostics = Game.Settings.Debug.SnapshotDiagnostics
+			};
+
+			using (var writer = new SnapshotWriter(stream, BuildHeader(flags, droppedActivities, droppedEffects)))
+				saver.Save(writer);
+		}
+
+		SnapshotHeader BuildHeader(SnapshotFlags flags, int droppedActivities, int droppedEffects)
+		{
+			var (reportedFrame, reportedHash, reportedDefeatState) = OrderManager.LastReportedSync;
+			return new SnapshotHeader(
+				Game.EngineVersion,
+				modData.Manifest.Id,
+				modData.Manifest.Metadata.Version,
+				Map.Uid,
+				WorldTick,
+				SyncHash(),
+				reportedFrame,
+				reportedHash,
+				reportedDefeatState,
+				DateTime.UtcNow,
+				flags,
+				droppedActivities,
+				droppedEffects);
+		}
+
 		readonly Dictionary<int, MiniYaml> gameSaveTraitData = [];
 		internal void AddGameSaveTraitData(int traitIndex, MiniYaml yaml)
 		{
 			gameSaveTraitData[traitIndex] = yaml;
+		}
+
+		TraitPair<IGameSaveTraitData> LegacyGameSaveTrait(int traitIndex)
+		{
+			return TraitDict.ActorsWithTrait<IGameSaveTraitData>()
+				.Skip(traitIndex)
+				.FirstOrDefault();
+		}
+
+		internal static GameSaves.SnapshotTraitKey TraitKey(Actor actor, TraitInfo info)
+		{
+			return new GameSaves.SnapshotTraitKey(actor.ActorID, info.GetType().Name, info.InstanceName);
 		}
 
 		public void SetPauseState(bool paused)
@@ -416,10 +549,7 @@ namespace OpenRA
 			{
 				foreach (var kv in gameSaveTraitData)
 				{
-					var tp = TraitDict.ActorsWithTrait<IGameSaveTraitData>()
-						.Skip(kv.Key)
-						.FirstOrDefault();
-
+					var tp = LegacyGameSaveTrait(kv.Key);
 					if (tp.Actor == null)
 						break;
 
@@ -452,6 +582,23 @@ namespace OpenRA
 
 			while (frameEndActions.Count != 0)
 				frameEndActions.Dequeue()(this);
+
+			if (scheduledSnapshot != null && OrderManager.NetFrameNumber >= scheduledSnapshotFrame)
+			{
+				pendingSnapshot = scheduledSnapshot;
+				scheduledSnapshot = null;
+				scheduledSnapshotFrame = -1;
+			}
+
+			if (pendingSnapshot != null)
+			{
+				var save = pendingSnapshot;
+				pendingSnapshot = null;
+				save(this);
+
+				while (frameEndActions.Count != 0)
+					frameEndActions.Dequeue()(this);
+			}
 		}
 
 		// For things that want to update their render state once per tick, ignoring pause state
@@ -473,10 +620,23 @@ namespace OpenRA
 			return null;
 		}
 
-		uint nextAID = 0;
+		internal uint NextActorID { get; private set; }
+
 		internal uint NextAID()
 		{
-			return nextAID++;
+			return NextActorID++;
+		}
+
+		internal uint NextAID(uint forcedID)
+		{
+			if (actors.ContainsKey(forcedID))
+				throw new InvalidDataException($"Cannot restore actor {forcedID}: that id is already in use.");
+
+			if (forcedID < NextActorID)
+				throw new InvalidDataException($"Cannot restore actor {forcedID}: ids below {NextActorID} have already been issued.");
+
+			NextActorID = forcedID + 1;
+			return forcedID;
 		}
 
 		public int SyncHash()
@@ -564,6 +724,143 @@ namespace OpenRA
 
 		public void RequestGameSave(string filename, bool isAutosave)
 		{
+			if (UseSnapshotSaves)
+				RequestSnapshotSave(filename, isAutosave);
+			else
+				RequestLegacyGameSave(filename, isAutosave);
+		}
+
+		void FallBackToLegacySave(string filename, bool isAutosave, Exception refusal)
+		{
+			Log.Write("lua", $"Snapshot save '{filename}' refused, falling back to the replay format:");
+			Log.Write("lua", refusal);
+			Log.Write("debug", $"Snapshot save '{filename}' refused; see lua.log. Writing a replay save instead.");
+
+			RequestLegacyGameSave(filename, isAutosave);
+		}
+
+		void RequestSnapshotSave(string filename, bool isAutosave)
+		{
+			if (LobbyInfo.NonBotClients.Count() > 1)
+			{
+				var request = new List<MiniYamlNode>
+				{
+					new("Filename", filename),
+					new("Autosave", isAutosave ? "true" : "false")
+				};
+
+				Log.Write("debug", $"Asked the server to save '{filename}' at a frame it names " +
+					$"({LobbyInfo.NonBotClients.Count()} player(s)).");
+				IssueOrder(Order.FromTargetString("RequestSnapshot", request.WriteToString(), true));
+				return;
+			}
+
+			WriteSnapshotAtFrameEnd(filename, isAutosave, upload: false);
+		}
+
+		internal void WriteSnapshotAtFrameEnd(string filename, bool isAutosave, bool upload)
+		{
+			RequestSnapshotAtFrameEnd(_ => WriteSnapshot(filename, isAutosave, upload));
+		}
+
+		internal void WriteSnapshotNow(string filename, bool isAutosave, bool upload)
+		{
+			WriteSnapshot(filename, isAutosave, upload);
+		}
+
+		void WriteSnapshot(string filename, bool isAutosave, bool upload)
+		{
+			var flags = isAutosave ? SnapshotFlags.Autosave : SnapshotFlags.None;
+
+			Log.Write("debug", $"Writing the save '{filename}' to this client's save directory" +
+				$"{(upload ? ", then uploading it to the server." : ".")}");
+
+			var directory = SavePaths.BaseSaveDirectory(modData.Manifest);
+			var path = Path.Combine(directory, SavePaths.SanitizeFileName(filename));
+
+			var temporaryPath = $"{path}.{Environment.ProcessId}.tmp";
+
+			try
+			{
+				Directory.CreateDirectory(directory);
+
+				using (var stream = File.Create(temporaryPath))
+					SaveSnapshot(stream, flags);
+
+				File.Move(temporaryPath, path, true);
+			}
+			catch (LuaStateSnapshotRefusedException e)
+			{
+				try
+				{
+					File.Delete(temporaryPath);
+				}
+				catch (Exception cleanup)
+				{
+					Log.Write("debug", cleanup);
+				}
+
+				FallBackToLegacySave(filename, isAutosave, e);
+				return;
+			}
+			catch (Exception e)
+			{
+				Log.Write("debug", $"Failed to save {filename}:");
+				Log.Write("debug", e);
+
+				TextNotificationsManager.AddSystemLine(SaveFailed, "file", filename, "reason", e.Message);
+
+				if (upload)
+					OrderManager.IssueOrder(Order.FromTargetString("SnapshotSaveFailed", $"{filename}: {e.Message}", true));
+
+				try
+				{
+					File.Delete(temporaryPath);
+				}
+				catch (Exception cleanup)
+				{
+					Log.Write("debug", cleanup);
+				}
+
+				return;
+			}
+
+			if (upload)
+			{
+				UploadSnapshot(filename, flags);
+				return;
+			}
+
+			foreach (var nsr in WorldActor.TraitsImplementing<INotifyGameSaved>())
+				nsr.GameSaved(this, isAutosave);
+		}
+
+		void UploadSnapshot(string filename, SnapshotFlags flags)
+		{
+			byte[] payload;
+			try
+			{
+				using (var stream = new MemoryStream())
+				{
+					SaveSnapshot(stream, flags);
+					payload = stream.ToArray();
+				}
+			}
+			catch (Exception e)
+			{
+				Log.Write("debug", $"Failed to save {filename}:");
+				Log.Write("debug", e);
+				TextNotificationsManager.AddSystemLine(SaveFailed, "file", filename, "reason", e.Message);
+
+				OrderManager.IssueOrder(Order.FromTargetString("SnapshotSaveFailed", $"{filename}: {e.Message}", true));
+				return;
+			}
+
+			OrderManager.UploadSnapshot(payload, filename, flags.HasFlag(SnapshotFlags.Autosave));
+		}
+
+		void RequestLegacyGameSave(string filename, bool isAutosave)
+		{
 			// Allow traits to save arbitrary data that will be passed back via IGameSaveTraitData.ResolveTraitData
 			// at the end of the save restoration
 			// TODO: This will need to be generalized to a request / response pair for multiplayer game saves
@@ -593,6 +890,10 @@ namespace OpenRA
 			OrderGenerator?.Deactivate();
 
 			frameEndActions.Clear();
+
+			pendingSnapshot = null;
+			scheduledSnapshot = null;
+			OrderManager.AbandonSnapshotUpload();
 
 			Game.Sound.StopAudio();
 			Game.Sound.StopVideo();

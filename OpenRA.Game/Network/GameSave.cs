@@ -14,67 +14,10 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
-using OpenRA.Primitives;
 using OpenRA.Server;
 
 namespace OpenRA.Network
 {
-	public class SlotClient
-	{
-		public readonly Color Color;
-		public readonly string Faction;
-		public readonly int SpawnPoint;
-		public readonly int Team;
-		public readonly int Handicap;
-		public readonly string Slot;
-		public readonly string Bot;
-		public readonly bool IsAdmin;
-
-		public readonly string BotName;
-
-		public SlotClient() { }
-
-		public SlotClient(Session.Client client)
-		{
-			Color = client.Color;
-			Faction = client.Faction;
-			SpawnPoint = client.SpawnPoint;
-			Team = client.Team;
-			Handicap = client.Handicap;
-			Slot = client.Slot;
-			Bot = client.Bot;
-			IsAdmin = client.IsAdmin;
-
-			if (client.Bot != null)
-				BotName = client.Name;
-		}
-
-		public void ApplyTo(Session.Client client)
-		{
-			client.Color = Color;
-			client.Faction = Faction;
-			client.SpawnPoint = SpawnPoint;
-			client.Team = Team;
-			client.Handicap = Handicap;
-			client.Slot = Slot;
-			client.Bot = Bot;
-			client.IsAdmin = IsAdmin;
-
-			if (Bot != null)
-				client.Name = BotName;
-		}
-
-		public static SlotClient Deserialize(MiniYaml data)
-		{
-			return FieldLoader.Load<SlotClient>(data);
-		}
-
-		public MiniYamlNode Serialize(string key)
-		{
-			return new MiniYamlNode($"SlotClient@{key}", FieldSaver.Save(this));
-		}
-	}
-
 	public class GameSave
 	{
 		public const int EOFMarker = -2;

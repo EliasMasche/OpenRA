@@ -11,8 +11,10 @@
 
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Numerics;
+using OpenRA.GameSaves;
 using OpenRA.Graphics;
 using OpenRA.Primitives;
 
@@ -21,6 +23,8 @@ namespace OpenRA.Traits
 	public interface ICreatesFrozenActors
 	{
 		void OnVisibilityChanged(FrozenActor frozen);
+
+		void OnVisibilityRestored(FrozenActor frozen);
 	}
 
 	[TraitLocation(SystemActors.Player)]
@@ -88,6 +92,8 @@ namespace OpenRA.Traits
 		{
 			this.actor = actor;
 			this.frozenTrait = frozenTrait;
+			ID = actor.ActorID;
+			Info = actor.Info;
 			Viewer = viewer;
 			shroud = viewer.Shroud;
 			NeedRenderables = startsRevealed;
@@ -113,13 +119,56 @@ namespace OpenRA.Traits
 			UpdateVisibility();
 		}
 
-		public uint ID => actor.ActorID;
+		internal FrozenActor(uint id, ActorInfo info, Player viewer, PPos[] footprint, WPos centerPosition,
+			Player owner, BitSet<TargetableType> targetTypes, WPos[] targetablePositions, int hp, DamageState damageState, bool hidden)
+		{
+			ID = id;
+			Info = info;
+			actor = null;
+			frozenTrait = null;
+			Viewer = viewer;
+			shroud = viewer.Shroud;
+			tooltips = [];
+			visibilityModifiers = [];
+
+			Footprint = footprint;
+			CenterPosition = centerPosition;
+			Owner = owner;
+			TargetTypes = targetTypes;
+			this.targetablePositions.AddRange(targetablePositions);
+			HP = hp;
+			DamageState = damageState;
+			Hidden = hidden;
+
+			UpdateVisibility();
+		}
+
+		internal void LoadRestoredState(Player owner, BitSet<TargetableType> targetTypes, WPos[] positions, int hp, DamageState damageState, bool hidden)
+		{
+			Owner = owner;
+			TargetTypes = targetTypes;
+			targetablePositions.Clear();
+			targetablePositions.AddRange(positions);
+			HP = hp;
+			DamageState = damageState;
+			Hidden = hidden;
+		}
+
+		internal WPos[] TargetablePositionsArray => [.. targetablePositions];
+
+		public uint ID { get; }
+
 		public bool IsValid => Owner != null;
-		public ActorInfo Info => actor.Info;
-		public Actor Actor => !actor.IsDead ? actor : null;
+
+		public ActorInfo Info { get; }
+
+		public Actor Actor => actor != null && !actor.IsDead ? actor : null;
 
 		public void RefreshState()
 		{
+			if (actor == null)
+				return;
+
 			Owner = actor.Owner;
 			TargetTypes = actor.GetEnabledTargetTypes();
 			targetablePositions.Clear();
@@ -141,6 +190,9 @@ namespace OpenRA.Traits
 
 		public void RefreshHidden()
 		{
+			if (actor == null)
+				return;
+
 			Hidden = false;
 			foreach (var visibilityModifier in visibilityModifiers)
 			{
@@ -187,7 +239,7 @@ namespace OpenRA.Traits
 			// Force the backing trait to update so other actors can't
 			// query inconsistent state (both hidden or both visible)
 			if (Visible != wasVisible)
-				frozenTrait.OnVisibilityChanged(this);
+				frozenTrait?.OnVisibilityChanged(this);
 
 			NeedRenderables |= Visible && !wasVisible;
 		}
@@ -195,6 +247,32 @@ namespace OpenRA.Traits
 		public void Invalidate()
 		{
 			Owner = null;
+		}
+
+		internal void RestoreVisibility()
+		{
+			UpdateVisibilityNextTick = false;
+			Shrouded = true;
+			Visible = true;
+
+			foreach (var puv in Footprint)
+			{
+				var cv = shroud.GetVisibility(puv);
+				if (cv.HasFlag(Shroud.CellVisibility.Visible))
+				{
+					Visible = false;
+					Shrouded = false;
+					break;
+				}
+
+				if (Shrouded && cv.HasFlag(Shroud.CellVisibility.Explored))
+					Shrouded = false;
+			}
+		}
+
+		internal void SyncVisibility()
+		{
+			frozenTrait?.OnVisibilityRestored(this);
 		}
 
 		public void Flash(Color color, float alpha)
@@ -243,7 +321,7 @@ namespace OpenRA.Traits
 		}
 	}
 
-	public class FrozenActorLayer : IRender, ITick, ISync
+	public class FrozenActorLayer : IRender, ITick, ISync, ISaveState, INotifyStateRestored
 	{
 		[VerifySync]
 		public int VisibilityHash;
@@ -251,14 +329,26 @@ namespace OpenRA.Traits
 		[VerifySync]
 		public int FrozenHash;
 
+		const string OwnerKey = "Owner";
+		const string TargetTypesKey = "TargetTypes";
+		const string TargetablePositionsKey = "TargetablePositions";
+		const string HPKey = "HP";
+		const string DamageStateKey = "DamageState";
+		const string HiddenKey = "Hidden";
+		const string GhostTypeKey = "Type";
+		const string GhostFootprintKey = "Footprint";
+		const string GhostCenterPositionKey = "CenterPosition";
+
 		readonly int binSize;
 		readonly World world;
 		readonly Player owner;
+		readonly FrozenActorLayerInfo info;
 		readonly Dictionary<uint, FrozenActor> frozenActorsById;
 		readonly SpatiallyPartitioned<FrozenActor> partitionedFrozenActors;
 
 		public FrozenActorLayer(Actor self, FrozenActorLayerInfo info)
 		{
+			this.info = info;
 			binSize = info.BinSize;
 			world = self.World;
 			owner = self.Owner;
@@ -274,12 +364,177 @@ namespace OpenRA.Traits
 			};
 		}
 
+		void INotifyStateRestored.StateRestored(Actor self)
+		{
+			VisibilityHash = 0;
+			FrozenHash = 0;
+
+			foreach (var kvp in frozenActorsById)
+			{
+				var frozenActor = kvp.Value;
+
+				frozenActor.RestoreVisibility();
+
+				frozenActor.SyncVisibility();
+
+				var hash = (int)kvp.Key;
+				FrozenHash += hash;
+
+				if (frozenActor.Visible)
+					VisibilityHash += hash;
+			}
+		}
+
 		public void Add(FrozenActor fa)
 		{
 			frozenActorsById.Add(fa.ID, fa);
 			world.ScreenMap.AddOrUpdate(owner, fa);
 			partitionedFrozenActors.Add(fa, FootprintBounds(fa));
 		}
+
+		List<MiniYamlNode> ISaveState.SaveState(Actor self, SnapshotWriter w)
+		{
+			var nodes = new List<MiniYamlNode>();
+			foreach (var fa in frozenActorsById.Values.OrderBy(f => f.ID))
+			{
+				var ghost = fa.Actor == null;
+				if (!ghost && !fa.IsValid)
+					continue;
+
+				var fields = new List<MiniYamlNode>
+				{
+					new(OwnerKey, w.PlayerRef(fa.Owner)),
+					new(TargetTypesKey, FieldSaver.FormatValue(fa.TargetTypes)),
+					new(TargetablePositionsKey, FieldSaver.FormatValue(fa.TargetablePositionsArray)),
+					new(HPKey, FieldSaver.FormatValue(fa.HP)),
+					new(DamageStateKey, FieldSaver.FormatValue(fa.DamageState)),
+					new(HiddenKey, FieldSaver.FormatValue(fa.Hidden))
+				};
+
+				if (ghost)
+				{
+					fields.Add(new(GhostTypeKey, fa.Info.Name));
+					fields.Add(new(GhostFootprintKey, FormatFootprint(fa.Footprint)));
+					fields.Add(new(GhostCenterPositionKey, FieldSaver.FormatValue(fa.CenterPosition)));
+				}
+
+				nodes.Add(new MiniYamlNode(fa.ID.ToStringInvariant(), new MiniYaml("", fields)));
+			}
+
+			return nodes.Count > 0 ? nodes : null;
+		}
+
+		void ISaveState.LoadState(Actor self, MiniYaml data, SnapshotReader r)
+		{
+			foreach (var node in data.Nodes)
+			{
+				if (!uint.TryParse(node.Key, NumberStyles.None, CultureInfo.InvariantCulture, out var id))
+					continue;
+
+				var fields = node.Value.ToDictionary();
+
+				if (frozenActorsById.TryGetValue(id, out var live))
+				{
+					live.LoadRestoredState(
+						ParsePlayerRef(fields, OwnerKey),
+						ParseTargetTypes(fields),
+						ParsePositions(fields),
+						ParseInt(fields, HPKey),
+						ParseDamageState(fields),
+						ParseBool(fields, HiddenKey));
+
+					continue;
+				}
+
+				var type = StringValue(fields, GhostTypeKey);
+				if (string.IsNullOrEmpty(type) || !world.Map.Rules.Actors.TryGetValue(type, out var actorInfo))
+					continue;
+
+				var footprint = ParseFootprint(StringValue(fields, GhostFootprintKey));
+				if (footprint.Length == 0)
+					continue;
+
+				Add(new FrozenActor(id, actorInfo, owner, footprint,
+					FieldLoader.GetValue<WPos>(GhostCenterPositionKey, StringValue(fields, GhostCenterPositionKey)),
+					ParsePlayerRef(fields, OwnerKey),
+					ParseTargetTypes(fields),
+					ParsePositions(fields),
+					ParseInt(fields, HPKey),
+					ParseDamageState(fields),
+					ParseBool(fields, HiddenKey)));
+			}
+		}
+
+		static string StringValue(Dictionary<string, MiniYaml> fields, string key)
+		{
+			return fields.TryGetValue(key, out var node) ? node.Value : null;
+		}
+
+		static bool ParseBool(Dictionary<string, MiniYaml> fields, string key)
+		{
+			var value = StringValue(fields, key);
+			return !string.IsNullOrEmpty(value) && FieldLoader.GetValue<bool>(key, value);
+		}
+
+		static int ParseInt(Dictionary<string, MiniYaml> fields, string key)
+		{
+			var value = StringValue(fields, key);
+			return string.IsNullOrEmpty(value) ? 0 : FieldLoader.GetValue<int>(key, value);
+		}
+
+		static DamageState ParseDamageState(Dictionary<string, MiniYaml> fields)
+		{
+			var value = StringValue(fields, DamageStateKey);
+			return string.IsNullOrEmpty(value) ? default : FieldLoader.GetValue<DamageState>(DamageStateKey, value);
+		}
+
+		static WPos[] ParsePositions(Dictionary<string, MiniYaml> fields)
+		{
+			var value = StringValue(fields, TargetablePositionsKey);
+			return string.IsNullOrEmpty(value) ? [] : FieldLoader.GetValue<WPos[]>(TargetablePositionsKey, value);
+		}
+
+		static BitSet<TargetableType> ParseTargetTypes(Dictionary<string, MiniYaml> fields)
+		{
+			var value = StringValue(fields, TargetTypesKey);
+			return string.IsNullOrEmpty(value)
+				? default
+				: new BitSet<TargetableType>(value.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries));
+		}
+
+		Player ParsePlayerRef(Dictionary<string, MiniYaml> fields, string key)
+		{
+			var value = StringValue(fields, key);
+			return string.IsNullOrEmpty(value) || value == SnapshotRefs.Null ? null : SnapshotRefs.ParsePlayer(world, value);
+		}
+
+		static string FormatFootprint(PPos[] footprint)
+		{
+			return string.Join(" ", footprint.Select(p => p.U.ToStringInvariant() + "," + p.V.ToStringInvariant()));
+		}
+
+		static PPos[] ParseFootprint(string value)
+		{
+			if (string.IsNullOrEmpty(value))
+				return [];
+
+			var parts = value.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+			var footprint = new PPos[parts.Length];
+			for (var i = 0; i < parts.Length; i++)
+			{
+				var pair = parts[i].Split(',');
+				if (pair.Length != 2 ||
+					!Exts.TryParseInt32Invariant(pair[0], out var u) ||
+					!Exts.TryParseInt32Invariant(pair[1], out var v))
+					return [];
+
+				footprint[i] = new PPos(u, v);
+			}
+
+			return footprint;
+		}
+
+		TraitInfo ISaveState.SaveStateInfo => info;
 
 		public void Remove(FrozenActor fa)
 		{

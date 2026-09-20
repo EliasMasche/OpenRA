@@ -29,9 +29,16 @@ namespace OpenRA.GameRules
 		public Func<WAngle> CurrentMuzzleFacing;
 		public WPos Source;
 		public Func<WPos> CurrentSource;
-		public Actor SourceActor;
 		public WPos PassiveTarget;
 		public Target GuidedTarget;
+
+		public World World;
+
+		public Player SourceOwner;
+
+		public Actor SourceActor;
+
+		public IProjectileSource SourceProvider;
 	}
 
 	public class WarheadArgs
@@ -41,8 +48,13 @@ namespace OpenRA.GameRules
 		public WPos? Source;
 		public WRot ImpactOrientation;
 		public WPos ImpactPosition;
-		public Actor SourceActor;
 		public Target WeaponTarget;
+
+		public World World;
+
+		public Player SourceOwner;
+
+		public Actor SourceActor;
 
 		public WarheadArgs(ProjectileArgs args)
 		{
@@ -50,6 +62,8 @@ namespace OpenRA.GameRules
 			DamageModifiers = args.DamageModifiers;
 			ImpactPosition = args.PassiveTarget;
 			Source = args.Source;
+			World = args.World;
+			SourceOwner = args.SourceOwner;
 			SourceActor = args.SourceActor;
 			WeaponTarget = args.GuidedTarget;
 		}
@@ -60,6 +74,10 @@ namespace OpenRA.GameRules
 			Weapon = args.Weapon;
 			DamageModifiers = args.DamageModifiers;
 			Source = args.Source;
+			ImpactOrientation = args.ImpactOrientation;
+			ImpactPosition = args.ImpactPosition;
+			World = args.World;
+			SourceOwner = args.SourceOwner;
 			SourceActor = args.SourceActor;
 			WeaponTarget = args.WeaponTarget;
 		}
@@ -234,7 +252,7 @@ namespace OpenRA.GameRules
 		/// <summary>Applies all the weapon's warheads to the target.</summary>
 		public void Impact(in Target target, WarheadArgs args)
 		{
-			var world = args.SourceActor.World;
+			var world = args.World;
 			foreach (var warhead in Warheads)
 			{
 				if (warhead.Delay > 0)
@@ -255,7 +273,9 @@ namespace OpenRA.GameRules
 			var args = new WarheadArgs
 			{
 				Weapon = this,
+				World = firedBy.World,
 				SourceActor = firedBy,
+				SourceOwner = firedBy.Owner,
 				WeaponTarget = target
 			};
 

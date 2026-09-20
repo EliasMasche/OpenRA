@@ -148,6 +148,9 @@ namespace OpenRA
 		[Desc("Allow clients to see the country of other clients.")]
 		public bool EnableGeoIP = true;
 
+		[Desc("For dedicated servers only, allow the admin to save the game.")]
+		public bool EnableGameSaves = true;
+
 		[Desc("For dedicated servers only, save replays for all games played.")]
 		public bool RecordReplays = false;
 
@@ -231,6 +234,13 @@ namespace OpenRA
 
 		[Desc("Throw an exception if the world sync hash changes while evaluating BotModules.")]
 		public bool SyncCheckBotModuleCode = false;
+
+		[Desc("Log rather than throw when a loaded save does not restore to the world it was saved from.")]
+		public bool SnapshotLenient = false;
+
+		[Desc("Record what each save hashed, so that a failed restore can name the actor and trait",
+			"behind it rather than only reporting that two hashes differ. Costs file size.")]
+		public bool SnapshotDiagnostics = false;
 	}
 
 	[YamlNode("Graphics", shared: true)]

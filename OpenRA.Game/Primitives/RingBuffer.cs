@@ -70,7 +70,7 @@ namespace OpenRA.Primitives
 			if (arrayIndex < 0)
 				throw new ArgumentNullException(nameof(arrayIndex));
 
-			if (arrayIndex + Count >= array.Length)
+			if (arrayIndex + Count > array.Length)
 				throw new ArgumentException("Invalid array capacity");
 
 			var destinationIndex = arrayIndex;

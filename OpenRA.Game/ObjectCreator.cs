@@ -55,12 +55,35 @@ namespace OpenRA
 
 			if (!ResolvedAssemblies.TryGetValue(hash, out var assembly))
 			{
-				var loader = new Support.AssemblyLoader(resolvedPath);
-				assembly = loader.LoadDefaultAssembly();
+				assembly = AlreadyLoaded(resolvedPath);
+
+				if (assembly == null)
+				{
+					var loader = new Support.AssemblyLoader(resolvedPath);
+					assembly = loader.LoadDefaultAssembly();
+				}
+
 				ResolvedAssemblies.Add(hash, assembly);
 			}
 
 			assemblyList.Add(assembly);
+		}
+
+		static Assembly AlreadyLoaded(string resolvedPath)
+		{
+			var full = Path.GetFullPath(resolvedPath);
+
+			foreach (var a in AppDomain.CurrentDomain.GetAssemblies())
+			{
+				if (a.IsDynamic)
+					continue;
+
+				if (!string.IsNullOrEmpty(a.Location) &&
+					string.Equals(Path.GetFullPath(a.Location), full, StringComparison.OrdinalIgnoreCase))
+					return a;
+			}
+
+			return null;
 		}
 
 		Assembly ResolveAssembly(object sender, ResolveEventArgs e)

@@ -23,6 +23,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using OpenRA.FileFormats;
+using OpenRA.GameSaves;
 using OpenRA.Network;
 using OpenRA.Primitives;
 using OpenRA.Support;
@@ -50,6 +51,54 @@ namespace OpenRA.Server
 	{
 		[FluentReference]
 		const string CustomRules = "notification-custom-rules";
+
+		[FluentReference]
+		const string SnapshotTransferFailed = "notification-snapshot-transfer-failed";
+
+		[FluentReference("frame")]
+		const string SnapshotDoesNotMatch = "notification-snapshot-does-not-match";
+
+		[FluentReference]
+		const string SnapshotNotWritten = "notification-snapshot-not-written";
+
+		[FluentReference]
+		const string SnapshotOnlyHost = "notification-snapshot-only-host";
+
+		[FluentReference("player", "save")]
+		const string SnapshotLoading = "notification-snapshot-loading";
+
+		[FluentReference]
+		const string SnapshotPickSlots = "notification-snapshot-pick-slots";
+
+		[FluentReference]
+		const string SnapshotMapUnavailable = "notification-snapshot-map-unavailable";
+
+		[FluentReference]
+		const string SnapshotDifferentMap = "notification-cannot-load-different-map";
+
+		[FluentReference]
+		const string SnapshotNotFound = "notification-snapshot-not-found";
+
+		[FluentReference("player", "reason")]
+		const string SnapshotLoadFailed = "notification-snapshot-load-failed";
+
+		[FluentReference("player")]
+		const string SnapshotStartFailed = "notification-snapshot-start-failed";
+
+		[FluentReference]
+		const string SnapshotLoadInGame = "notification-snapshot-load-in-game";
+
+		[FluentReference("save")]
+		const string SnapshotReceived = "notification-snapshot-received";
+
+		[FluentReference("save")]
+		const string SnapshotLoadWaiting = "notification-snapshot-load-waiting";
+
+		[FluentReference("save", "reason")]
+		const string SnapshotLoadAbandoned = "notification-snapshot-load-abandoned";
+
+		[FluentReference]
+		const string SnapshotNoLobby = "notification-snapshot-no-lobby";
 
 		[FluentReference]
 		const string TwoHumansRequired = "notification-two-humans-required";
@@ -118,6 +167,8 @@ namespace OpenRA.Server
 		public readonly ServerType Type;
 		public bool IsMultiplayer => Type == ServerType.Dedicated || Type == ServerType.Multiplayer;
 
+		public bool IsSinglePlayer => !IsMultiplayer && LobbyInfo.NonBotClients.Count() <= 1;
+
 		public readonly List<Connection> Conns = [];
 
 		public readonly Lock LobbyInfoLock = new();
@@ -130,7 +181,33 @@ namespace OpenRA.Server
 		// Managed by LobbyCommands
 		public MapPreview Map;
 		public readonly MapStatusCache MapStatusCache;
+
+		const int SnapshotFrameMargin = 10;
+
+		const int SnapshotLoadHoldTimeoutMs = 30000;
+
 		public GameSave GameSave;
+
+		string snapshotFilename;
+
+		bool snapshotIsLocalLoad;
+
+		bool snapshotClientsHoldFile;
+
+		public bool LobbyRestoredFromSnapshot { get; private set; }
+
+		readonly Dictionary<Connection, BlobReassembler> snapshotUploads = [];
+
+		readonly Dictionary<string, HashSet<Connection>> snapshotPendingAcks = [];
+
+		string snapshotLoadBlocked;
+
+		long snapshotLoadBlockedSince;
+
+		int lastSessionFrame;
+
+		(Session.Global GlobalSettings, Dictionary<string, Session.Slot> Slots) lobbyBeforeLoad;
+
 		public FrozenSet<string> MapPool;
 
 		// Default to the next frame for ServerType.Local - MP servers take the value from the selected GameSpeed.
@@ -379,6 +456,8 @@ namespace OpenRA.Server
 									DispatchFrameToClient(con, playerIndex, frame);
 							}
 						}
+
+						ExpireSnapshotLoadHold();
 					}
 
 					if (State == ServerState.ShuttingDown)
@@ -789,12 +868,224 @@ namespace OpenRA.Server
 			}
 		}
 
+		void DistributeSnapshot(string filename)
+		{
+			DistributeSnapshot(filename, null);
+		}
+
+		void DistributeSnapshot(string filename, Connection skip)
+		{
+			byte[] payload;
+			try
+			{
+				payload = File.ReadAllBytes(Path.Combine(SavePaths.BaseSaveDirectory(ModData.Manifest), filename));
+			}
+			catch (Exception e)
+			{
+				Log.Write("server", $"Failed to read snapshot {filename} for distribution: {e.Message}");
+				return;
+			}
+
+			var recipients = Conns.Where(c => c.Validated && c != skip).ToList();
+			if (recipients.Count == 0)
+				return;
+
+			snapshotPendingAcks[filename] = [.. recipients];
+
+			var parts = BlobTransfer.Split(payload);
+			var recipientSpan = (ReadOnlySpan<Connection>)[.. recipients];
+			for (var i = 0; i < parts.Chunks.Count; i++)
+				DispatchServerOrdersToClients(recipientSpan, Order.FromTargetString("SnapshotChunk", parts.Chunks[i], true, (uint)i).Serialize());
+
+			var end = new List<MiniYamlNode>
+			{
+				new("Count", parts.Chunks.Count.ToStringInvariant()),
+				new("Length", parts.EncodedLength.ToStringInvariant()),
+				new("Hash", parts.Hash),
+				new("Filename", filename)
+			};
+
+			DispatchServerOrdersToClients(recipientSpan, Order.FromTargetString("SnapshotChunkEnd", end.WriteToString(), true).Serialize());
+
+			Log.Write("server", $"Sending {(snapshotLoadBlocked == filename ? "the load" : "the save")} " +
+				$"{filename} to {recipients.Count} client(s).");
+		}
+
+		bool AcceptsSnapshotUpload(Connection conn)
+		{
+			if (!LobbyInfo.GlobalSettings.EnableGameSaves)
+				return false;
+
+			if (State != ServerState.GameStarted && State != ServerState.WaitingPlayers)
+				return false;
+
+			var client = GetClient(conn);
+			return client != null && client.IsAdmin;
+		}
+
+		bool AcceptsLobbySnapshot(Connection conn, byte[] payload)
+		{
+			SnapshotLobby lobby;
+			try
+			{
+				using (var stream = new MemoryStream(payload))
+				using (var reader = new SnapshotReader(stream))
+					lobby = SnapshotLobby.Read(reader);
+			}
+			catch (Exception e)
+			{
+				Log.Write("server", $"Refused unreadable snapshot from client {conn.PlayerIndex}: {e.Message}");
+				SendFluentMessageTo(conn, SnapshotTransferFailed);
+				return false;
+			}
+
+			if (lobby == null)
+			{
+				Log.Write("server", $"Refused a snapshot with no lobby section from client {conn.PlayerIndex}.");
+				SendFluentMessageTo(conn, SnapshotTransferFailed);
+				return false;
+			}
+
+			var uid = lobby.GlobalSettings.Map;
+			if (uid == null || ModData.MapCache[uid].Status != MapStatus.Available)
+			{
+				Log.Write("server", $"Refused a snapshot naming map {uid}, which this server does not have.");
+				SendFluentMessageTo(conn, SnapshotMapUnavailable);
+				return false;
+			}
+
+			return true;
+		}
+
+		void CompleteSnapshotUpload(Connection conn, BlobReassembler upload, Order o)
+		{
+			var nodes = new MiniYaml("", MiniYaml.FromString(o.TargetString, o.OrderString));
+			var count = OpenRA.Exts.ParseInt32Invariant(nodes.NodeWithKey("Count").Value.Value);
+			var length = OpenRA.Exts.ParseInt32Invariant(nodes.NodeWithKey("Length").Value.Value);
+			var hash = nodes.NodeWithKey("Hash").Value.Value;
+			var filename = SavePaths.SanitizeFileName(nodes.NodeWithKey("Filename").Value.Value);
+
+			if (!upload.TryComplete(count, length, hash, out var payload, out var error))
+			{
+				Log.Write("server", $"Refused snapshot from client {conn.PlayerIndex}: {error}");
+				SendFluentMessageTo(conn, SnapshotTransferFailed);
+				return;
+			}
+
+			if (State == ServerState.GameStarted)
+			{
+				int savedFrame;
+				int savedHash;
+				ulong savedDefeatState;
+				try
+				{
+					using (var stream = new MemoryStream(payload))
+					using (var reader = new SnapshotReader(stream))
+					{
+						savedFrame = reader.Header.ReportedFrame;
+						savedHash = reader.Header.ReportedSyncHash;
+						savedDefeatState = reader.Header.ReportedDefeatState;
+					}
+				}
+				catch (Exception e)
+				{
+					Log.Write("server", $"Refused unreadable snapshot from client {conn.PlayerIndex}: {e.Message}");
+					SendFluentMessageTo(conn, SnapshotTransferFailed);
+					return;
+				}
+
+				if (pendingSnapshotFrame is int requested && savedFrame != requested)
+					Log.Write("server", $"Save was taken at frame {savedFrame}, but frame {requested} was last requested.");
+
+				if (!syncForFrame.TryGetValue(savedFrame, out var sync))
+				{
+					Log.Write("server", $"Refused the save for frame {savedFrame}: this session has no sync hash " +
+						"recorded for that frame, so the save cannot be checked against the world being played. " +
+						"A save is verifiable only until a load restarts the session it was taken in.");
+					SendFluentMessageTo(conn, SnapshotDoesNotMatch, ["frame", savedFrame]);
+					return;
+				}
+
+				var expected = BitConverter.ToInt32(sync, 1);
+				if (expected != savedHash)
+				{
+					Log.Write("server", $"Refused snapshot for frame {savedFrame}: sync hash {savedHash} does not match the recorded {expected}.");
+					SendFluentMessageTo(conn, SnapshotDoesNotMatch, ["frame", savedFrame]);
+					return;
+				}
+
+				var expectedDefeatState = BitConverter.ToUInt64(sync, 1 + 4);
+				if (expectedDefeatState != savedDefeatState)
+				{
+					Log.Write("server", $"Refused snapshot for frame {savedFrame}: defeat state {savedDefeatState} does not match the recorded {expectedDefeatState}.");
+					SendFluentMessageTo(conn, SnapshotDoesNotMatch, ["frame", savedFrame]);
+					return;
+				}
+
+				pendingSnapshotFrame = null;
+			}
+			else if (!AcceptsLobbySnapshot(conn, payload))
+				return;
+
+			try
+			{
+				var baseSavePath = SavePaths.BaseSaveDirectory(ModData.Manifest);
+				if (!Directory.Exists(baseSavePath))
+					Directory.CreateDirectory(baseSavePath);
+
+				SavePaths.ReplaceFile(Path.Combine(baseSavePath, filename), payload);
+				Log.Write("server", $"Staged {filename} ({payload.Length} bytes) from client {conn.PlayerIndex}.");
+			}
+			catch (Exception e)
+			{
+				SavePaths.DiscardFailedWrite(Path.Combine(SavePaths.BaseSaveDirectory(ModData.Manifest), filename));
+				Log.Write("server", $"Failed to write snapshot {filename}: {e.Message}");
+				SendFluentMessageTo(conn, SnapshotNotWritten);
+				return;
+			}
+
+			DistributeSnapshot(filename, conn);
+
+			DispatchServerOrdersToClients(Order.FromTargetString("GameSaved", filename, true, o.ExtraData));
+		}
+
+		string UniqueSnapshotFilename(string filename)
+		{
+			try
+			{
+				var directory = SavePaths.BaseSaveDirectory(ModData.Manifest);
+				return Path.GetFileName(SavePaths.UniqueFilePath(directory, filename));
+			}
+			catch (Exception e)
+			{
+				Log.Write("server", $"Could not find a free name for {filename}, using it as given: {e.Message}");
+				return filename;
+			}
+		}
+
+		bool MoveStagedSnapshot(string staged, string served, out string refusal)
+		{
+			refusal = null;
+
+			try
+			{
+				var directory = SavePaths.BaseSaveDirectory(ModData.Manifest);
+				File.Move(Path.Combine(directory, staged), Path.Combine(directory, served), true);
+				return true;
+			}
+			catch (Exception e)
+			{
+				refusal = e.Message;
+				return false;
+			}
+		}
+
 		void OutOfSync(int frame)
 		{
 			Log.Write("server", $"Out of sync detected at frame {frame}, cancel replay recording");
 
 			// Make sure the written file is not valid
-			// TODO: storing a serverside replay on desync would be extremely useful
+			// TODO: Storing a server-side replay on desync would be extremely useful
 			if (recorder != null)
 			{
 				recorder.Metadata = null;
@@ -809,6 +1100,8 @@ namespace OpenRA.Server
 		readonly Dictionary<int, byte[]> syncForFrame = [];
 		int lastDefeatStateFrame;
 		ulong lastDefeatState;
+
+		int? pendingSnapshotFrame;
 
 		void HandleSyncOrder(int frame, byte[] packet)
 		{
@@ -924,6 +1217,9 @@ namespace OpenRA.Server
 
 					orderBuffer?.AddOrderTimestamp(conn.PlayerIndex);
 
+					if (frame > lastSessionFrame)
+						lastSessionFrame = frame;
+
 					// Track the last frame for each client so the disconnect handling can write
 					// an EndOfOrders marker with the correct frame number.
 					// TODO: This should be handled by the order buffering system too
@@ -1036,22 +1332,166 @@ namespace OpenRA.Server
 						break;
 					}
 
+					case "RequestSnapshot":
+					{
+						if (State != ServerState.GameStarted || !LobbyInfo.GlobalSettings.EnableGameSaves)
+							break;
+
+						var requester = GetClient(conn);
+						if (requester == null)
+							break;
+
+						if (!requester.IsAdmin)
+						{
+							SendFluentMessageTo(conn, SnapshotOnlyHost);
+							break;
+						}
+
+						string filename;
+						string autosave;
+						try
+						{
+							var request = new MiniYaml("", MiniYaml.FromString(o.TargetString, o.OrderString));
+							filename = request.NodeWithKey("Filename").Value.Value;
+							autosave = request.NodeWithKey("Autosave").Value.Value;
+						}
+						catch (Exception e)
+						{
+							Log.Write("server", $"Malformed RequestSnapshot from client {conn.PlayerIndex}: {e.Message}");
+							break;
+						}
+
+						var targetFrame = Conns.Count == 0 ? OrderLatency : Conns.Max(c => c.LastOrdersFrame) + OrderLatency + SnapshotFrameMargin;
+						pendingSnapshotFrame = targetFrame;
+
+						var announce = new List<MiniYamlNode>
+						{
+							new("Frame", targetFrame.ToStringInvariant()),
+							new("Filename", filename),
+							new("Autosave", autosave),
+							new("Host", requester.Index.ToStringInvariant())
+						};
+
+						DispatchServerOrdersToClients(Order.FromTargetString("SaveSnapshot", announce.WriteToString(), true));
+						break;
+					}
+
+					case "SnapshotChunk":
+					{
+						if (!AcceptsSnapshotUpload(conn))
+							break;
+
+						if (o.ExtraData == 0 || !snapshotUploads.TryGetValue(conn, out var upload))
+							snapshotUploads[conn] = upload = new BlobReassembler();
+
+						if (!upload.TryAdd((int)o.ExtraData, o.TargetString, out var chunkError))
+						{
+							Log.Write("server", $"Refused snapshot chunk from client {conn.PlayerIndex}: {chunkError}");
+							SendFluentMessageTo(conn, SnapshotTransferFailed);
+							snapshotUploads.Remove(conn);
+						}
+
+						break;
+					}
+
+					case "SnapshotChunkEnd":
+					{
+						if (!AcceptsSnapshotUpload(conn))
+							break;
+
+						if (snapshotUploads.Remove(conn, out var completed))
+							CompleteSnapshotUpload(conn, completed, o);
+
+						else
+							Log.Write("server", $"Ignored a SnapshotChunkEnd from client {conn.PlayerIndex}: " +
+								"no upload from that client is in progress.");
+
+						break;
+					}
+
+					case "SnapshotLoadFailed":
+					{
+						if (!SavePaths.TrySanitizeFileName(o.TargetString, out var failed))
+							break;
+
+						if (!snapshotPendingAcks.TryGetValue(failed, out var stillWaiting))
+							break;
+
+						if (!stillWaiting.Remove(conn))
+							break;
+
+						var failing = GetClient(conn);
+						Log.Write("server", $"Client {failing?.Index} ({failing?.Name}) could not receive snapshot {failed}.");
+
+						if (snapshotLoadBlocked == failed)
+							AbandonSnapshotLoad(failed, $"client {failing?.Index} ({failing?.Name}) could not receive it.");
+
+						break;
+					}
+
+					case "SnapshotSaveFailed":
+					{
+						Log.Write("server", $"Client {conn.PlayerIndex} could not save: {o.TargetString}");
+						break;
+					}
+
+					case "SnapshotReceived":
+					{
+						if (!SavePaths.TrySanitizeFileName(o.TargetString, out var received))
+							break;
+
+						if (!snapshotPendingAcks.TryGetValue(received, out var awaiting))
+							break;
+
+						var acking = GetClient(conn);
+						if (acking == null)
+							break;
+
+						if (!awaiting.Remove(conn))
+							break;
+
+						var forLoad = snapshotLoadBlocked == received;
+						var purpose = forLoad ? "load" : "save";
+
+						Log.Write("server", $"Client {acking.Index} ({acking.Name}) holds the {purpose} " +
+							$"{received}; {awaiting.Count} still outstanding.");
+
+						if (awaiting.Count == 0)
+						{
+							snapshotPendingAcks.Remove(received);
+							SendFluentMessage(SnapshotReceived, "save", received);
+
+							if (snapshotLoadBlocked == received)
+							{
+								Log.Write("server", $"Every client holds {received}; restarting the session from it.");
+								StartGame();
+							}
+							else
+								Log.Write("server", $"Every client holds the save {received}; the match continues.");
+						}
+
+						break;
+					}
+
+					case "SnapshotStartFailed":
+					{
+						var failed = GetClient(conn);
+						if (failed == null)
+							break;
+
+						Log.Write("server", $"Client {failed.Index} ({failed.Name}) could not start the game: {o.TargetString}");
+						SendFluentMessage(SnapshotStartFailed, "player", failed.Name);
+						break;
+					}
+
 					case "CreateGameSave":
 					{
 						if (GameSave != null)
 						{
-							// Sanitize potentially malicious input
-							var filename = o.TargetString;
-							var invalidIndex = -1;
-							var invalidChars = Path.GetInvalidFileNameChars();
-							while ((invalidIndex = filename.IndexOfAny(invalidChars)) != -1)
-								filename = filename.Remove(invalidIndex, 1);
+							if (!SavePaths.TrySanitizeFileName(o.TargetString, out var filename))
+								break;
 
-							var baseSavePath = Path.Combine(
-								Platform.SupportDir,
-								"Saves",
-								ModData.Manifest.Id,
-								ModData.Manifest.Metadata.Version);
+							var baseSavePath = SavePaths.BaseSaveDirectory(ModData.Manifest);
 
 							if (!Directory.Exists(baseSavePath))
 								Directory.CreateDirectory(baseSavePath);
@@ -1065,69 +1505,236 @@ namespace OpenRA.Server
 
 					case "LoadGameSave":
 					{
-						if (Type == ServerType.Dedicated || State >= ServerState.GameStarted)
+						snapshotIsLocalLoad = false;
+						snapshotClientsHoldFile = false;
+
+						if (State == ServerState.ShuttingDown || !LobbyInfo.GlobalSettings.EnableGameSaves)
+						{
+							Log.Write("server", $"Refused a load from client {conn.PlayerIndex}: state is {State}, " +
+								$"saves are {(LobbyInfo.GlobalSettings.EnableGameSaves ? "enabled" : "disabled")}.");
+							SendFluentMessageTo(conn, SnapshotLoadInGame);
+							break;
+						}
+
+						var gameRunning = State == ServerState.GameStarted;
+
+						var requester = GetClient(conn);
+						if (requester?.IsAdmin != true)
+						{
+							SendFluentMessageTo(conn, SnapshotOnlyHost);
+							break;
+						}
+
+						if (!SavePaths.TrySanitizeFileName(o.TargetString, out var filename))
 							break;
 
-						// Sanitize potentially malicious input
-						var filename = o.TargetString;
-						var invalidIndex = -1;
-						var invalidChars = Path.GetInvalidFileNameChars();
-						while ((invalidIndex = filename.IndexOfAny(invalidChars)) != -1)
-							filename = filename.Remove(invalidIndex, 1);
+						var savePath = Path.Combine(SavePaths.BaseSaveDirectory(ModData.Manifest), filename);
 
-						var savePath = Path.Combine(
-							Platform.SupportDir,
-							"Saves",
-							ModData.Manifest.Id,
-							ModData.Manifest.Metadata.Version,
-							filename);
+						if (!File.Exists(savePath))
+						{
+							Log.Write("server", $"Refused to load {filename}, which this server does not hold.");
 
-						GameSave = new GameSave(savePath);
-						LobbyInfo.GlobalSettings = GameSave.GlobalSettings;
-						LobbyInfo.Slots = GameSave.Slots;
+							SendFluentMessageTo(conn, SnapshotNotFound);
+							SendFluentMessage(SnapshotLoadFailed, "player", requester.Name,
+								"reason", FluentProvider.GetMessage(SnapshotNotFound));
+							break;
+						}
+
+						var format = SaveFileFormatDetector.Detect(savePath);
+
+						if (gameRunning && format != SaveFileFormat.Snapshot)
+						{
+							Log.Write("server", $"Refused to load {filename} from client {conn.PlayerIndex}: " +
+								"only a snapshot can restart a session that is already running.");
+							SendFluentMessageTo(conn, SnapshotLoadInGame);
+							break;
+						}
+
+						string saveMapUid;
+						try
+						{
+							if (format == SaveFileFormat.Snapshot)
+							{
+								using var stream = File.OpenRead(savePath);
+								using var reader = new SnapshotReader(stream);
+								saveMapUid = reader.Header.MapUid;
+							}
+							else
+								saveMapUid = new GameSave(savePath).GlobalSettings.Map;
+						}
+						catch (Exception e)
+						{
+							Log.Write("server", $"Refused to read the map of {filename} from client {conn.PlayerIndex}: {e.Message}");
+							SendFluentMessageTo(conn, SnapshotTransferFailed);
+							break;
+						}
+
+						var refusal = LoadPolicy.CanRestoreInto(
+							saveMapUid, Map?.Uid, ModData.MapCache[saveMapUid].Status == MapStatus.Available);
+
+						if (refusal != LoadRefusal.None)
+						{
+							Log.Write("server", $"Refused to load {filename} from client {conn.PlayerIndex}: {refusal} " +
+								$"(save map {saveMapUid}, session map {Map?.Uid}).");
+							SendFluentMessageTo(conn, refusal == LoadRefusal.DifferentMap
+								? SnapshotDifferentMap
+								: SnapshotMapUnavailable);
+							break;
+						}
+
+						SendFluentMessage(SnapshotLoading, "player", requester.Name, "save", filename);
+
+						Dictionary<string, SlotClient> slotClients;
+						if (format == SaveFileFormat.Snapshot)
+						{
+							SnapshotLobby lobby;
+							using (var stream = File.OpenRead(savePath))
+							using (var reader = new SnapshotReader(stream))
+								lobby = SnapshotLobby.Read(reader);
+
+							if (lobby == null)
+							{
+								Log.Write("server", $"Refused to load {filename} from client {conn.PlayerIndex}: " +
+									"the snapshot carries no lobby section.");
+								SendFluentMessageTo(conn, SnapshotNoLobby);
+								SendFluentMessage(SnapshotLoadFailed, "player", requester.Name,
+									"reason", FluentProvider.GetMessage(SnapshotNoLobby));
+								break;
+							}
+
+							GameSave = null;
+
+							var uploaded = filename;
+
+							snapshotIsLocalLoad = o.ExtraData == 1 && IsSinglePlayer;
+
+							snapshotClientsHoldFile = snapshotIsLocalLoad
+								|| LobbyInfo.NonBotClients.Count() <= 1;
+
+							if (snapshotClientsHoldFile)
+								snapshotFilename = uploaded;
+							else
+								snapshotFilename = UniqueSnapshotFilename(filename);
+
+							if (!snapshotClientsHoldFile && snapshotFilename != uploaded)
+							{
+								if (!MoveStagedSnapshot(uploaded, snapshotFilename, out var moveFailure))
+								{
+									Log.Write("server", $"Refused to load {uploaded} from client {conn.PlayerIndex}: " +
+										$"it could not be served as {snapshotFilename} ({moveFailure}).");
+									SendFluentMessageTo(conn, SnapshotNotWritten);
+									snapshotFilename = null;
+									snapshotIsLocalLoad = false;
+									snapshotClientsHoldFile = false;
+									break;
+								}
+
+								Log.Write("server", $"The load's file is served as {snapshotFilename}, " +
+									$"because {uploaded} is already on this server.");
+							}
+							else if (snapshotClientsHoldFile)
+								Log.Write("server", $"The load's file is served as {snapshotFilename}, which every " +
+									"client in this session already holds; no transfer is needed.");
+							else
+								Log.Write("server", $"The load's file is served as {snapshotFilename}.");
+
+							LobbyRestoredFromSnapshot = true;
+
+							if (gameRunning)
+							{
+								lobbyBeforeLoad = (LobbyInfo.GlobalSettings, LobbyInfo.Slots);
+								Log.Write("server", "Kept the running session's lobby in case the load is abandoned.");
+							}
+
+							LobbyInfo.GlobalSettings = lobby.GlobalSettings;
+							LobbyInfo.Slots = lobby.Slots;
+							slotClients = lobby.SlotClients;
+						}
+						else
+						{
+							GameSave = new GameSave(savePath);
+							snapshotFilename = null;
+							LobbyInfo.GlobalSettings = GameSave.GlobalSettings;
+							LobbyInfo.Slots = GameSave.Slots;
+							slotClients = GameSave.SlotClients;
+						}
 
 						// Reassign clients to slots
 						//  - Bot ordering is preserved
 						//  - Humans are assigned on a first-come-first-serve basis
 						//  - Leftover humans become spectators
 
-						// Start by removing all bots and assigning all players as spectators
-						foreach (var c in LobbyInfo.Clients)
-						{
-							if (c.Bot != null)
-								LobbyInfo.Clients.Remove(c);
-							else
-								c.Slot = null;
-						}
+						var seating = LoadSeating.Plan(gameRunning, LobbyInfo.Clients.Count(c => c.Bot == null));
 
-						// Rebuild/remap the saved client state
-						// TODO: Multiplayer saves should leave all humans as spectators so they can manually pick slots
-						var adminClientIndex = LobbyInfo.Clients.First(c => c.IsAdmin).Index;
-						foreach (var kv in GameSave.SlotClients)
+						if (seating == SeatingPlan.FromSave)
 						{
-							if (kv.Value.Bot != null)
+							// Start by removing all bots and assigning all players as spectators
+							foreach (var c in LobbyInfo.Clients)
 							{
-								var bot = new Session.Client()
+								if (c.Bot != null)
+									LobbyInfo.Clients.Remove(c);
+								else
+									c.Slot = null;
+							}
+
+							// Rebuild/remap the saved client state
+							// TODO: Multiplayer saves should leave all humans as spectators so they can manually pick slots
+							var adminClientIndex = LobbyInfo.Clients.First(c => c.IsAdmin).Index;
+
+							var seatHumans = LobbyInfo.Clients.Count(c => c.Bot == null) == 1;
+
+							foreach (var kv in slotClients)
+							{
+								if (kv.Value.Bot != null)
 								{
-									Index = ChooseFreePlayerIndex(),
-									State = Session.ClientState.NotReady,
-									BotControllerClientIndex = adminClientIndex
-								};
+									var bot = new Session.Client()
+									{
+										Index = ChooseFreePlayerIndex(),
+										State = Session.ClientState.NotReady,
+										BotControllerClientIndex = adminClientIndex
+									};
 
-								kv.Value.ApplyTo(bot);
-								LobbyInfo.Clients.Add(bot);
+									kv.Value.ApplyTo(bot);
+									LobbyInfo.Clients.Add(bot);
+								}
+								else if (seatHumans)
+								{
+									// This will throw if the server doesn't have enough human clients to fill all player slots
+									// See TODO above - this isn't a problem in practice because MP saves won't use this
+									var client = LobbyInfo.Clients.FirstOrDefault(c => c.Slot == null && c.Bot == null);
+									if (client != null)
+										kv.Value.ApplyTo(client);
+								}
 							}
-							else
-							{
-								// This will throw if the server doesn't have enough human clients to fill all player slots
-								// See TODO above - this isn't a problem in practice because MP saves won't use this
-								var client = LobbyInfo.Clients.First(c => c.Slot == null);
-								kv.Value.ApplyTo(client);
-							}
+
+							if (!seatHumans)
+								SendFluentMessage(SnapshotPickSlots);
 						}
 
 						SyncLobbyInfo();
 						SyncLobbyClients();
+
+						if (gameRunning && snapshotFilename != null)
+						{
+							Log.Write("server", $"Load handler is serving {snapshotFilename}: local load " +
+								$"{snapshotIsLocalLoad}, clients hold it {snapshotClientsHoldFile}, " +
+								$"players {LobbyInfo.NonBotClients.Count()}.");
+							if (!snapshotClientsHoldFile)
+								DistributeSnapshot(snapshotFilename);
+
+							if (snapshotPendingAcks.TryGetValue(snapshotFilename, out var awaitingLoad))
+							{
+								snapshotLoadBlocked = snapshotFilename;
+								snapshotLoadBlockedSince = Game.RunTime;
+								SendFluentMessage(SnapshotLoadWaiting, "save", snapshotFilename);
+								Log.Write("server", $"Holding the load of {snapshotFilename} until every client " +
+									$"has confirmed it received the file; {awaitingLoad.Count} outstanding.");
+							}
+							else
+							{
+								StartGame();
+							}
+						}
 
 						break;
 					}
@@ -1210,6 +1817,7 @@ namespace OpenRA.Server
 			{
 				orderBuffer?.RemovePlayer(toDrop.PlayerIndex);
 				Conns.Remove(toDrop);
+				snapshotUploads.Remove(toDrop);
 
 				var dropClient = LobbyInfo.Clients.FirstOrDefault(c => c.Index == toDrop.PlayerIndex);
 				if (dropClient == null)
@@ -1277,7 +1885,7 @@ namespace OpenRA.Server
 		{
 			lock (LobbyInfoLock)
 			{
-				if (State == ServerState.WaitingPlayers) // Don't do this while the game is running, it breaks things!
+				if (State == ServerState.WaitingPlayers) // Do not do this while the game is running, it breaks things!
 					DispatchServerOrdersToClients(Order.FromTargetString("SyncInfo", LobbyInfo.Serialize(), true));
 
 				foreach (var t in serverTraits.WithInterface<INotifySyncLobbyInfo>())
@@ -1339,6 +1947,42 @@ namespace OpenRA.Server
 			}
 		}
 
+		void AbandonSnapshotLoad(string held, string reason)
+		{
+			snapshotPendingAcks.Remove(held);
+			snapshotLoadBlocked = null;
+			snapshotIsLocalLoad = false;
+			snapshotClientsHoldFile = false;
+
+			if (lobbyBeforeLoad != default)
+			{
+				LobbyInfo.GlobalSettings = lobbyBeforeLoad.GlobalSettings;
+				LobbyInfo.Slots = lobbyBeforeLoad.Slots;
+				lobbyBeforeLoad = default;
+				SyncLobbyInfo();
+				SyncLobbySlots();
+				Log.Write("server", "Put the running session's lobby back after abandoning the load.");
+			}
+
+			Log.Write("server", $"Abandoned the load of {held}: {reason} The match continues.");
+			SendFluentMessage(SnapshotLoadAbandoned, "save", held, "reason", reason);
+		}
+
+		void ExpireSnapshotLoadHold()
+		{
+			var held = snapshotLoadBlocked;
+			if (held == null)
+				return;
+
+			if (Game.RunTime - snapshotLoadBlockedSince < SnapshotLoadHoldTimeoutMs)
+				return;
+
+			var outstanding = snapshotPendingAcks.TryGetValue(held, out var awaiting) ? awaiting.Count : 0;
+
+			AbandonSnapshotLoad(held, $"{outstanding} client(s) never confirmed they received it within " +
+				$"{SnapshotLoadHoldTimeoutMs} ms.");
+		}
+
 		public void StartGame()
 		{
 			lock (LobbyInfoLock)
@@ -1354,8 +1998,10 @@ namespace OpenRA.Server
 
 				// Enable game saves for singleplayer missions only
 				// TODO: Enable for multiplayer (non-dedicated servers only) once the lobby UI has been created
-				LobbyInfo.GlobalSettings.EnableGameSaves = Type != ServerType.Dedicated && LobbyInfo.NonBotClients.Count() == 1;
+				LobbyInfo.GlobalSettings.EnableGameSaves = SnapshotPolicy.ServerOffersGameSaves(
+					Type == ServerType.Dedicated, Settings.EnableGameSaves);
 
+				worldPlayers.Clear();
 				// Player list for win/loss tracking
 				// HACK: NonCombatant and non-Playable players are set to null to simplify replay tracking
 				// The null padding is needed to keep the player indexes in sync with world.Players on the clients
@@ -1394,6 +2040,11 @@ namespace OpenRA.Server
 				orderBuffer = new OrderBuffer();
 				orderBuffer.Start(gameSpeed, Conns.Where(c => c.Validated).Select(c => c.PlayerIndex));
 
+				syncForFrame.Clear();
+				lastDefeatState = 0;
+				lastDefeatStateFrame = 0;
+				pendingSnapshotFrame = null;
+
 				State = ServerState.GameStarted;
 
 				if (IsMultiplayer)
@@ -1401,11 +2052,23 @@ namespace OpenRA.Server
 
 				LobbyInfo.GlobalSettings.GameTimestep = gameSpeed.Timestep;
 
-				if (GameSave == null && LobbyInfo.GlobalSettings.EnableGameSaves)
+				if (GameSave == null && LobbyInfo.GlobalSettings.EnableGameSaves && SnapshotPolicy.NeedsOrderStream(Map.WorldActorInfo))
 					GameSave = new GameSave();
 
+				var startingFrame = lastSessionFrame > 0 ? lastSessionFrame + 1 : 1;
+
 				var startGameData = "";
-				if (GameSave != null)
+				if (snapshotFilename != null)
+				{
+					if (snapshotLoadBlocked != snapshotFilename)
+						DistributeSnapshot(snapshotFilename);
+
+					startGameData = new List<MiniYamlNode>()
+					{
+						new("SnapshotPath", snapshotFilename)
+					}.WriteToString();
+				}
+				else if (GameSave != null)
 				{
 					GameSave.StartGame(LobbyInfo, Map);
 					if (GameSave.LastOrdersFrame >= 0)
@@ -1418,12 +2081,45 @@ namespace OpenRA.Server
 					}
 				}
 
-				DispatchServerOrdersToClients(Order.FromTargetString("StartGame", startGameData, true));
+				var startGameNodes = new List<MiniYamlNode>
+				{
+					new("StartingFrame", startingFrame.ToStringInvariant())
+				};
+
+				if (snapshotFilename != null)
+				{
+					Log.Write("server", $"StartGame is serving {snapshotFilename}: local load " +
+						$"{snapshotIsLocalLoad}, clients hold it {snapshotClientsHoldFile}, " +
+						$"held {snapshotLoadBlocked == snapshotFilename}, players {LobbyInfo.NonBotClients.Count()}.");
+					if (!snapshotClientsHoldFile && snapshotLoadBlocked != snapshotFilename)
+						DistributeSnapshot(snapshotFilename);
+
+					startGameNodes.Add(new MiniYamlNode("SnapshotPath", snapshotFilename));
+				}
+
+				if (!string.IsNullOrEmpty(startGameData))
+					startGameNodes.AddRange(MiniYaml.FromString(startGameData, "StartGame"));
+
+				DispatchServerOrdersToClients(Order.FromTargetString("StartGame", startGameNodes.WriteToString(), true));
+
+				snapshotFilename = null;
+				snapshotIsLocalLoad = false;
+				snapshotClientsHoldFile = false;
+				LobbyRestoredFromSnapshot = false;
+
+				snapshotLoadBlocked = null;
+				snapshotLoadBlockedSince = 0;
+
+				lobbyBeforeLoad = default;
+
+				snapshotUploads.Clear();
+
+				snapshotPendingAcks.Clear();
 
 				foreach (var t in serverTraits.WithInterface<IStartGame>())
 					t.GameStarted(this);
 
-				var firstFrame = 1;
+				var firstFrame = startingFrame;
 				if (GameSave != null && GameSave.LastOrdersFrame >= 0)
 				{
 					GameSave.ParseOrders(LobbyInfo, (frame, client, data) =>

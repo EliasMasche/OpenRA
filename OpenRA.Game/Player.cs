@@ -332,6 +332,11 @@ namespace OpenRA
 			return $"Player ({ResolvedPlayerName})";
 		}
 
+		public bool TryGetScriptMember(string name, out ScriptMemberWrapper wrapper)
+		{
+			return luaInterface.Value.TryGetMember(name, out wrapper);
+		}
+
 		#endregion
 	}
 }

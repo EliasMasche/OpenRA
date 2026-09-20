@@ -126,6 +126,25 @@ namespace OpenRA.Traits
 			}
 		}
 
+		public bool IsValidFor(Player viewer)
+		{
+			if (viewer == null)
+				return false;
+
+			switch (Type)
+			{
+				case TargetType.Actor:
+					return Actor.IsTargetableBy(viewer);
+				case TargetType.FrozenActor:
+					return FrozenActor.IsValid && FrozenActor.Visible && !FrozenActor.Hidden;
+				case TargetType.Invalid:
+					return false;
+				case TargetType.Terrain:
+				default:
+					return true;
+			}
+		}
+
 		// Currently all or nothing.
 		// TODO: either replace based on target type or put in singleton trait
 		public bool RequiresForceFire

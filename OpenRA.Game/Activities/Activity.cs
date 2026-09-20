@@ -12,6 +12,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using OpenRA.GameSaves;
 using OpenRA.Graphics;
 using OpenRA.Primitives;
 using OpenRA.Traits;
@@ -292,5 +293,35 @@ namespace OpenRA.Activities
 				foreach (var a in na.ActivitiesImplementing<T>())
 					yield return a;
 		}
+
+		#region Snapshot save and restore
+
+		public virtual List<MiniYamlNode> SaveState(Actor self, SnapshotWriter w)
+		{
+			return null;
+		}
+
+		internal void RestoreBaseState(ActivityState state, bool firstRunCompleted, bool finishing,
+			bool isInterruptible, bool childHasPriority)
+		{
+			State = state;
+			this.firstRunCompleted = firstRunCompleted;
+			this.finishing = finishing;
+			IsInterruptible = isInterruptible;
+			ChildHasPriority = childHasPriority;
+		}
+
+		internal void RestoreLinks(Activity child, Activity next)
+		{
+			childActivity = child;
+			nextActivity = next;
+		}
+
+		internal (ActivityState State, bool FirstRunCompleted, bool Finishing, Activity Child, Activity Next) SaveBaseState()
+		{
+			return (State, firstRunCompleted, finishing, childActivity, nextActivity);
+		}
+
+		#endregion
 	}
 }

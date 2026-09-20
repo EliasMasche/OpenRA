@@ -45,6 +45,12 @@ namespace OpenRA.Traits
 		{
 			shakeEffects.RemoveAll(t => t.ExpiryTime == ticks);
 
+			if (worldRenderer == null)
+			{
+				ticks++;
+				return;
+			}
+
 			var newOffset = shakeEffects.Count > 0 ? GetScrollOffset() : Vector2.Zero;
 			if (newOffset != previousOffset)
 			{
