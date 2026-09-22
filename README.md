@@ -69,9 +69,10 @@ Object graph recovery
 
 SnapshotReader queues
 
-csharp
-
-Copy
+```csharp
+readonly List<(uint ActorID, Action<Actor> Resolve)> deferredActorRefs = [];
+readonly List<Action> deferredCompletions = [];
+```
 
 readonly List<(uint ActorID, Action<Actor> Resolve)> deferredActorRefs = [];
 readonly List<Action> deferredCompletions = [];
@@ -113,16 +114,14 @@ IWorldSaveState
 
 IWorldSaveState differs from ISaveState, requesting solely from world actor and player actors:
 
-csharp
-
-Copy
-
+```csharp
 public interface IWorldSaveState
 {
     string SectionName { get; }
     void SaveState(Actor self, Stream s, SnapshotWriter w);
     void LoadState(Actor self, Stream s, SnapshotReader r);
 }
+```
 
 ISaveState vs IWorldSaveState
 
@@ -156,7 +155,7 @@ Three ordering hooks
 
 4. Purpose of ActivityRegistry
 
-It serves as a name to restore-constructor table across all Activity subclasses known by the mod's ObjectCreator, filtered by [SaveableActivity]:
+It serves as a name-to-restore-constructor table across all Activity subclasses known by the mod's ObjectCreator, filtered by [SaveableActivity]:
 
 * Ctor signature remains fixed: (Actor, SnapshotReader, MiniYaml) — the reader is mandatory so the ctor can delay references.
 * Constructed once per ModData, from ObjectCreator.GetTypes(), ensuring coverage of every mod assembly.
@@ -168,7 +167,7 @@ Thus it acts like a polymorphic label for actions. This happens since restoring 
 
 EffectRegistry serves IEffect similarly using (World, SnapshotReader, MiniYaml).
 
-One point to note, as it hurts
+Note points:
 
 * ActivitySerializer discards the full tree (DroppedTrees++) if one action fails saving or repeats a key — a broken tree leaves dead links to missing items.
 * Move.SaveState gives null for MoveSearch.Custom moves, so actors stuck mid-custom-move return idle silently.
