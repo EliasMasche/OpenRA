@@ -1,60 +1,180 @@
-# OpenRA
+Format
 
-A Libre/Free Real Time Strategy game engine supporting early Westwood classics.
+The format acts as a container holding:
 
-* Website: [https://www.openra.net](https://www.openra.net)
-* Chat: [#openra on Libera](ircs://irc.libera.chat:6697/openra) ([web](https://web.libera.chat/#openra)) or [Discord](https://discord.openra.net) ![Discord Badge](https://discordapp.com/api/guilds/153649279762694144/widget.png)
-* Repository: [https://github.com/OpenRA/OpenRA](https://github.com/OpenRA/OpenRA) ![Continuous Integration](https://github.com/OpenRA/OpenRA/workflows/Continuous%20Integration/badge.svg)
+* a magic string
+* a header containing the version number, the engine/mod ID, the map UID, the tick count, the sync hash, and the flags
+* Deflate-or-raw sections
+* a section table at the end, so that the writer does not have to know the length of the sections in advance
 
-Please read the [FAQ](https://github.com/OpenRA/OpenRA/wiki/FAQ) in our [Wiki](https://github.com/OpenRA/OpenRA/wiki) and report problems at [https://github.com/OpenRA/OpenRA/issues](https://github.com/OpenRA/OpenRA/issues).
+Actors
 
-Join the [Forum](https://forum.openra.net/) for discussion.
+* Actor gained a forcedActorID ctor param and Initialize(addToWorld, restoring).
+* World.RestoreActor rebuilds each actor via World.NextAID(forcedID), which rejects reused/stale IDs.
+* Placement replays through the normal init path via LocationInit / CenterPositionInit / SubCellInit / FacingInit, plus two new inits: RestoringInit, SpawnedByMapInit.
 
-## Play
+Suppression flag
 
-Distributed mods include a reimagining of
+* World.IsRestoringSnapshot must be set before the world loads (throws otherwise).
+* Over 15 calls check it to skip one-time side effects on restore: FreeActor, Crate, Harvester, Husk, CrateSpawner, SpawnMapActors, SpawnStartingUnits, ProducibleWithLevel, ActorSpawnManager, LegacyBridgeLayer, LoadWidgetAtGameStart.
+* Actor.Initialize also skips ICreationActivity entirely when restoring.
 
-* Command & Conquer: Red Alert
-* Command & Conquer: Tiberian Dawn
-* Dune 2000
+Traits
 
-EA has not endorsed and does not support this product.
+* New ISaveState (SaveStateInfo, SaveState → List, LoadState), keyed by SnapshotTraitKey = actorId/traitTypeName[@instanceName].
+* 46 implementers in Mods.Common.
+* Plus INotifyStateRestored for post-load recompute.
 
-Check our [Playing the Game](https://github.com/OpenRA/OpenRA/wiki/Playing-the-game) Guide to win multiplayer matches.
+Activities
 
-## Contribute
+* Activity.SaveState (virtual) + internal SaveBaseState / RestoreBaseState / RestoreLinks.
+* New interfaces IActivityReferences, IProvidesMovePath.
 
-* Please read [INSTALL.md](https://github.com/OpenRA/OpenRA/blob/bleed/INSTALL.md) and [Compiling](https://github.com/OpenRA/OpenRA/wiki/Compiling) on how to set up an OpenRA development environment.
-* See [Hacking](https://github.com/OpenRA/OpenRA/wiki/Hacking) for a (now very outdated) overview of the engine.
-* Read and follow our [Code of Conduct](https://github.com/OpenRA/OpenRA/blob/bleed/CODE_OF_CONDUCT.md).
-* To get your patches merged, please adhere to the [Contributing](https://github.com/OpenRA/OpenRA/blob/bleed/CONTRIBUTING.md) guidelines.
+Effects
 
-## Mapping
+* ISaveableEffect + IRequiresRestoredReferences.
+* DelayedImpact is the reference example — a closure-based state machine effect with a (World, SnapshotReader, MiniYaml) restore ctor.
 
-* We offer a [Mapping](https://github.com/OpenRA/OpenRA/wiki/Mapping) Tutorial as you can change gameplay drastically with custom rules.
-* For scripted mission have a look at the [Lua API](https://docs.openra.net/en/release/lua/).
-* If you want to share your maps with the community, upload them at the [OpenRA Resource Center](https://resource.openra.net).
+Projectiles / warheads
 
-## Modding
+* IWarhead.IsValidAgainst changes from Actor firedBy to Player firedBy (the firing actor may not exist after restore, but the player always does).
+* New IProjectileSource / IProjectileScriptInfo, plus ProjectileArgsCodec / WarheadArgsCodec / WeaponRefs.
+* ArmamentProjectileSource rebuilds a muzzle from actor + trait instance name + barrel index, falling back to a frozen source over the saved position.
 
-* Download a copy of the [OpenRA Mod SDK](https://github.com/OpenRA/OpenRAModSDK) to start your own mod.
-* Check the [Modding Guide](https://github.com/OpenRA/OpenRA/wiki/Modding-Guide) to create your own classic RTS.
-* There exists an auto-generated [Trait documentation](https://docs.openra.net/en/latest/release/traits/) to get started with yaml files.
-* Some hints on how to create new OpenRA compatible [Pixelart](https://github.com/OpenRA/OpenRA/wiki/Pixelart).
-* Upload total conversions at [our Mod DB profile](https://www.moddb.com/games/openra/mods).
+Netcode
 
-## Support
+* Protocol 21→22.
+* New orders: RequestSnapshot, SaveSnapshot, SnapshotChunk, SnapshotChunkEnd, SnapshotReceived, SnapshotLoadFailed, SnapshotSaveFailed, SnapshotStartFailed, LoadGameSave.
+* Server selects a save point (max(LastOrdersFrame) + OrderLatency + 10) ensuring client synchronization.
+* Files transmit in parts through BlobReassembler.
+* Server discards them if sync hash / defeat state mismatches occur.
+* Loading halts until every client acknowledges; thirty-second timeouts revert the lobby.
 
-* Sponsor a [mirror server](https://github.com/OpenRA/OpenRAWebsiteV3/tree/master/packages) if you have some bandwidth to spare.
-* You can immediately set up a [Dedicated](https://github.com/OpenRA/OpenRA/wiki/Dedicated-Server) Game Server.
+Lua
 
-## License
-Copyright (c) OpenRA Developers and Contributors
-This file is part of OpenRA, which is free software. It is made
-available to you under the terms of the GNU General Public License
-as published by the Free Software Foundation, either version 3 of
-the License, or (at your option) any later version. For more
-information, see [COPYING](https://github.com/OpenRA/OpenRA/blob/bleed/COPYING).
+* Lacks a core heap serializer — ILuaStateSnapshotCodec uses LUA_SNAPSHOT flag wrapping external Eluant.LuaSnapshot.
+* Missing bindings trigger LuaStateSnapshotRefusedException, caught by World.WriteSnapshot, deprecating legacy replay saves.
+* Mod layer: ScriptUserdataCodec stores actors / players / positions / colours / bound methods as MiniYaml; deceased actors turn into ActorTombstone handles.
 
-# Sponsors
-Free code signing on Windows provided by [SignPath.io](https://about.signpath.io/), certificate by [SignPath Foundation](https://signpath.org/).
+Conditions
+
+Conditions skip serialization — actors rebuild normally, suppressing side effects via IsRestoringSnapshot, then regain grants in StateRestored (Cloak.cs:397-404), being per-world runtime handles, not data.
+
+Object graph recovery
+
+* Involves serializing identifiers plus lookups, deferring forward references.
+* Identity format reads A:, P:, F:<viewer>:<id>, C:, TP:.
+* Actor targets include generation counters preventing recycled IDs resolving wrongly.
+* Weapons / warheads store as rule keys (weaponKey:index) — never serialized, since rules objects remain immutable/shared.
+
+SnapshotReader queues
+
+csharp
+
+Copy
+
+readonly List<(uint ActorID, Action<Actor> Resolve)> deferredActorRefs = [];
+readonly List<Action> deferredCompletions = [];
+
+* RunDeferred() processes actor refs first, then completions.
+* GetActorById checks reader's restoredActors map before World.GetActorById, since mid-restore actors exist but lack world presence.
+* DeferTarget delays only when values name actors — cells / positions resolve instantly.
+
+Other graph edges
+
+* Activity trees numbered by ActivitySerializer, traversing childActivity / nextActivity, writing nodes per activity keyed by int, using Child / Next as numeric refs with Root pointers. Restore builds every node initially, connects them later — avoids forward-reference issues.
+* Lua closures turn into integer handles inside ScriptContext.handles, fetched again after loading.
+* C# delegates cannot serialize — Animation uses this model: store a SequenceState entry, then call PlayThen / PlayRepeating to reconstruct the tick delegate and apply saved counters onto it.
+
+Verification
+
+* World.SyncHash() recalculates after restore and matches against the header.
+* Because ISync fields hash, missing ones show up as mismatches.
+* This explains why savers include actors leaving worlds yet holding ISync state (world.Actors ∪ world.ActorsHavingTrait<ISync>()), and why Settings.Debug.SnapshotDiagnostics might print a Diff segment listing actor / trait during mismatch.
+
+Restore sequence
+
+The restore sequence within WorldRestorer.Restore forms a documented agreement, each phase warranted by reliance:
+
+1. check header
+2. spawn actors
+3. ingest pre-script mass data
+4. execute deferred map Lua block
+5. individual-actor trait status plus actions plus join world
+6. world / player condition
+7. impacts
+8. RunDeferred()
+9. leftover mass data
+10. StateRestored
+11. tick plus RNG jointly
+12. sync-hash validation
+
+IWorldSaveState
+
+IWorldSaveState differs from ISaveState, requesting solely from world actor and player actors:
+
+csharp
+
+Copy
+
+public interface IWorldSaveState
+{
+    string SectionName { get; }
+    void SaveState(Actor self, Stream s, SnapshotWriter w);
+    void LoadState(Actor self, Stream s, SnapshotReader r);
+}
+
+ISaveState vs IWorldSaveState
+
+* ISaveState provides a trait with a List within its actor's YAML block.
+* IWorldSaveState grants a trait its specific named compressed section, acting as a raw Stream.
+
+What it handles
+
+This handles data too vast or malformed for individual actor YAML:
+
+* Shroud — comprises four ProjectedCellLayer arrays and six flags, written directly via BinaryWriter.
+  * Each player gets one section: "Shroud/" + owner.InternalName.
+* ResourceLayer
+* SmudgeLayer ("SmudgeLayer/" + Info.Type)
+* MapLayerSnapshot ("MapLayers")
+* PowerManager
+* SpawnMapActors ("MapActors")
+* LuaScript ("Script")
+
+Why streams
+
+* Streams bypass base64-through-YAML for binary loads.
+* Allow readers to skip sections using the table.
+* Permit compression per section.
+
+Three ordering hooks
+
+1. ILoadBeforeDeferredScript — map Lua chunks read the actor list at their root, requiring SpawnMapActors to load first.
+2. IMapActorRoster — name-to-actor-id mapping plus id ranges, enabling restored actors to receive SpawnedByMapInit.
+3. IDeferScriptUntilRestored — LuaScript builds its ScriptContext with an empty script list, then executes the chunk there.
+
+4. Purpose of ActivityRegistry
+
+It serves as a name to restore-constructor table across all Activity subclasses known by the mod's ObjectCreator, filtered by [SaveableActivity]:
+
+* Ctor signature remains fixed: (Actor, SnapshotReader, MiniYaml) — the reader is mandatory so the ctor can delay references.
+* Constructed once per ModData, from ObjectCreator.GetTypes(), ensuring coverage of every mod assembly.
+* Verification occurs at startup, not during restoration: a flagged type lacking a restore ctor fails instantly, and duplicate names fail similarly.
+* --check-activity-restore enumerates violations.
+* NameOf outputs the type identifier (inner types named Declaring+Nested); Create mirrors and resends errors as InvalidDataException.
+
+Thus it acts like a polymorphic label for actions. This happens since restoring cannot call standard constructors — activity builders often queue kids, make iterators, or hold pathfinder/delegate info (Move's Func<BlockedByActor, (bool, List<CPos>)> getPath fits perfectly).
+
+EffectRegistry serves IEffect similarly using (World, SnapshotReader, MiniYaml).
+
+One point to note, as it hurts
+
+* ActivitySerializer discards the full tree (DroppedTrees++) if one action fails saving or repeats a key — a broken tree leaves dead links to missing items.
+* Move.SaveState gives null for MoveSearch.Custom moves, so actors stuck mid-custom-move return idle silently.
+* A similar form applies to effects: DroppedEffects counts because SyncHash computes sync effect hashes via location, thus losing one changes all later hashes.
+
+Two process points
+
+* I made and deleted temp git worktrees inside .worktrees/ to view branches.
+* The noted file remains the sole leftover item. No commits occurred.
