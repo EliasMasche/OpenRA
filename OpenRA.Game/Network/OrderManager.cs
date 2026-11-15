@@ -19,7 +19,7 @@ using OpenRA.Widgets;
 
 namespace OpenRA.Network
 {
-	public sealed class OrderManager : IDisposable
+	public sealed partial class OrderManager : IDisposable
 	{
 		const OrderPacket ClientDisconnected = null;
 

@@ -19,7 +19,7 @@ using OpenRA.Traits;
 namespace OpenRA.Mods.Cnc.Traits
 {
 	[Desc("Actor's turret rises from the ground before attacking.")]
-	sealed class AttackPopupTurretedInfo : AttackTurretedInfo, Requires<BuildingInfo>, Requires<WithEmbeddedTurretSpriteBodyInfo>
+	sealed class AttackPopupTurretedInfo : AttackTurretedInfo, Requires<BuildingInfo>, Requires<WithEmbeddedTurretSpriteBodyInfo>, ISnapshotCreationInfo
 	{
 		[Desc("How many game ticks should pass before closing the actor's turret.")]
 		public readonly int CloseDelay = 125;
@@ -45,6 +45,12 @@ namespace OpenRA.Mods.Cnc.Traits
 		public readonly string Body = "body";
 
 		public override object Create(ActorInitializer init) { return new AttackPopupTurreted(init, this); }
+
+		void ISnapshotCreationInfo.AddSnapshotInits(Primitives.TypeDictionary inits, Player owner, Func<string, string> saved, Func<string, Actor> savedActor)
+		{
+			if (!inits.Contains<SkipMakeAnimsInit>())
+				inits.Add(new SkipMakeAnimsInit());
+		}
 	}
 
 	sealed class AttackPopupTurreted : AttackTurreted, INotifyIdle, IDamageModifier, IResumeAnimations

@@ -23,7 +23,7 @@ using OpenRA.Traits;
 namespace OpenRA.Mods.Common.Traits
 {
 	[Desc("This actor can transport Passenger actors.")]
-	public class CargoInfo : ConditionalTraitInfo, Requires<IOccupySpaceInfo>
+	public class CargoInfo : ConditionalTraitInfo, Requires<IOccupySpaceInfo>, ISnapshotCreationInfo
 	{
 		[Desc("The maximum sum of Passenger.Weight that this actor can support.")]
 		public readonly int MaxWeight = 0;
@@ -91,6 +91,12 @@ namespace OpenRA.Mods.Common.Traits
 		public IEnumerable<string> LinterPassengerConditions => PassengerConditions.Values;
 
 		public override object Create(ActorInitializer init) { return new Cargo(init, this); }
+
+		// The saved state holds the passengers, so the transport starts without its initial units.
+		void ISnapshotCreationInfo.AddSnapshotInits(TypeDictionary inits, Player owner, Func<string, string> saved, Func<string, Actor> savedActor)
+		{
+			inits.Add(new RuntimeCargoInit(this, []));
+		}
 	}
 
 	public class Cargo : ConditionalTrait<CargoInfo>, IIssueOrder, IResolveOrder, IOrderVoice,

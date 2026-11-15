@@ -94,6 +94,42 @@ namespace OpenRA.Network
 
 		void IConnection.StartGame() { }
 
+		// Makes the recording continue at netFrame, for a game that restores there. A chunk ends with the order packet
+		// of its frame, so this drops each chunk of an earlier frame. A sync hash or a disconnect of a later frame in a
+		// dropped chunk goes out with the next chunk. The server sends a disconnect apart from the orders, so a chunk
+		// can hold a disconnect of an earlier frame. This drops it too. Returns the clients that left before netFrame.
+		internal int[] ContinueAt(int netFrame)
+		{
+			var leftClients = new List<int>();
+			var carried = new List<(int ClientId, byte[] Packet)>();
+			var keptChunks = new List<Chunk>();
+			foreach (var chunk in chunks)
+			{
+				var kept = chunk.Frame >= netFrame;
+				foreach (var packet in chunk.Packets)
+				{
+					var isDisconnect = OrderIO.TryParseDisconnect(packet, out var disconnect);
+					if (isDisconnect && disconnect.Frame < netFrame)
+						leftClients.Add(disconnect.ClientId);
+					else if (kept || isDisconnect || (OrderIO.TryParseSync(packet.Packet, out var hash) && hash.Frame >= netFrame))
+						carried.Add(packet);
+				}
+
+				if (!kept)
+					continue;
+
+				chunk.Packets = [.. carried];
+				carried.Clear();
+				keptChunks.Add(chunk);
+			}
+
+			chunks.Clear();
+			foreach (var chunk in keptChunks)
+				chunks.Enqueue(chunk);
+
+			return [.. leftClients];
+		}
+
 		// Do nothing: ignore locally generated orders
 		void IConnection.Send(int frame, IEnumerable<Order> orders) { }
 		void IConnection.SendImmediate(IEnumerable<Order> orders) { }

@@ -56,7 +56,14 @@ namespace OpenRA
 
 		public bool IsInWorld { get; internal set; }
 		public bool WillDispose { get; private set; }
-		public bool Disposed { get; private set; }
+		public bool Disposed { get; internal set; }
+
+		/// <summary>
+		/// The traits of this actor when it left the trait dictionary, in creation order. A snapshot can name some of
+		/// them after the actor dies, such as the armament that a bullet follows, and finds their actor here.
+		/// </summary>
+		[NotSaved("Only an actor that has died holds it, and a snapshot writes no field of such an actor.")]
+		public IReadOnlyList<object> TraitsAfterDisposal { get; internal set; }
 
 		Activity currentActivity;
 		public Activity CurrentActivity

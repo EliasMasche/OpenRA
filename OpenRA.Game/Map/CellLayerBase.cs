@@ -16,13 +16,18 @@ using OpenRA.Primitives;
 
 namespace OpenRA
 {
-	public abstract class CellLayerBase<T> : IEnumerable<T>
+	// The cells of a layer as one array, for a loader that knows their type only when it runs.
+	interface ICellLayerEntries { Array Entries { get; } }
+
+	public abstract class CellLayerBase<T> : IEnumerable<T>, ICellLayerEntries
 	{
 		public readonly Size Size;
 		public readonly MapGridType GridType;
 
 		protected readonly T[] Entries;
 		protected readonly Rectangle Bounds;
+
+		Array ICellLayerEntries.Entries => Entries;
 
 		protected CellLayerBase(Map map)
 			: this(map.Grid.Type, map.MapSize) { }

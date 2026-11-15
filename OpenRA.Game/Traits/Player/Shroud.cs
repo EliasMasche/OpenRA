@@ -75,6 +75,10 @@ namespace OpenRA.Traits
 		[NotSaved("FrozenActorLayer and PlayerRadarTerrain subscribe when they are created, the renderers when they load.")]
 		public event Action<PPos> OnShroudChanged;
 
+		/// <summary>True while <see cref="RaiseAllCellsChanged"/> runs, which changes no cell.</summary>
+		[NotSaved("True only while RaiseAllCellsChanged runs, and a save does not occur then.")]
+		public bool IsRedrawing { get; private set; }
+
 		public int RevealedCells { get; private set; }
 
 		enum ShroudCellType : byte { Shroud, Fog, Visible }
@@ -91,9 +95,7 @@ namespace OpenRA.Traits
 		[NotSaved("Each revealing actor adds its source again when it enters the world, and corrects its cells after a load.")]
 		readonly Dictionary<object, ShroudSource> sources = [];
 
-		// Which sources this shroud holds, and of which type. A save holds this and not the cells of a
-		// source. Who feeds a player's shroud is decided when a source is added, by the relationship of
-		// that moment, so it cannot be worked out again from the relationships a loaded world has.
+		// The save holds which sources feed this shroud. The relationship decided that at the addition of each source.
 		readonly Dictionary<object, SourceType> sourceTypes = [];
 
 		// Per-cell count of each source type, used to resolve the final cell type
@@ -212,6 +214,25 @@ namespace OpenRA.Traits
 			disabledChanged = false;
 		}
 
+		/// <summary>Tells each subscriber of each cell, as a load puts the saved cells in place without a change.</summary>
+		public void RaiseAllCellsChanged()
+		{
+			if (OnShroudChanged == null)
+				return;
+
+			IsRedrawing = true;
+			try
+			{
+				foreach (var puv in map.ProjectedCells)
+					if (map.Contains(puv))
+						OnShroudChanged(puv);
+			}
+			finally
+			{
+				IsRedrawing = false;
+			}
+		}
+
 		void UpdateCell(int index, Actor self)
 		{
 			var type = ShroudCellType.Shroud;
@@ -280,10 +301,8 @@ namespace OpenRA.Traits
 		}
 
 		/// <summary>
-		/// Called after a load by whatever keeps the source <paramref name="key"/>, with the cells the
-		/// source had when the world was saved. If the saved shroud held the source, it is put back with
-		/// those cells. If it did not, the source that creating its owner added is dropped. Neither counts
-		/// a cell: the saved counts already hold what the saved sources added.
+		/// The keeper of the source <paramref name="key"/> calls this after a load, with its saved cells. The saved
+		/// counts already hold them, so this counts no cell.
 		/// </summary>
 		public void RestoreSource(object key, PPos[] projectedCells)
 		{
@@ -293,11 +312,7 @@ namespace OpenRA.Traits
 				sources.Remove(key);
 		}
 
-		/// <summary>
-		/// The first cell whose count differs from what the sources add up to, or null when every cell agrees.
-		/// Only adding and removing a source change the counts, so after a load they have to agree. A trait that
-		/// keeps a source and does not give it back after a load leaves a difference here.
-		/// </summary>
+		/// <summary>The first cell whose count differs from what the sources add up to, or null.</summary>
 		public PPos? FirstMismatchedCell()
 		{
 			var passive = new ProjectedCellLayer<short>(map);

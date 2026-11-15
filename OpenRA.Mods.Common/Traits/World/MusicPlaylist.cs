@@ -107,7 +107,7 @@ namespace OpenRA.Mods.Common.Traits
 			// Reset any bogus pre-existing state
 			Game.Sound.DisableWorldSounds = info.DisableWorldSounds;
 
-			if (!world.IsLoadingGameSave)
+			if (!world.IsResumingSave)
 				Play();
 		}
 

@@ -52,6 +52,12 @@ namespace OpenRA.Network
 			}
 		}
 
+		/// <summary>A copy of the orders as the connection sends them, without a frame number.</summary>
+		public byte[] ToBytes()
+		{
+			return data.ToArray();
+		}
+
 		public byte[] Serialize(int frame)
 		{
 			var ms = new MemoryStream((int)data.Length + 4);

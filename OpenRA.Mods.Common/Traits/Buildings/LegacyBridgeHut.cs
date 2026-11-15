@@ -16,11 +16,19 @@ using OpenRA.Traits;
 namespace OpenRA.Mods.Common.Traits
 {
 	[Desc("Allows bridges to be targeted for demolition and repair.")]
-	public class LegacyBridgeHutInfo : TraitInfo, IDemolishableInfo
+	public class LegacyBridgeHutInfo : TraitInfo, IDemolishableInfo, ISnapshotCreationInfo
 	{
 		public bool IsValidTarget(ActorInfo actorInfo, Actor saboteur) { return false; } // TODO: bridges don't support frozen under fog
 
 		public override object Create(ActorInitializer init) { return new LegacyBridgeHut(init); }
+
+		// The hut cannot start without its bridge, and its saved state names the bridge.
+		void ISnapshotCreationInfo.AddSnapshotInits(TypeDictionary inits, Player owner, System.Func<string, string> saved, System.Func<string, Actor> savedActor)
+		{
+			var bridge = savedActor(nameof(LegacyBridgeHut.Bridge));
+			if (bridge != null)
+				inits.Add(new ParentActorInit(bridge));
+		}
 	}
 
 	public class LegacyBridgeHut : IDemolishable, IDelayedDemolition

@@ -49,6 +49,19 @@ namespace OpenRA.Network
 
 		int IConnection.LocalClientId => LocalClientId;
 
+		internal IEnumerable<(int Frame, OrderPacket Orders)> SentOrders => orders;
+
+		// Orders of a restored game that the client issued and did not send before the save, or null. They stay bytes:
+		// an order finds its actors when it applies, and one of them can be outside the world now.
+		internal OrderPacket UnsentOrders { get; private set; }
+
+		// Forgets the sent packets that did not come back yet. Then the unsent orders go out ahead of the next orders.
+		internal void RestoreOrders(OrderPacket unsent)
+		{
+			orders.Clear();
+			UnsentOrders = unsent;
+		}
+
 		void IConnection.StartGame()
 		{
 			// Inject an empty frame to fill the gap we are making by projecting forward orders
@@ -57,7 +70,14 @@ namespace OpenRA.Network
 
 		void IConnection.Send(int frame, IEnumerable<Order> o)
 		{
-			orders.Enqueue((frame, new OrderPacket(o)));
+			var packet = new OrderPacket(o);
+			if (UnsentOrders != null)
+			{
+				packet = OrderPacket.Combine([UnsentOrders, packet]);
+				UnsentOrders = null;
+			}
+
+			orders.Enqueue((frame, packet));
 		}
 
 		void IConnection.SendImmediate(IEnumerable<Order> o)
@@ -231,9 +251,28 @@ namespace OpenRA.Network
 
 		void IConnection.StartGame() { }
 
+		internal IEnumerable<(int Frame, OrderPacket Orders)> SentOrders => sentOrders;
+
+		// Orders of a restored game that the client issued and did not send before the save, or null. They stay bytes:
+		// an order finds its actors when it applies, and one of them can be outside the world now.
+		internal OrderPacket UnsentOrders { get; private set; }
+
+		// The unsent orders go out ahead of the next orders. The packets that wait for an ack stay. The server of a
+		// restored game sends the packets that were in transit at the save.
+		internal void RestoreOrders(OrderPacket unsent)
+		{
+			UnsentOrders = unsent;
+		}
+
 		void IConnection.Send(int frame, IEnumerable<Order> orders)
 		{
 			var o = new OrderPacket(orders);
+			if (UnsentOrders != null)
+			{
+				o = OrderPacket.Combine([UnsentOrders, o]);
+				UnsentOrders = null;
+			}
+
 			sentOrders.Enqueue((frame, o));
 			Send(o.Serialize(frame));
 		}
@@ -368,6 +407,14 @@ namespace OpenRA.Network
 			// If we have a previous recording then save/dispose it and start a new one.
 			Recorder?.Dispose();
 			Recorder = new ReplayRecorder(chooseFilename);
+		}
+
+		// Ends the recording, and records nothing more of the game. A recording gets its file from the order that
+		// starts the game, so a recording that ends before that order leaves no file.
+		internal void StopRecording()
+		{
+			Recorder?.Dispose();
+			Recorder = null;
 		}
 
 		void IDisposable.Dispose()

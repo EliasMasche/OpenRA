@@ -27,7 +27,7 @@ namespace OpenRA.Mods.Common.Traits.Render
 	}
 
 	[Desc("Render trait fundament that won't work without additional With* render traits.")]
-	public class RenderSpritesInfo : TraitInfo, IRenderActorPreviewInfo
+	public class RenderSpritesInfo : TraitInfo, IRenderActorPreviewInfo, ISnapshotCreationInfo
 	{
 		[Desc("The sequence name that defines the actor sprites. Defaults to the actor name.")]
 		public readonly string Image = null;
@@ -44,6 +44,12 @@ namespace OpenRA.Mods.Common.Traits.Render
 		public readonly string PlayerPalette = "player";
 
 		public override object Create(ActorInitializer init) { return new RenderSprites(init, this); }
+
+		// The images come from this faction. It stays when the owner changes, as after a capture.
+		void ISnapshotCreationInfo.AddSnapshotInits(TypeDictionary inits, Player owner, Func<string, string> saved, Func<string, Actor> savedActor)
+		{
+			inits.Add(new FactionInit(saved(RenderSprites.FactionField) ?? owner.Faction.InternalName));
+		}
 
 		public IEnumerable<IActorPreview> RenderPreview(ActorPreviewInitializer init)
 		{

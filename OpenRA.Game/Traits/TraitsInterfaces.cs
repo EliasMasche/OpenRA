@@ -683,6 +683,16 @@ namespace OpenRA.Traits
 	}
 
 	/// <summary>
+	/// A trait whose actor needs an init to be created by a snapshot load, and must create nothing else, such as its
+	/// passengers. <c>saved</c> gives the text of a saved field of this trait by name, or null.
+	/// <c>savedActor</c> gives the actor that such a field names. That actor has a lower ID.
+	/// </summary>
+	public interface ISnapshotCreationInfo : ITraitInfoInterface
+	{
+		void AddSnapshotInits(TypeDictionary inits, Player owner, Func<string, string> saved, Func<string, Actor> savedActor);
+	}
+
+	/// <summary>
 	/// A trait or an effect that builds again, after a snapshot load, state that the snapshot leaves out.
 	/// It must not change saved state. <c>self</c> is null for an effect.
 	/// </summary>

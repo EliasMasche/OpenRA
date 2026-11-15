@@ -257,6 +257,8 @@ namespace OpenRA.Test
 				new TestCaseData(Color.CornflowerBlue),
 				new TestCaseData(new Hotkey(Keycode.A, Modifiers.Shift)),
 				new TestCaseData(new WDist(123)),
+				new TestCaseData(new WDist(-512)),
+				new TestCaseData(new WDist(-1536)),
 				new TestCaseData(new WVec(123, 456, 789)),
 				new TestCaseData(new WPos(123, 456, 789)),
 				new TestCaseData(new WAngle(123)),
@@ -270,6 +272,8 @@ namespace OpenRA.Test
 				new TestCaseData(true),
 				new TestCaseData(new Size(123, 456)),
 				new TestCaseData(new int2(123, 456)),
+				new TestCaseData(new MPos(123, -456)),
+				new TestCaseData(new PPos(-123, 456)),
 				new TestCaseData(new Rectangle(123, 456, 789, 123)),
 			];
 		}

@@ -75,8 +75,10 @@ namespace OpenRA
 				return "";
 
 			var t = v.GetType();
+
+			// Sorted, because a bit set enumerates its members in the order that each process met their names.
 			if (t.IsGenericType && t.GetGenericTypeDefinition() == typeof(BitSet<>))
-				return ((IEnumerable<string>)v).Select(FormatValue).JoinWith(", ");
+				return ((IEnumerable<string>)v).Order(StringComparer.Ordinal).Select(FormatValue).JoinWith(", ");
 
 			if (t.IsArray && t.GetArrayRank() == 1)
 				return ((Array)v).Cast<object>().Select(FormatValue).JoinWith(", ");

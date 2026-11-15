@@ -16,7 +16,7 @@ namespace OpenRA.Mods.Common.Traits
 {
 	[Desc("Player receives a unit for free once the building is placed. This also works for structures.",
 		"If you want more than one unit to appear copy this section and assign IDs like FreeActor@2, ...")]
-	public class FreeActorInfo : ConditionalTraitInfo, IEditorActorOptions
+	public class FreeActorInfo : ConditionalTraitInfo, IEditorActorOptions, ISnapshotCreationInfo
 	{
 		[ActorReference]
 		[FieldLoader.Require]
@@ -50,6 +50,13 @@ namespace OpenRA.Mods.Common.Traits
 		}
 
 		public override object Create(ActorInitializer init) { return new FreeActor(init, this); }
+
+		// The saved state holds the free actor, if creation made it.
+		void ISnapshotCreationInfo.AddSnapshotInits(Primitives.TypeDictionary inits, Player owner,
+			System.Func<string, string> saved, System.Func<string, Actor> savedActor)
+		{
+			inits.Add(new FreeActorInit(this, false));
+		}
 	}
 
 	public class FreeActor : ConditionalTrait<FreeActorInfo>

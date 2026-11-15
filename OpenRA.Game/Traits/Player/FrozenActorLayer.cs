@@ -275,8 +275,14 @@ namespace OpenRA.Traits
 			partitionedFrozenActors = new SpatiallyPartitioned<FrozenActor>(
 				world.Map.MapSize.Width, world.Map.MapSize.Height, binSize);
 
-			self.Trait<Shroud>().OnShroudChanged += uv =>
+			var shroud = self.Trait<Shroud>();
+			shroud.OnShroudChanged += uv =>
 			{
+				// A redraw after a load changes no cell. The save holds the visibility of each frozen actor, and a
+				// world that does not tick after the load must keep it.
+				if (shroud.IsRedrawing)
+					return;
+
 				foreach (var fa in partitionedFrozenActors.At(new int2(uv.U, uv.V)))
 					fa.UpdateVisibilityNextTick = true;
 			};

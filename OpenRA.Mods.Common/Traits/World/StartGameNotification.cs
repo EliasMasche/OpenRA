@@ -48,7 +48,7 @@ namespace OpenRA.Mods.Common.Traits
 
 		void IPostWorldLoaded.PostWorldLoaded(World world, WorldRenderer wr)
 		{
-			if (!world.IsLoadingGameSave)
+			if (!world.IsResumingSave)
 			{
 				Game.Sound.PlayNotification(world.Map.Rules, null, "Speech", info.Notification, world.RenderPlayer?.Faction.InternalName);
 				TextNotificationsManager.AddTransientLine(null, info.TextNotification);

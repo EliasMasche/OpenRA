@@ -17,7 +17,7 @@ using OpenRA.Traits;
 namespace OpenRA.Mods.D2k.Traits.Render
 {
 	[Desc("Rendered together with the \"make\" animation.")]
-	public class WithCrumbleOverlayInfo : ConditionalTraitInfo, Requires<RenderSpritesInfo>
+	public class WithCrumbleOverlayInfo : ConditionalTraitInfo, Requires<RenderSpritesInfo>, ISnapshotCreationInfo
 	{
 		[SequenceReference]
 		[Desc("Sequence name to use")]
@@ -31,6 +31,13 @@ namespace OpenRA.Mods.D2k.Traits.Render
 		public readonly bool IsPlayerPalette = false;
 
 		public override object Create(ActorInitializer init) { return new WithCrumbleOverlay(init, this); }
+
+		void ISnapshotCreationInfo.AddSnapshotInits(Primitives.TypeDictionary inits, Player owner,
+			System.Func<string, string> saved, System.Func<string, Actor> savedActor)
+		{
+			if (!inits.Contains<SkipMakeAnimsInit>())
+				inits.Add(new SkipMakeAnimsInit());
+		}
 	}
 
 	public class WithCrumbleOverlay : ConditionalTrait<WithCrumbleOverlayInfo>

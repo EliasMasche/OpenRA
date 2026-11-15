@@ -18,7 +18,7 @@ using OpenRA.Traits;
 namespace OpenRA.Mods.Common.Traits.Render
 {
 	[Desc("Replaces the sprite during construction/deploy/undeploy.")]
-	public class WithMakeAnimationInfo : TraitInfo, Requires<WithSpriteBodyInfo>
+	public class WithMakeAnimationInfo : TraitInfo, Requires<WithSpriteBodyInfo>, ISnapshotCreationInfo
 	{
 		[SequenceReference]
 		[Desc("Sequence name to use.")]
@@ -32,12 +32,16 @@ namespace OpenRA.Mods.Common.Traits.Render
 		public readonly ImmutableArray<string> BodyNames = ["body"];
 
 		public override object Create(ActorInitializer init) { return new WithMakeAnimation(init, this); }
+
+		void ISnapshotCreationInfo.AddSnapshotInits(Primitives.TypeDictionary inits, Player owner, Func<string, string> saved, Func<string, Actor> savedActor)
+		{
+			if (!inits.Contains<SkipMakeAnimsInit>())
+				inits.Add(new SkipMakeAnimsInit());
+		}
 	}
 
 	public class WithMakeAnimation : INotifyCreated, INotifyDeployTriggered, IResumeAnimations
 	{
-		// The make animation's callback that this trait owns. A caller that passes its own callback resumes it
-		// itself, so this trait leaves External alone.
 		enum PendingMake { None, External, Created, QueueActivity, Deploy, Undeploy }
 
 		readonly WithMakeAnimationInfo info;
@@ -104,10 +108,7 @@ namespace OpenRA.Mods.Common.Traits.Render
 				overlay.Reverse();
 		}
 
-		/// <summary>
-		/// Attaches <paramref name="onComplete"/> again to a make animation that <see cref="Forward"/>
-		/// or Reverse started and that is still playing. Both directions finish the same way.
-		/// </summary>
+		/// <summary>Attaches <paramref name="onComplete"/> again to a make animation that still plays.</summary>
 		public void Continue(Actor self, Action onComplete)
 		{
 			var wsb = wsbs.FirstEnabledConditionalTraitOrDefault();
@@ -115,9 +116,7 @@ namespace OpenRA.Mods.Common.Traits.Render
 				wsb.ContinueCustomAnimation(self, () => MakeFinished(self, onComplete));
 		}
 
-		// Another animation on the same body takes the place of the make animation, and of its callback. A callback
-		// that was lost that way must not come back after a load, so it is attached again only to the make
-		// sequence.
+		// A callback that another animation took the place of does not come back after a load.
 		bool PlaysMakeSequence(Actor self, WithSpriteBody wsb)
 		{
 			return wsb.DefaultAnimation.CurrentSequence?.Name == wsb.NormalizeSequence(self, info.Sequence);
@@ -147,8 +146,6 @@ namespace OpenRA.Mods.Common.Traits.Render
 				overlay.Reverse();
 		}
 
-		// The callback that queues the activity waiting for the reverse animation. It binds the activity waiting
-		// now, so a later Reverse cannot swap it.
 		Action QueuePendingActivity(Actor self)
 		{
 			var activity = pendingActivity;

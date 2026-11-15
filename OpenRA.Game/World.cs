@@ -27,6 +27,13 @@ namespace OpenRA
 {
 	public enum WorldType { Regular, Shellmap, Editor }
 
+	/// <summary>
+	/// Where the actors that a world starts with come from. From its map: the actors that the map places, the first
+	/// units of each player, and the bridges that its tiles show. From a snapshot: none at the start, because the
+	/// snapshot holds every actor.
+	/// </summary>
+	public enum StartupActors { FromMap, FromSnapshot }
+
 	public sealed partial class World : IDisposable
 	{
 		internal readonly TraitDictionary TraitDict = new();
@@ -37,7 +44,8 @@ namespace OpenRA
 		readonly ModData modData;
 		readonly GameSettings gameSettings;
 
-		readonly Queue<Action<World>> frameEndActions = [];
+		// The tasks that wait for the end of the frame. The writer writes a snapshot only while none waits.
+		internal Queue<Action<World>> FrameEndActions { get; } = [];
 
 		public readonly GameSpeed GameSpeed;
 
@@ -173,11 +181,12 @@ namespace OpenRA
 
 		public bool RulesContainTemporaryBlocker { get; }
 
-		bool wasLoadingGameSave;
+		public readonly StartupActors StartupActors;
 
 		internal World(Map map, ModData modData, OrderManager orderManager, WorldType type)
 		{
 			Type = type;
+			StartupActors = orderManager.StartupActors;
 			OrderManager = orderManager;
 			this.modData = modData;
 			Map = map;
@@ -259,10 +268,14 @@ namespace OpenRA
 
 		public void LoadComplete(WorldRenderer wr)
 		{
-			if (IsLoadingGameSave)
+			// A snapshot loads before the first tick, and its reader turns the sounds off while it writes the world.
+			// Each tick of a replay of the orders makes sounds, so they stay off until the replay is complete.
+			if (IsLoadingGameSave || StartupActors == StartupActors.FromSnapshot)
 			{
-				wasLoadingGameSave = true;
-				Game.Sound.DisableAllSounds = true;
+				IsResumingSave = true;
+				if (IsLoadingGameSave)
+					Game.Sound.DisableAllSounds = true;
+
 				foreach (var nsr in WorldActor.TraitsImplementing<INotifyGameLoading>())
 					nsr.GameLoading(this);
 			}
@@ -282,7 +295,7 @@ namespace OpenRA
 					using (new PerfTimer(iwl.GetType().Name + ".WorldLoaded"))
 						iwl.WorldLoaded(this, wr);
 
-				if (trait is ICreateStartupActors creator)
+				if (StartupActors == StartupActors.FromMap && trait is ICreateStartupActors creator)
 					using (new PerfTimer(creator.GetType().Name + ".CreateStartupActors"))
 						creator.CreateStartupActors(this);
 			}
@@ -386,7 +399,7 @@ namespace OpenRA
 			syncedEffects.RemoveAll(e => predicate((IEffect)e));
 		}
 
-		public void AddFrameEndTask(Action<World> a) { frameEndActions.Enqueue(a); }
+		public void AddFrameEndTask(Action<World> a) { FrameEndActions.Enqueue(a); }
 
 		public event Action<Actor> ActorAdded = _ => { };
 		public event Action<Actor> ActorRemoved = _ => { };
@@ -418,7 +431,7 @@ namespace OpenRA
 
 		public void Tick()
 		{
-			if (wasLoadingGameSave && !IsLoadingGameSave)
+			if (IsResumingSave && !IsLoadingGameSave)
 			{
 				foreach (var kv in gameSaveTraitData)
 				{
@@ -434,11 +447,15 @@ namespace OpenRA
 
 				gameSaveTraitData.Clear();
 
+				// The renderers of the shroud and the radar show the cells of the loaded world.
+				foreach (var p in Players)
+					p.Shroud.RaiseAllCellsChanged();
+
 				Game.Sound.DisableAllSounds = false;
 				foreach (var nsr in WorldActor.TraitsImplementing<INotifyGameLoaded>())
 					nsr.GameLoaded(this);
 
-				wasLoadingGameSave = false;
+				IsResumingSave = false;
 			}
 
 			// Allow users to pause the shellmap via the settings menu
@@ -456,8 +473,8 @@ namespace OpenRA
 				effects.DoTimed(e => e.Tick(this), "Effect");
 			}
 
-			while (frameEndActions.Count != 0)
-				frameEndActions.Dequeue()(this);
+			while (FrameEndActions.Count != 0)
+				FrameEndActions.Dequeue()(this);
 		}
 
 		// For things that want to update their render state once per tick, ignoring pause state
@@ -479,10 +496,9 @@ namespace OpenRA
 			return null;
 		}
 
-		uint nextAID = 0;
 		internal uint NextAID()
 		{
-			return nextAID++;
+			return NextActorId++;
 		}
 
 		public int SyncHash()
@@ -598,7 +614,7 @@ namespace OpenRA
 
 			OrderGenerator?.Deactivate();
 
-			frameEndActions.Clear();
+			FrameEndActions.Clear();
 
 			Game.Sound.StopAudio();
 			Game.Sound.StopVideo();
@@ -610,8 +626,8 @@ namespace OpenRA
 				a.Dispose();
 
 			// Actor disposals are done in a FrameEndTask
-			while (frameEndActions.Count != 0)
-				frameEndActions.Dequeue()(this);
+			while (FrameEndActions.Count != 0)
+				FrameEndActions.Dequeue()(this);
 
 			// HACK: The shellmap OrderManager is owned by its world in order to avoid
 			// problems with having multiple OMs active when joining a game lobby from the main menu.

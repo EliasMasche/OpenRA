@@ -86,7 +86,7 @@ namespace OpenRA.Mods.Common.Traits
 		void IPostWorldLoaded.PostWorldLoaded(World w, WorldRenderer wr)
 		{
 			// HACK: Defer fade-in until the GameLoaded notification for game saves
-			if (!w.IsLoadingGameSave)
+			if (!w.IsResumingSave)
 				Fade(Info.Effect, Info.FadeInLength);
 		}
 

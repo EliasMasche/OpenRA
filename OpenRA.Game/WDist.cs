@@ -85,8 +85,8 @@ namespace OpenRA
 				default: return false;
 			}
 
-			// Propagate sign to fractional part
-			if (cell < 0)
+			// Propagate sign to fractional part. The cell part of "-0c512" is zero, so the sign comes from the text.
+			if (components == 2 && s[ranges[0]].TrimStart().StartsWith('-'))
 				subcell = -subcell;
 
 			result = new WDist(1024 * cell + subcell);

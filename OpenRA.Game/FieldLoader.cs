@@ -97,6 +97,8 @@ namespace OpenRA
 				{ typeof(int2[]), ParseInt2Array },
 				{ typeof(Size), ParseSize },
 				{ typeof(int2), ParseInt2 },
+				{ typeof(MPos), (name, type, value) => ParseInt2(name, type, value) is int2 p ? new MPos(p.X, p.Y) : null },
+				{ typeof(PPos), (name, type, value) => ParseInt2(name, type, value) is int2 p ? new PPos(p.X, p.Y) : null },
 				{ typeof(Vector2), ParseVector2 },
 				{ typeof(Vector3), ParseVector3 },
 				{ typeof(Rectangle), ParseRectangle },

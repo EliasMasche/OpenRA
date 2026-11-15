@@ -120,6 +120,8 @@ namespace OpenRA
 
 		public void RemoveActor(Actor a)
 		{
+			// A snapshot can name the traits of a dead actor, and must know whose they are.
+			a.TraitsAfterDisposal = WithInterface<object>(a).ToArray();
 			foreach (var t in traits)
 				t.Value.RemoveActor(a.ActorID);
 		}
