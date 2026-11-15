@@ -162,7 +162,7 @@ namespace OpenRA.Graphics
 			releaseBufferOnCommit = true;
 
 			// Commit data from the buffer to the texture, allowing the buffer to be released and reclaimed by GC.
-			if (Game.Renderer != null)
+			if (Game.Host.Profile.HasDisplay)
 				GetTexture();
 		}
 
@@ -175,7 +175,7 @@ namespace OpenRA.Graphics
 			ReleaseBuffer();
 
 			// We aren't committing data to the GPU, so let's not delete our data.
-			if (Game.Renderer == null)
+			if (!Game.Host.Profile.HasDisplay)
 				return false;
 
 			// Only transfer if the destination has no data that would be lost by overwriting.

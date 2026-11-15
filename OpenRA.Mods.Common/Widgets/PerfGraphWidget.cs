@@ -25,15 +25,16 @@ namespace OpenRA.Mods.Common.Widgets
 		readonly int dotWidth;
 		readonly int nextDotAdvance;
 		readonly Cache<string, int> textWidthCache = null;
-		readonly SpriteFont font = Game.Renderer?.Fonts["Tiny"];
+		readonly SpriteFont font;
 		StringBuilder builder = null;
 
 		public PerfGraphWidget()
 		{
-			// Skip if running format unit test
-			if (font == null)
+			// No fonts without a display. Number formatting does not need them.
+			if (!Game.Host.Profile.HasDisplay)
 				return;
 
+			font = Game.Renderer.Fonts["Tiny"];
 			textWidthCache = new(GetTextWidth);
 			dotWidth = textWidthCache["."];
 			nextDotAdvance = textWidthCache[".."] - dotWidth;

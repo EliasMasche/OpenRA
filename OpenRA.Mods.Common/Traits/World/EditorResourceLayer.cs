@@ -13,7 +13,6 @@ using System;
 using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Linq;
-using OpenRA.Graphics;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Traits
@@ -108,7 +107,7 @@ namespace OpenRA.Mods.Common.Traits
 			Map.Resources.CellEntryChanged += UpdateCell;
 		}
 
-		public void WorldLoaded(World w, WorldRenderer wr)
+		public void WorldLoaded(World w)
 		{
 			var playerResourcesInfo = w.Map.Rules.Actors[SystemActors.Player].TraitInfoOrDefault<PlayerResourcesInfo>();
 			resourceValues = playerResourcesInfo?.ResourceValues ?? FrozenDictionary<string, int>.Empty;

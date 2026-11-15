@@ -61,7 +61,7 @@ namespace OpenRA.Mods.Common.Traits
 	}
 
 	[NotSaved("Draws the map's terrain, which the simulation never reads back.")]
-	public sealed class TerrainRenderer : IRenderTerrain, IWorldLoaded, INotifyActorDisposing, ITiledTerrainRenderer
+	public sealed class TerrainRenderer : IRenderTerrain, IWorldRendererLoaded, INotifyActorDisposing, ITiledTerrainRenderer
 	{
 		readonly Map map;
 		TerrainSpriteLayer spriteLayer;
@@ -80,7 +80,7 @@ namespace OpenRA.Mods.Common.Traits
 			tileCache = new DefaultTileCache(terrainInfo);
 		}
 
-		void IWorldLoaded.WorldLoaded(World world, WorldRenderer wr)
+		void IWorldRendererLoaded.WorldRendererLoaded(World world, WorldRenderer wr)
 		{
 			worldRenderer = wr;
 			spriteLayer = new TerrainSpriteLayer(world, wr, tileCache.MissingTile, BlendMode.Alpha, world.Type != WorldType.Editor);

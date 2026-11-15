@@ -124,7 +124,7 @@ namespace OpenRA.Mods.Common.Traits
 			OrderCount++;
 		}
 
-		public void WorldLoaded(World w, WorldRenderer wr)
+		public void WorldLoaded(World w)
 		{
 			if (!armyGraphDisabled)
 				ArmySamples.Add(ArmyValue);

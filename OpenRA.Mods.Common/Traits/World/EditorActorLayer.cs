@@ -43,7 +43,7 @@ namespace OpenRA.Mods.Common.Traits
 	}
 
 	[NotSaved("Editor world only. A game save never contains it.")]
-	public class EditorActorLayer : IWorldLoaded, ITickRender, IRender, IRadarSignature, ICreatePlayers, IRenderAnnotations, INotifyActorDisposing
+	public class EditorActorLayer : IWorldRendererLoaded, ITickRender, IRender, IRadarSignature, ICreatePlayers, IRenderAnnotations, INotifyActorDisposing
 	{
 		const string ActorPrefix = "Actor";
 		const string PlayerSpawnName = "mpspawn";
@@ -73,7 +73,7 @@ namespace OpenRA.Mods.Common.Traits
 			w.SetWorldOwner(new Player(w, null, worldOwner, playerRandom));
 		}
 
-		public void WorldLoaded(World world, WorldRenderer wr)
+		void IWorldRendererLoaded.WorldRendererLoaded(World world, WorldRenderer wr)
 		{
 			worldRenderer = wr;
 

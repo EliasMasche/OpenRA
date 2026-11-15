@@ -41,6 +41,9 @@ namespace OpenRA.Mods.D2k.Traits
 		public SonicBlastRenderer(SonicBlastRendererInfo info)
 		{
 			Info = info;
+			if (!Game.Host.Profile.HasDisplay)
+				return;
+
 			renderer = Game.Renderer;
 			shader = renderer.CreateShader(new RenderPostProcessPassTexturedShaderBindings("sonic"));
 

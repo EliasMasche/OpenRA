@@ -32,7 +32,7 @@ namespace OpenRA.Mods.Common.LoadScreens
 
 		public virtual void Display()
 		{
-			if (Game.Renderer == null || initialized)
+			if (!Game.Host.Profile.HasDisplay || initialized)
 				return;
 
 			// Draw a black screen

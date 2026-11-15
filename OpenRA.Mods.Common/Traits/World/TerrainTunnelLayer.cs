@@ -10,7 +10,6 @@
 #endregion
 
 using System.Collections.Generic;
-using OpenRA.Graphics;
 using OpenRA.Mods.Common.Pathfinder;
 using OpenRA.Traits;
 
@@ -41,7 +40,7 @@ namespace OpenRA.Mods.Common.Traits
 			terrainIndices.Clear(map.Rules.TerrainInfo.GetTerrainIndex(info.ImpassableTerrainType));
 		}
 
-		public void WorldLoaded(World world, WorldRenderer wr)
+		public void WorldLoaded(World world)
 		{
 			var cellHeight = world.Map.CellHeightStep.Length;
 			foreach (var tti in world.WorldActor.Info.TraitInfos<TerrainTunnelInfo>())

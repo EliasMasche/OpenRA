@@ -117,7 +117,7 @@ namespace OpenRA.Mods.Common.Traits
 		public override object Create(ActorInitializer init) { return new MapOptions(this); }
 	}
 
-	public class MapOptions : INotifyCreated, IWorldLoaded
+	public class MapOptions : INotifyCreated, IWorldRendererLoaded
 	{
 		readonly MapOptionsInfo info;
 
@@ -138,7 +138,7 @@ namespace OpenRA.Mods.Common.Traits
 				.OptionOrDefault("techlevel", info.TechLevel);
 		}
 
-		void IWorldLoaded.WorldLoaded(World w, WorldRenderer wr)
+		void IWorldRendererLoaded.WorldRendererLoaded(World w, WorldRenderer wr)
 		{
 			if (info.ViewportHeight.HasValue)
 			{

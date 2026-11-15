@@ -60,7 +60,7 @@ namespace OpenRA
 		public ExternalMods()
 		{
 			// Don't try to load mod icons if we don't have a texture to put them in
-			if (Game.Renderer != null)
+			if (Game.RendererCreated)
 				sheetBuilder = new SheetBuilder(SheetType.BGRA, CreateSheet);
 
 			// Several types of support directory types are available, depending on

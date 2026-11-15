@@ -48,6 +48,12 @@ namespace OpenRA
 		readonly Dictionary<string, ISound> currentNotifications = [];
 		public bool DummyEngine { get; }
 
+		public Sound(ISoundEngine soundEngine)
+		{
+			this.soundEngine = soundEngine;
+			DummyEngine = soundEngine.Dummy;
+		}
+
 		public Sound(IPlatform platform, SoundSettings soundSettings)
 		{
 			soundEngine = platform.CreateSound(soundSettings.Device);

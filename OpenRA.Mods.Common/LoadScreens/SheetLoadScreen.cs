@@ -38,7 +38,7 @@ namespace OpenRA.Mods.Common.LoadScreens
 		public override void Display()
 		{
 			// Limit load screens to at most 5 FPS
-			if (Game.Renderer == null || (lastUpdate != null && lastUpdate.Elapsed.TotalSeconds < 0.2))
+			if (!Game.Host.Profile.HasDisplay || (lastUpdate != null && lastUpdate.Elapsed.TotalSeconds < 0.2))
 				return;
 
 			// Start the timer on the first render

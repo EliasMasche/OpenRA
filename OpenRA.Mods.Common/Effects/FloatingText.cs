@@ -31,7 +31,9 @@ namespace OpenRA.Mods.Common.Effects
 
 		public FloatingText(WPos pos, Color color, string text, int duration)
 		{
-			font = Game.Renderer.Fonts["TinyBold"];
+			if (Game.Host.Profile.HasDisplay)
+				font = Game.Renderer.Fonts["TinyBold"];
+
 			this.pos = pos;
 			this.color = color;
 			this.text = text;

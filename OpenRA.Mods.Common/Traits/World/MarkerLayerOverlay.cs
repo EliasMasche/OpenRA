@@ -150,7 +150,7 @@ namespace OpenRA.Mods.Common.Traits
 			mapCenter = GetMapCenterWPos();
 		}
 
-		public void WorldLoaded(World w, WorldRenderer wr)
+		public void WorldLoaded(World w)
 		{
 			try
 			{

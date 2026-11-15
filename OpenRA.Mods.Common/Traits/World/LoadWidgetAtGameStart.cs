@@ -37,7 +37,7 @@ namespace OpenRA.Mods.Common.Traits
 		public override object Create(ActorInitializer init) { return new LoadWidgetAtGameStart(this); }
 	}
 
-	public class LoadWidgetAtGameStart : IWorldLoaded, INotifyGameLoading, INotifyGameLoaded
+	public class LoadWidgetAtGameStart : IWorldRendererLoaded, INotifyGameLoading, INotifyGameLoaded
 	{
 		readonly LoadWidgetAtGameStartInfo info;
 		Widget root;
@@ -49,6 +49,10 @@ namespace OpenRA.Mods.Common.Traits
 
 		void INotifyGameLoading.GameLoading(World world)
 		{
+			// A world without a display has no loading screen.
+			if (!Game.Host.Profile.HasDisplay)
+				return;
+
 			// Clear any existing widget state
 			if (info.ClearRoot)
 				Ui.ResetAll();
@@ -59,7 +63,7 @@ namespace OpenRA.Mods.Common.Traits
 			});
 		}
 
-		void IWorldLoaded.WorldLoaded(World world, WorldRenderer wr)
+		void IWorldRendererLoaded.WorldRendererLoaded(World world, WorldRenderer wr)
 		{
 			if (!world.IsResumingSave && info.ClearRoot)
 				Ui.ResetAll();
@@ -76,6 +80,16 @@ namespace OpenRA.Mods.Common.Traits
 
 		void INotifyGameLoaded.GameLoaded(World world)
 		{
+			// A world without a display has no loading screen to close and no menu to open. Its game continues, as it
+			// does with a display after the player closes the menu. A game that runs already gets no order.
+			if (!Game.Host.Profile.HasDisplay)
+			{
+				if (!world.IsReplay && world.PredictedPaused)
+					world.SetPauseState(false);
+
+				return;
+			}
+
 			Ui.CloseWindow();
 			root.IsVisible = () => true;
 

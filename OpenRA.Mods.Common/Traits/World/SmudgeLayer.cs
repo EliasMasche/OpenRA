@@ -86,7 +86,7 @@ namespace OpenRA.Mods.Common.Traits
 	}
 
 	[CosmeticState("The cosmetic random picks the variant of each smudge, and the simulation never reads the layer.")]
-	public class SmudgeLayer : IRenderOverlay, IWorldLoaded, ITickRender, INotifyActorDisposing
+	public class SmudgeLayer : IRenderOverlay, IWorldRendererLoaded, ITickRender, INotifyActorDisposing
 	{
 		struct Smudge
 		{
@@ -123,7 +123,7 @@ namespace OpenRA.Mods.Common.Traits
 			world.Map.Height.CellEntryChanged += RemoveUnacceptableSmudgeOnCellChange;
 		}
 
-		public void WorldLoaded(World w, WorldRenderer wr)
+		void IWorldRendererLoaded.WorldRendererLoaded(World w, WorldRenderer wr)
 		{
 			var sprites = smudges.Values.SelectMany(v => Exts.MakeArray(v.Length, x => v.GetSprite(x))).ToList();
 			var sheet = sprites[0].Sheet;

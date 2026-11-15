@@ -13,7 +13,6 @@ using System;
 using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Linq;
-using OpenRA.Graphics;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Traits
@@ -123,7 +122,7 @@ namespace OpenRA.Mods.Common.Traits
 				kv => kv.Key);
 		}
 
-		protected virtual void WorldLoaded(World w, WorldRenderer wr)
+		protected virtual void WorldLoaded(World w)
 		{
 			foreach (var cell in w.Map.AllCells)
 			{
@@ -164,7 +163,7 @@ namespace OpenRA.Mods.Common.Traits
 			}
 		}
 
-		void IWorldLoaded.WorldLoaded(World w, WorldRenderer wr) { WorldLoaded(w, wr); }
+		void IWorldLoaded.WorldLoaded(World w) { WorldLoaded(w); }
 
 		protected virtual bool AllowResourceAt(string resourceType, CPos cell)
 		{

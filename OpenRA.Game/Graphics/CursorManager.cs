@@ -112,7 +112,7 @@ namespace OpenRA.Graphics
 			}
 
 			// Allow the utility to create a cursor manager.
-			if (Game.Renderer != null)
+			if (Game.Host.Profile.HasDisplay)
 			{
 				CreateOrUpdateHardwareCursors();
 				Update();

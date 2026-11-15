@@ -13,7 +13,6 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.IO;
 using System.Linq;
-using OpenRA.Graphics;
 using OpenRA.Mods.Common.Terrain;
 using OpenRA.Traits;
 
@@ -44,7 +43,7 @@ namespace OpenRA.Mods.Common.Traits
 				throw new InvalidDataException("LegacyBridgeLayer requires a template-based tileset.");
 		}
 
-		public void WorldLoaded(World w, WorldRenderer wr)
+		public void WorldLoaded(World w)
 		{
 			bridges = new CellLayer<Bridge>(w.Map);
 

@@ -42,7 +42,7 @@ namespace OpenRA.Mods.Common.Traits
 		}
 	}
 
-	public class BuildableTerrainOverlay : IRenderAboveWorld, IWorldLoaded, INotifyActorDisposing
+	public class BuildableTerrainOverlay : IRenderAboveWorld, IWorldRendererLoaded, INotifyActorDisposing
 	{
 		readonly BuildableTerrainOverlayInfo info;
 		readonly World world;
@@ -65,7 +65,7 @@ namespace OpenRA.Mods.Common.Traits
 			disabledSpriteScale = spriteSequence.Scale;
 		}
 
-		void IWorldLoaded.WorldLoaded(World w, WorldRenderer wr)
+		void IWorldRendererLoaded.WorldRendererLoaded(World w, WorldRenderer wr)
 		{
 			render = new TerrainSpriteLayer(w, wr, disabledSprite, BlendMode.Alpha, false);
 

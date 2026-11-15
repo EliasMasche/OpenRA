@@ -77,13 +77,16 @@ namespace OpenRA.Mods.Cnc.Traits
 
 		public ModelRenderer(ModelRendererInfo info, Actor self)
 		{
+			ModelCache = self.Trait<IModelCache>();
+			sheetSize = info.RenderBufferSize;
+
+			if (!Game.Host.Profile.HasDisplay)
+				return;
+
 			renderer = Game.Renderer;
 			shader = renderer.CreateShader(new ModelShaderBindings());
 			renderer.WorldRenderers = renderer.WorldRenderers.Append(this).ToArray();
 
-			ModelCache = self.Trait<IModelCache>();
-
-			sheetSize = info.RenderBufferSize;
 			var a = 2f / sheetSize;
 			var view = new[]
 			{
@@ -389,7 +392,8 @@ namespace OpenRA.Mods.Cnc.Traits
 
 			mappedBuffers.Clear();
 			unmappedBuffers.Clear();
-			renderer.WorldRenderers = renderer.WorldRenderers.Where(r => r != this).ToArray();
+			if (Game.Host.Profile.HasDisplay)
+				renderer.WorldRenderers = renderer.WorldRenderers.Where(r => r != this).ToArray();
 		}
 
 		void INotifyActorDisposing.Disposing(Actor a)

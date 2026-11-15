@@ -52,7 +52,7 @@ namespace OpenRA.Mods.Cnc.Traits
 	}
 
 	[NotSaved("Animates resources on screen and draws only from the cosmetic random.")]
-	public class WithResourceAnimation : IWorldLoaded, ITick
+	public class WithResourceAnimation : IWorldRendererLoaded, ITick
 	{
 		readonly WithResourceAnimationInfo info;
 		readonly World world;
@@ -70,7 +70,7 @@ namespace OpenRA.Mods.Cnc.Traits
 			ticks = Common.Util.RandomInRange(Game.CosmeticRandom, info.Interval);
 		}
 
-		void IWorldLoaded.WorldLoaded(World w, WorldRenderer wr)
+		void IWorldRendererLoaded.WorldRendererLoaded(World w, WorldRenderer wr)
 		{
 			worldRenderer = wr;
 
@@ -80,6 +80,10 @@ namespace OpenRA.Mods.Cnc.Traits
 
 		void ITick.Tick(Actor self)
 		{
+			// Animates the cells in view, so a world without a display skips it.
+			if (!Game.Host.Profile.HasDisplay)
+				return;
+
 			if (--ticks > 0)
 				return;
 

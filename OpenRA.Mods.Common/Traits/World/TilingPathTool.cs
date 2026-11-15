@@ -39,7 +39,7 @@ namespace OpenRA.Mods.Common.Traits
 		}
 	}
 
-	public sealed class TilingPathTool : IEditorTool, IRenderAnnotations, INotifyActorDisposing, IWorldLoaded
+	public sealed class TilingPathTool : IEditorTool, IRenderAnnotations, INotifyActorDisposing, IWorldRendererLoaded
 	{
 		[FluentReference]
 		const string Label = "label-tool-tiling-path";
@@ -399,7 +399,7 @@ namespace OpenRA.Mods.Common.Traits
 			VerifyTypes(InnerType);
 		}
 
-		public void WorldLoaded(World w, WorldRenderer wr)
+		void IWorldRendererLoaded.WorldRendererLoaded(World w, WorldRenderer wr)
 		{
 			WorldRenderer = wr;
 		}

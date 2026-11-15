@@ -47,7 +47,7 @@ namespace OpenRA.Mods.Common.Traits
 		DeveloperMode devMode;
 		World world;
 
-		void IWorldLoaded.WorldLoaded(World w, WorldRenderer wr)
+		void IWorldLoaded.WorldLoaded(World w)
 		{
 			world = w;
 			var console = w.WorldActor.TraitOrDefault<ChatCommands>();

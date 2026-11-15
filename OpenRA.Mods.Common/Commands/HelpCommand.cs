@@ -11,7 +11,6 @@
 
 using System.Collections.Generic;
 using System.Linq;
-using OpenRA.Graphics;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Commands
@@ -42,7 +41,7 @@ namespace OpenRA.Mods.Common.Commands
 			helpDescriptions = [];
 		}
 
-		public void WorldLoaded(World w, WorldRenderer wr)
+		public void WorldLoaded(World w)
 		{
 			world = w;
 			console = world.WorldActor.Trait<ChatCommands>();

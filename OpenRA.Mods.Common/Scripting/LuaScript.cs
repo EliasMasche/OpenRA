@@ -28,10 +28,11 @@ namespace OpenRA.Mods.Common.Scripting
 		public override object Create(ActorInitializer init) { return new LuaScript(this); }
 	}
 
-	public class LuaScript : ITick, IWorldLoaded, INotifyActorDisposing
+	public class LuaScript : ITick, IWorldRendererLoaded, IWorldLoaded, INotifyActorDisposing
 	{
 		readonly LuaScriptInfo info;
 		public ScriptContext Context;
+		WorldRenderer worldRenderer;
 		bool disposed;
 
 		public LuaScript(LuaScriptInfo info)
@@ -39,7 +40,12 @@ namespace OpenRA.Mods.Common.Scripting
 			this.info = info;
 		}
 
-		void IWorldLoaded.WorldLoaded(World world, WorldRenderer worldRenderer)
+		void IWorldRendererLoaded.WorldRendererLoaded(World world, WorldRenderer wr)
+		{
+			worldRenderer = wr;
+		}
+
+		void IWorldLoaded.WorldLoaded(World world)
 		{
 			var scripts = info.Scripts ?? Enumerable.Empty<string>();
 			Context = new ScriptContext(world, worldRenderer, scripts);

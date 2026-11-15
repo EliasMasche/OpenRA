@@ -59,8 +59,8 @@ namespace OpenRA.Mods.Common
 			if (!Game.Settings.Game.EnableDiscordService)
 				return;
 
-			// HACK: Prevent service from starting when launching the utility or server.
-			if (Game.Renderer == null)
+			// Discord shows what a player sees on screen, so a host without a display never starts it.
+			if (!Game.Host.Profile.HasDisplay)
 				return;
 
 			client = new DiscordRpcClient(ApplicationId, autoEvents: true)

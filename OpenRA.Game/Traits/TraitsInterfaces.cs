@@ -381,8 +381,8 @@ namespace OpenRA.Traits
 	[RequireExplicitImplementation]
 	public interface INotifySelection { void SelectionChanged(); }
 
-	public interface IWorldLoaded { void WorldLoaded(World w, WorldRenderer wr); }
-	public interface IPostWorldLoaded { void PostWorldLoaded(World w, WorldRenderer wr); }
+	public interface IWorldLoaded { void WorldLoaded(World w); }
+	public interface IPostWorldLoaded { void PostWorldLoaded(World w); }
 
 	/// <summary>
 	/// Creates the actors that a world starts with, right after the WorldLoaded of the same trait, only when the world
@@ -390,6 +390,11 @@ namespace OpenRA.Traits
 	/// </summary>
 	[RequireExplicitImplementation]
 	public interface ICreateStartupActors { void CreateStartupActors(World w); }
+
+	/// <summary>Receives the renderer, immediately before the WorldLoaded of the same trait. Only a host with a display calls it.</summary>
+	[RequireExplicitImplementation]
+	public interface IWorldRendererLoaded { void WorldRendererLoaded(World w, WorldRenderer wr); }
+
 	public interface INotifyGameLoading { void GameLoading(World w); }
 	public interface INotifyGameLoaded { void GameLoaded(World w); }
 	public interface INotifyGameSaved { void GameSaved(World w, bool isAutoSave); }

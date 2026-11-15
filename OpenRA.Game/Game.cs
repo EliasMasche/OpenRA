@@ -20,10 +20,12 @@ using System.Net;
 using System.Runtime;
 using System.Threading;
 using OpenRA.Graphics;
+using OpenRA.Hosting;
 using OpenRA.Network;
 using OpenRA.Primitives;
 using OpenRA.Server;
 using OpenRA.Support;
+using OpenRA.Traits;
 using OpenRA.Widgets;
 
 namespace OpenRA
@@ -52,7 +54,34 @@ namespace OpenRA
 
 		public static MersenneTwister CosmeticRandom = new(); // not synced
 
-		public static Renderer Renderer;
+		static GameHost host;
+
+		/// <summary>
+		/// The portions of the engine this process runs.
+		/// Set once, before anything reads <see cref="RunTime"/>.
+		/// </summary>
+		public static GameHost Host => host ?? throw new InvalidOperationException("Game.Host is not created. Call Game.InitializeHost first.");
+
+		static Renderer renderer;
+
+		/// <summary>Throws <see cref="HostPortionException"/> when the host profile has no display.</summary>
+		public static Renderer Renderer
+		{
+			get
+			{
+				if (renderer != null)
+					return renderer;
+
+				if (!Host.Profile.HasDisplay)
+					throw new HostPortionException(Host.Profile, "there is no renderer without a display.");
+
+				throw new InvalidOperationException("The renderer is not created yet.");
+			}
+		}
+
+		// False until the platform loop in Initialize builds the renderer.
+		internal static bool RendererCreated => renderer != null;
+
 		public static Sound Sound;
 
 		public static string EngineVersion { get; private set; }
@@ -127,9 +156,69 @@ namespace OpenRA
 			});
 		}
 
-		// More accurate replacement for Environment.TickCount
-		static readonly Stopwatch Stopwatch = Stopwatch.StartNew();
-		public static long RunTime => Stopwatch.ElapsedMilliseconds;
+		public static long RunTime => Host.Clock.Milliseconds;
+
+		public static void InitializeHost(HostProfile profile)
+		{
+			if (host != null)
+				throw new InvalidOperationException($"Game.Host is already created with the '{host.Profile.Name}' profile.");
+
+			host = GameHost.Create(profile);
+
+			// The platform loop in Initialize opens a device, together with the renderer.
+			if (profile.Audio == AudioPortion.Silent)
+				Sound = new Sound(new SilentSoundEngine());
+		}
+
+		// The presentation of a host with a window: the world renderer, the cursor and the UI focus. It also hands
+		// the current world renderer to each loading trait.
+		internal sealed class WindowPresentation : IPresentation, IWorldPresentation
+		{
+			public void DetachWorld()
+			{
+				worldRenderer?.Dispose();
+				Cursor.SetCursor(null);
+			}
+
+			public void PrepareMap(Map map)
+			{
+				// The depth buffer needs to be initialized with enough range to cover:
+				//  - the height of the screen
+				//  - the z-offset of tiles from MaxTerrainHeight below the bottom of the screen (pushed into view)
+				//  - additional z-offset from actors on top of MaxTerrainHeight terrain
+				//  - a small margin so that tiles rendered partially above the top edge of the screen aren't pushed behind the clip plane
+				// We need an offset of mapGrid.MaximumTerrainHeight * mapGrid.TileSize.Height / 2 to cover the terrain height
+				// and choose to use mapGrid.MaximumTerrainHeight * mapGrid.TileSize.Height / 4 for each of the actor and top-edge cases
+				var margin = 0;
+				if (map.Grid.EnableDepthBuffer)
+					margin = map.Rules.TerrainInfo.TileSize.Height * map.Grid.MaximumTerrainHeight;
+
+				Renderer.SetDepthMargin(margin);
+			}
+
+			public IWorldPresentation AttachWorld(World world)
+			{
+				worldRenderer = new WorldRenderer(ModData, world);
+				return this;
+			}
+
+			public void Attach(World world, IWorldRendererLoaded trait)
+			{
+				trait.WorldRendererLoaded(world, worldRenderer);
+			}
+
+			public void BeforeStart()
+			{
+				Ui.MouseFocusWidget = null;
+				Ui.KeyboardFocusWidget = null;
+			}
+
+			public void AfterStart()
+			{
+				worldRenderer.RefreshPalette();
+				Cursor.SetCursor(ChromeMetrics.Get<string>("DefaultCursor"));
+			}
+		}
 
 		public static int RenderFrame = 0;
 		public static int NetFrameNumber => OrderManager.NetFrameNumber;
@@ -195,40 +284,28 @@ namespace OpenRA
 
 		internal static void StartGame(Map map, WorldType type)
 		{
-			// Dispose of the old world before creating a new one.
-			worldRenderer?.Dispose();
+			var presentation = Host.Presentation;
 
-			Cursor.SetCursor(null);
+			// Dispose of the old world before creating a new one.
+			presentation.DetachWorld();
 			BeforeGameStart();
 
 			using (new PerfTimer("NewWorld"))
 			{
 				ModData.PrepareMap(map);
-
-				// The depth buffer needs to be initialized with enough range to cover:
-				//  - the height of the screen
-				//  - the z-offset of tiles from MaxTerrainHeight below the bottom of the screen (pushed into view)
-				//  - additional z-offset from actors on top of MaxTerrainHeight terrain
-				//  - a small margin so that tiles rendered partially above the top edge of the screen aren't pushed behind the clip plane
-				// We need an offset of mapGrid.MaximumTerrainHeight * mapGrid.TileSize.Height / 2 to cover the terrain height
-				// and choose to use mapGrid.MaximumTerrainHeight * mapGrid.TileSize.Height / 4 for each of the actor and top-edge cases
-				var margin = 0;
-				if (map.Grid.EnableDepthBuffer)
-					margin = map.Rules.TerrainInfo.TileSize.Height * map.Grid.MaximumTerrainHeight;
-
-				Renderer.SetDepthMargin(margin);
+				presentation.PrepareMap(map);
 				OrderManager.World = new World(map, ModData, OrderManager, type);
 			}
 
 			OrderManager.World.GameOver += FinishBenchmark;
 
-			worldRenderer = new WorldRenderer(ModData, OrderManager.World);
+			var worldPresentation = presentation.AttachWorld(OrderManager.World);
 
 			// Proactively collect memory during loading to reduce peak memory.
 			GC.Collect();
 
 			using (new PerfTimer("LoadComplete"))
-				OrderManager.World.LoadComplete(worldRenderer);
+				OrderManager.World.LoadComplete(worldPresentation);
 
 			// Proactively collect memory during loading to reduce peak memory.
 			GC.Collect();
@@ -236,12 +313,9 @@ namespace OpenRA
 			if (OrderManager.GameStarted)
 				return;
 
-			Ui.MouseFocusWidget = null;
-			Ui.KeyboardFocusWidget = null;
-
+			presentation.BeforeStart();
 			OrderManager.StartGame();
-			worldRenderer.RefreshPalette();
-			Cursor.SetCursor(ChromeMetrics.Get<string>("DefaultCursor"));
+			presentation.AfterStart();
 
 			// Now loading is completed, now is the ideal time to run a GC and compact the LOH.
 			// - All the temporary garbage created during loading can be collected.
@@ -255,7 +329,7 @@ namespace OpenRA
 
 			// PostLoadComplete is designed for anything that should trigger at the very end of loading.
 			// e.g. audio notifications that the game is starting.
-			OrderManager.World.PostLoadComplete(worldRenderer);
+			OrderManager.World.PostLoadComplete();
 
 			AfterGameStart();
 		}
@@ -343,6 +417,12 @@ namespace OpenRA
 
 		static void Initialize(Arguments args)
 		{
+			var profile = HostProfile.FromName(args.GetValue("Game.Host", HostProfile.Interactive.Name));
+			if (profile.Runner != RunnerPortion.Client)
+				throw new HostPortionException(profile, "the game client runs only profiles with the client runner.");
+
+			InitializeHost(profile);
+
 			var engineDirArg = args.GetValue("Engine.EngineDir", null);
 			if (!string.IsNullOrEmpty(engineDirArg))
 				Platform.OverrideEngineDir(engineDirArg);
@@ -439,7 +519,7 @@ namespace OpenRA
 				try
 				{
 					var platform = CreatePlatform(p);
-					Renderer = new Renderer(platform, Settings.Graphics, manifest.RendererConstants.VertexBatchSize);
+					renderer = new Renderer(platform, Settings.Graphics, manifest.RendererConstants.VertexBatchSize);
 					Sound = new Sound(platform, Settings.Sound);
 
 					break;
@@ -449,7 +529,7 @@ namespace OpenRA
 					Log.Write("graphics", $"{e}");
 					Console.WriteLine("Renderer initialization failed. Check graphics.log for details.");
 
-					Renderer?.Dispose();
+					renderer?.Dispose();
 
 					Sound?.Dispose();
 				}

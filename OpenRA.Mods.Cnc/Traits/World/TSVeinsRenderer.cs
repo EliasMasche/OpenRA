@@ -112,7 +112,7 @@ namespace OpenRA.Mods.Cnc.Traits
 	}
 
 	[NotSaved("Rendering only. The simulation never reads it.")]
-	public class TSVeinsRenderer : IResourceRenderer, IWorldLoaded, IRenderOverlay, ITickRender, INotifyActorDisposing, IRadarTerrainLayer
+	public class TSVeinsRenderer : IResourceRenderer, IWorldRendererLoaded, IRenderOverlay, ITickRender, INotifyActorDisposing, IRadarTerrainLayer
 	{
 		[Flags]
 		enum Adjacency : byte
@@ -190,7 +190,7 @@ namespace OpenRA.Mods.Cnc.Traits
 				dirty.Add(cell);
 		}
 
-		void IWorldLoaded.WorldLoaded(World w, WorldRenderer wr)
+		void IWorldRendererLoaded.WorldRendererLoaded(World w, WorldRenderer wr)
 		{
 			// Cache locations of veinhole actors
 			// TODO: Add support for monitoring actors placed in the map editor!

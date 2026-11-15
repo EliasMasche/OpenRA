@@ -34,6 +34,9 @@ namespace OpenRA.Mods.Cnc.Traits
 
 		public ChronoVortexRenderer(Actor self)
 		{
+			if (!Game.Host.Profile.HasDisplay)
+				return;
+
 			renderer = Game.Renderer;
 			shader = renderer.CreateShader(new RenderPostProcessPassTexturedShaderBindings("vortex"));
 

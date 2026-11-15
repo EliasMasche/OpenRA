@@ -13,7 +13,6 @@ using System;
 using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Linq;
-using OpenRA.Graphics;
 using OpenRA.Mods.Common.Activities;
 using OpenRA.Traits;
 
@@ -111,7 +110,7 @@ namespace OpenRA.Mods.Common.Traits
 			claimLayer = world.WorldActor.TraitOrDefault<ResourceClaimLayer>();
 		}
 
-		public void WorldLoaded(World w, WorldRenderer wr)
+		public void WorldLoaded(World w)
 		{
 			if (resourceLayer != null)
 			{

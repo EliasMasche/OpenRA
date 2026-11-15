@@ -131,7 +131,7 @@ namespace OpenRA.Mods.Common.Traits
 			TimeLimit *= 60 * ticksPerSecond;
 		}
 
-		void IWorldLoaded.WorldLoaded(World w, OpenRA.Graphics.WorldRenderer wr)
+		void IWorldLoaded.WorldLoaded(World w)
 		{
 			if (string.IsNullOrWhiteSpace(info.CountdownLabel) || string.IsNullOrWhiteSpace(info.CountdownText))
 				return;

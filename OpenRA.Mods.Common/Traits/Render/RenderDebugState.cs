@@ -40,7 +40,8 @@ namespace OpenRA.Mods.Common.Traits.Render
 			var yOffset = buildingInfo?.Dimensions.Y ?? 1;
 			offset = new WVec(0, 512 * yOffset, 0);
 
-			font = Game.Renderer.Fonts[info.Font];
+			if (Game.Host.Profile.HasDisplay)
+				font = Game.Renderer.Fonts[info.Font];
 
 			debugVis = self.World.WorldActor.TraitOrDefault<DebugVisualizations>();
 		}

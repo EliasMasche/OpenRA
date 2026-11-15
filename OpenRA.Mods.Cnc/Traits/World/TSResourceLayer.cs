@@ -13,7 +13,6 @@ using System;
 using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Linq;
-using OpenRA.Graphics;
 using OpenRA.Mods.Common.Traits;
 using OpenRA.Traits;
 
@@ -42,7 +41,7 @@ namespace OpenRA.Mods.Cnc.Traits
 			this.info = info;
 		}
 
-		protected override void WorldLoaded(World w, WorldRenderer wr)
+		protected override void WorldLoaded(World w)
 		{
 			// Cache locations of veinhole actors
 			w.ActorAdded += ActorAddedToWorld;
@@ -50,7 +49,7 @@ namespace OpenRA.Mods.Cnc.Traits
 			foreach (var a in w.Actors)
 				ActorAddedToWorld(a);
 
-			base.WorldLoaded(w, wr);
+			base.WorldLoaded(w);
 		}
 
 		void ActorAddedToWorld(Actor a)

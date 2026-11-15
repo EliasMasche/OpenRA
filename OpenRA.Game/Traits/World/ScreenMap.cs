@@ -37,7 +37,7 @@ namespace OpenRA.Traits
 		public override object Create(ActorInitializer init) { return new ScreenMap(init.World, this); }
 	}
 
-	public class ScreenMap : IWorldLoaded
+	public class ScreenMap : IWorldRendererLoaded
 	{
 		static readonly IEnumerable<FrozenActor> NoFrozenActors = [];
 		readonly Func<FrozenActor, bool> frozenActorIsValid = fa => fa.IsValid;
@@ -79,7 +79,7 @@ namespace OpenRA.Traits
 			removeFrozenActors = new Cache<Player, HashSet<FrozenActor>>(_ => []);
 		}
 
-		public void WorldLoaded(World w, WorldRenderer wr) { worldRenderer = wr; }
+		void IWorldRendererLoaded.WorldRendererLoaded(World w, WorldRenderer wr) { worldRenderer = wr; }
 
 		public void AddOrUpdate(Player viewer, FrozenActor fa)
 		{
@@ -107,6 +107,9 @@ namespace OpenRA.Traits
 
 		public void Add(IEffect effect, WPos position, Size size)
 		{
+			if (!Game.Host.Profile.HasDisplay)
+				return;
+
 			var screenPos = worldRenderer.ScreenPxPosition(position);
 			var screenWidth = Math.Abs(size.Width);
 			var screenHeight = Math.Abs(size.Height);

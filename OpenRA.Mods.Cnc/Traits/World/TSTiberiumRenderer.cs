@@ -68,14 +68,14 @@ namespace OpenRA.Mods.Cnc.Traits
 			}
 		}
 
-		protected override void WorldLoaded(World w, WorldRenderer wr)
+		protected override void WorldRendererLoaded(World w, WorldRenderer wr)
 		{
 			LoadVariants(info.Ramp1Sequences, ramp1Variants);
 			LoadVariants(info.Ramp2Sequences, ramp2Variants);
 			LoadVariants(info.Ramp3Sequences, ramp3Variants);
 			LoadVariants(info.Ramp4Sequences, ramp4Variants);
 
-			base.WorldLoaded(w, wr);
+			base.WorldRendererLoaded(w, wr);
 		}
 
 		protected override ISpriteSequence ChooseVariant(string resourceType, CPos cell)

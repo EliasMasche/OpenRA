@@ -59,11 +59,13 @@ namespace OpenRA.Mods.Common.Traits
 
 		public CellTriggerOverlay(CellTriggerOverlayInfo info)
 		{
-			font = Game.Renderer.Fonts[info.Font];
+			if (Game.Host.Profile.HasDisplay)
+				font = Game.Renderer.Fonts[info.Font];
+
 			color = info.Color;
 		}
 
-		void IWorldLoaded.WorldLoaded(World w, WorldRenderer wr)
+		void IWorldLoaded.WorldLoaded(World w)
 		{
 			world = w;
 			var console = w.WorldActor.TraitOrDefault<ChatCommands>();

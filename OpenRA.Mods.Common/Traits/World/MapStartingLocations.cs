@@ -110,7 +110,7 @@ namespace OpenRA.Mods.Common.Traits
 		}
 	}
 
-	public class MapStartingLocations : IWorldLoaded, INotifyCreated, IAssignSpawnPoints
+	public class MapStartingLocations : IWorldLoaded, IWorldRendererLoaded, INotifyCreated, IAssignSpawnPoints
 	{
 		readonly MapStartingLocationsInfo info;
 
@@ -176,15 +176,18 @@ namespace OpenRA.Mods.Common.Traits
 			return 0;
 		}
 
-		void IWorldLoaded.WorldLoaded(World world, WorldRenderer wr)
+		void IWorldRendererLoaded.WorldRendererLoaded(World world, WorldRenderer wr)
+		{
+			if (world.LocalPlayer is { Playable: true } localPlayer)
+				wr.Viewport.Center(world.Map.CenterOfCell(localPlayer.HomeLocation));
+		}
+
+		void IWorldLoaded.WorldLoaded(World world)
 		{
 			foreach (var p in world.Players)
 			{
 				if (!p.Playable)
 					continue;
-
-				if (p == world.LocalPlayer)
-					wr.Viewport.Center(world.Map.CenterOfCell(p.HomeLocation));
 
 				var cells = Shroud.ProjectedCellsInRange(world.Map, p.HomeLocation, info.InitialExploreRange)
 					.ToList();

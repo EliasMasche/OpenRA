@@ -10,7 +10,6 @@
 #endregion
 
 using System.Linq;
-using OpenRA.Graphics;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Traits
@@ -34,7 +33,7 @@ namespace OpenRA.Mods.Common.Traits
 			this.info = info;
 		}
 
-		public void WorldLoaded(World w, WorldRenderer wr)
+		public void WorldLoaded(World w)
 		{
 			var tileType = w.Map.Rules.TerrainInfo.GetTerrainIndex(info.TerrainType);
 

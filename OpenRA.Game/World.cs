@@ -17,6 +17,7 @@ using System.Linq;
 using OpenRA.Effects;
 using OpenRA.FileFormats;
 using OpenRA.Graphics;
+using OpenRA.Hosting;
 using OpenRA.Network;
 using OpenRA.Orders;
 using OpenRA.Primitives;
@@ -266,7 +267,7 @@ namespace OpenRA
 			ScreenMap.Remove(self);
 		}
 
-		public void LoadComplete(WorldRenderer wr)
+		public void LoadComplete(IWorldPresentation presentation)
 		{
 			// A snapshot loads before the first tick, and its reader turns the sounds off while it writes the world.
 			// Each tick of a replay of the orders makes sounds, so they stay off until the replay is complete.
@@ -281,29 +282,12 @@ namespace OpenRA
 			}
 
 			// ScreenMap must be initialized before anything else
-			using (new PerfTimer("ScreenMap.WorldLoaded"))
-				ScreenMap.WorldLoaded(this, wr);
+			using (new PerfTimer("ScreenMap.WorldRendererLoaded"))
+				presentation.Attach(this, ScreenMap);
 
-			// One pass in construct order, so a trait creates its startup actors right after its own WorldLoaded.
-			foreach (var trait in WorldActor.TraitsImplementing<object>())
-			{
-				// These have already been initialized
-				if (trait == ScreenMap)
-					continue;
-
-				if (trait is IWorldLoaded iwl)
-					using (new PerfTimer(iwl.GetType().Name + ".WorldLoaded"))
-						iwl.WorldLoaded(this, wr);
-
-				if (StartupActors == StartupActors.FromMap && trait is ICreateStartupActors creator)
-					using (new PerfTimer(creator.GetType().Name + ".CreateStartupActors"))
-						creator.CreateStartupActors(this);
-			}
-
+			NotifyWorldLoaded(WorldActor, presentation);
 			foreach (var p in Players)
-				foreach (var iwl in p.PlayerActor.TraitsImplementing<IWorldLoaded>())
-					using (new PerfTimer(iwl.GetType().Name + ".WorldLoaded"))
-						iwl.WorldLoaded(this, wr);
+				NotifyWorldLoaded(p.PlayerActor, presentation);
 
 			foreach (var player in Players)
 				gameInfo.AddPlayer(player, OrderManager.LobbyInfo);
@@ -316,16 +300,40 @@ namespace OpenRA
 				nc.Recorder.Metadata = new ReplayMetadata(gameInfo);
 		}
 
-		public void PostLoadComplete(WorldRenderer wr)
+		// One pass over the actor's traits in construct order, so each trait's renderer half runs immediately
+		// before its simulation half.
+		void NotifyWorldLoaded(Actor actor, IWorldPresentation presentation)
+		{
+			foreach (var trait in actor.TraitsImplementing<object>())
+			{
+				// ScreenMap receives the renderer first, before any other trait.
+				if (trait == ScreenMap)
+					continue;
+
+				if (trait is IWorldRendererLoaded rendererLoaded)
+					using (new PerfTimer(trait.GetType().Name + ".WorldRendererLoaded"))
+						presentation.Attach(this, rendererLoaded);
+
+				if (trait is IWorldLoaded loaded)
+					using (new PerfTimer(trait.GetType().Name + ".WorldLoaded"))
+						loaded.WorldLoaded(this);
+
+				if (StartupActors == StartupActors.FromMap && trait is ICreateStartupActors creator)
+					using (new PerfTimer(trait.GetType().Name + ".CreateStartupActors"))
+						creator.CreateStartupActors(this);
+			}
+		}
+
+		public void PostLoadComplete()
 		{
 			foreach (var iwl in WorldActor.TraitsImplementing<IPostWorldLoaded>())
 				using (new PerfTimer(iwl.GetType().Name + ".PostWorldLoaded"))
-					iwl.PostWorldLoaded(this, wr);
+					iwl.PostWorldLoaded(this);
 
 			foreach (var p in Players)
 				foreach (var iwl in p.PlayerActor.TraitsImplementing<IPostWorldLoaded>())
 					using (new PerfTimer(iwl.GetType().Name + ".PostWorldLoaded"))
-						iwl.PostWorldLoaded(this, wr);
+						iwl.PostWorldLoaded(this);
 		}
 
 		public void SetWorldOwner(Player p)

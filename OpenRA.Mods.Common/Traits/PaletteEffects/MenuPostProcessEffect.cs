@@ -83,7 +83,7 @@ namespace OpenRA.Mods.Common.Traits
 			shader.SetVec("Blend", blend);
 		}
 
-		void IPostWorldLoaded.PostWorldLoaded(World w, WorldRenderer wr)
+		void IPostWorldLoaded.PostWorldLoaded(World w)
 		{
 			// HACK: Defer fade-in until the GameLoaded notification for game saves
 			if (!w.IsResumingSave)

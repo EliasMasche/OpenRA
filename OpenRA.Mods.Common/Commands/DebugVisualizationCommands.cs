@@ -11,7 +11,6 @@
 
 using System;
 using System.Collections.Generic;
-using OpenRA.Graphics;
 using OpenRA.Mods.Common.Traits;
 using OpenRA.Traits;
 
@@ -81,7 +80,7 @@ namespace OpenRA.Mods.Common.Commands
 		DeveloperMode devMode;
 		World world;
 
-		public void WorldLoaded(World w, WorldRenderer wr)
+		public void WorldLoaded(World w)
 		{
 			world = w;
 			debugVis = world.WorldActor.TraitOrDefault<DebugVisualizations>();

@@ -100,7 +100,7 @@ namespace OpenRA.Mods.Common.Traits
 
 	[NotSaved("Rendering only. The simulation never reads it.")]
 	public class ResourceRenderer
-		: IResourceRenderer, IWorldLoaded, IRenderOverlay, ITickRender, INotifyActorDisposing, IRadarTerrainLayer, INotifyGameLoaded
+		: IResourceRenderer, IWorldRendererLoaded, IRenderOverlay, ITickRender, INotifyActorDisposing, IRadarTerrainLayer, INotifyGameLoaded
 	{
 		protected readonly ResourceRendererInfo Info;
 		protected readonly IResourceLayer ResourceLayer;
@@ -138,7 +138,7 @@ namespace OpenRA.Mods.Common.Traits
 				dirty.Add(cell);
 		}
 
-		protected virtual void WorldLoaded(World w, WorldRenderer wr)
+		protected virtual void WorldRendererLoaded(World w, WorldRenderer wr)
 		{
 			foreach (var kv in Variants)
 			{
@@ -183,7 +183,7 @@ namespace OpenRA.Mods.Common.Traits
 			}
 		}
 
-		void IWorldLoaded.WorldLoaded(World w, WorldRenderer wr) { WorldLoaded(w, wr); }
+		void IWorldRendererLoaded.WorldRendererLoaded(World w, WorldRenderer wr) { WorldRendererLoaded(w, wr); }
 
 		// A load puts the resources of the saved game in the layer and raises no cell change. So this renderer still
 		// draws what the map started with. It draws again each cell that holds a resource or that drew one.

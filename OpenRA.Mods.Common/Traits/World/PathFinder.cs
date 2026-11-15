@@ -12,7 +12,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using OpenRA.Graphics;
 using OpenRA.Mods.Common.Pathfinder;
 using OpenRA.Traits;
 
@@ -65,7 +64,7 @@ namespace OpenRA.Mods.Common.Traits
 			return GetHierarchicalPathFinder(locomotor, check, null).GetOverlayData();
 		}
 
-		public void WorldLoaded(World w, WorldRenderer wr)
+		public void WorldLoaded(World w)
 		{
 			pathFinderOverlay = world.WorldActor.TraitOrDefault<PathFinderOverlay>();
 

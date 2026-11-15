@@ -76,7 +76,13 @@ namespace OpenRA
 			left.StartFailure = reason;
 			startFailure = reason;
 			Disconnect();
-			LoadShellMap();
+			if (Host.Profile.HasDisplay)
+				LoadShellMap();
+			else
+			{
+				left.World?.Dispose();
+				left.World = null;
+			}
 		}
 	}
 }

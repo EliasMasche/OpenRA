@@ -9,7 +9,6 @@
  */
 #endregion
 
-using OpenRA.Graphics;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Commands
@@ -29,7 +28,7 @@ namespace OpenRA.Mods.Common.Commands
 
 		World world;
 
-		public void WorldLoaded(World w, WorldRenderer wr)
+		public void WorldLoaded(World w)
 		{
 			world = w;
 			var console = world.WorldActor.Trait<ChatCommands>();

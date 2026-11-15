@@ -11,7 +11,6 @@
 
 using System;
 using System.Linq;
-using OpenRA.Graphics;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Traits
@@ -65,7 +64,7 @@ namespace OpenRA.Mods.Common.Traits
 			CellTerrainColorChanged?.Invoke(uv);
 		}
 
-		public void WorldLoaded(World w, WorldRenderer wr)
+		public void WorldLoaded(World w)
 		{
 			radarTerrainLayers = w.WorldActor.TraitsImplementing<IRadarTerrainLayer>().ToArray();
 			terrainColor = new CellLayer<(uint, uint)>(w.Map);

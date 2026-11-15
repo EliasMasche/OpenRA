@@ -12,7 +12,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using OpenRA.Graphics;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Traits
@@ -104,7 +103,7 @@ namespace OpenRA.Mods.Common.Traits
 			this.player = player;
 		}
 
-		void IWorldLoaded.WorldLoaded(World w, WorldRenderer wr)
+		void IWorldLoaded.WorldLoaded(World w)
 		{
 			// Players and NonCombatants are fixed once the game starts, but the result of IsAlliedWith
 			// may change once players are marked as spectators, so cache these

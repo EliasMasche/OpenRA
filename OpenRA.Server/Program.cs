@@ -16,6 +16,7 @@ using System.Globalization;
 using System.IO;
 using System.Net;
 using System.Threading;
+using OpenRA.Hosting;
 using OpenRA.Network;
 
 namespace OpenRA.Server
@@ -77,6 +78,7 @@ namespace OpenRA.Server
 			// HACK: The engine code assumes that Game.Settings is set.
 			// This isn't nearly as bad as ModData, but is still not very nice.
 			Game.InitializeSettings(arguments);
+			Game.InitializeHost(HostProfile.Relay);
 			var settings = Game.Settings.Server;
 
 			Nat.Initialize();

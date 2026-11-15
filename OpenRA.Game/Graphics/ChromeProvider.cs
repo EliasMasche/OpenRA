@@ -69,7 +69,7 @@ namespace OpenRA.Graphics
 			Deinitialize();
 
 			// Load higher resolution images if available on HiDPI displays
-			if (Game.Renderer != null)
+			if (Game.Host.Profile.HasDisplay)
 				dpiScale = Game.Renderer.WindowScale;
 
 			fileSystem = modData.DefaultFileSystem;

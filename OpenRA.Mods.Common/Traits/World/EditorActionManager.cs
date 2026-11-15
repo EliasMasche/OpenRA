@@ -11,7 +11,6 @@
 
 using System;
 using System.Collections.Generic;
-using OpenRA.Graphics;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Traits
@@ -35,7 +34,7 @@ namespace OpenRA.Mods.Common.Traits
 		public bool Modified;
 		public bool SaveFailed;
 
-		public void WorldLoaded(World w, WorldRenderer wr)
+		public void WorldLoaded(World w)
 		{
 			Add(new OpenMapAction());
 			Modified = false;

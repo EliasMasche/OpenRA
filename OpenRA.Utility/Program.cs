@@ -14,6 +14,7 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.IO;
 using System.Linq;
+using OpenRA.Hosting;
 
 namespace OpenRA
 {
@@ -56,10 +57,18 @@ namespace OpenRA
 			if (!string.IsNullOrEmpty(engineDir))
 				Platform.OverrideEngineDir(engineDir);
 
+			// Before the settings, because they come from the support dir.
+			var supportDir = Environment.GetEnvironmentVariable("SUPPORT_DIR");
+			if (!string.IsNullOrEmpty(supportDir))
+				Platform.OverrideSupportDir(supportDir);
+
 			Log.AddChannel("perf", null);
 			Log.AddChannel("debug", null);
 
 			Game.InitializeSettings(Arguments.Empty);
+
+			// Before ModData: its manifest modules read the host.
+			Game.InitializeHost(HostProfile.Tooling);
 
 			var envModSearchPaths = Environment.GetEnvironmentVariable("MOD_SEARCH_PATHS");
 			var modSearchPaths = !string.IsNullOrWhiteSpace(envModSearchPaths) ?

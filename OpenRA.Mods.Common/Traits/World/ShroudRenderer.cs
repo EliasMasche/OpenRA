@@ -61,7 +61,7 @@ namespace OpenRA.Mods.Common.Traits
 	}
 
 	[NotSaved("Rendering only. The simulation never reads it.")]
-	public sealed class ShroudRenderer : IRenderShroud, IWorldLoaded, INotifyActorDisposing
+	public sealed class ShroudRenderer : IRenderShroud, IWorldRendererLoaded, INotifyActorDisposing
 	{
 		[Flags]
 		enum Edges : byte
@@ -197,7 +197,7 @@ namespace OpenRA.Mods.Common.Traits
 			world.RenderPlayerChanged += WorldOnRenderPlayerChanged;
 		}
 
-		void IWorldLoaded.WorldLoaded(World w, WorldRenderer wr)
+		void IWorldRendererLoaded.WorldRendererLoaded(World w, WorldRenderer wr)
 		{
 			// Initialize tile cache
 			// This includes the region outside the visible area to cover any sprites peeking outside the map

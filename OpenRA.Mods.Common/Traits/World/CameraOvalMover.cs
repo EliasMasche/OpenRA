@@ -32,7 +32,7 @@ namespace OpenRA.Mods.Common.Traits
 		public override object Create(ActorInitializer init) { return new CameraOvalMover(this); }
 	}
 
-	sealed class CameraOvalMover : IWorldLoaded
+	sealed class CameraOvalMover : IWorldRendererLoaded
 	{
 		readonly CameraOvalMoverInfo info;
 		public CameraOvalMover(CameraOvalMoverInfo info)
@@ -40,7 +40,7 @@ namespace OpenRA.Mods.Common.Traits
 			this.info = info;
 		}
 
-		public void WorldLoaded(World world, WorldRenderer wr)
+		void IWorldRendererLoaded.WorldRendererLoaded(World world, WorldRenderer wr)
 		{
 			var vo = wr.Viewport.CenterPosition;
 			var viewportOrigin = new Vector2(vo.X, vo.Y);

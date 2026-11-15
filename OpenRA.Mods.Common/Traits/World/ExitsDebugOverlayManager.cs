@@ -57,11 +57,11 @@ namespace OpenRA.Mods.Common.Traits
 			this.self = self;
 			Info = info;
 
-			if (!Game.Renderer.Fonts.TryGetValue(info.Font, out Font))
+			if (Game.Host.Profile.HasDisplay && !Game.Renderer.Fonts.TryGetValue(info.Font, out Font))
 				throw new YamlException($"Could not find font '{info.Font}'");
 		}
 
-		void IWorldLoaded.WorldLoaded(World w, WorldRenderer wr)
+		void IWorldLoaded.WorldLoaded(World w)
 		{
 			world = w;
 			var console = self.TraitOrDefault<ChatCommands>();

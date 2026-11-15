@@ -21,11 +21,11 @@ namespace OpenRA.Mods.Common.Traits
 		public override object Create(ActorInitializer init) { return new GameSaveViewportManager(); }
 	}
 
-	public class GameSaveViewportManager : IWorldLoaded, IGameSaveTraitData
+	public class GameSaveViewportManager : IWorldRendererLoaded, IGameSaveTraitData
 	{
 		WorldRenderer worldRenderer;
 
-		void IWorldLoaded.WorldLoaded(World w, WorldRenderer wr) { worldRenderer = wr; }
+		void IWorldRendererLoaded.WorldRendererLoaded(World w, WorldRenderer wr) { worldRenderer = wr; }
 
 		List<MiniYamlNode> IGameSaveTraitData.IssueTraitData(Actor self)
 		{

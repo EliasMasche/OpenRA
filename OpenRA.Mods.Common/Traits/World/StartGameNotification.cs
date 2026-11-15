@@ -9,7 +9,6 @@
  */
 #endregion
 
-using OpenRA.Graphics;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Traits
@@ -52,7 +51,7 @@ namespace OpenRA.Mods.Common.Traits
 			this.info = info;
 		}
 
-		void IPostWorldLoaded.PostWorldLoaded(World world, WorldRenderer wr)
+		void IPostWorldLoaded.PostWorldLoaded(World world)
 		{
 			if (!world.IsResumingSave)
 			{

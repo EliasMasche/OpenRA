@@ -12,7 +12,6 @@
 using System;
 using System.Linq;
 using OpenRA.GameRules;
-using OpenRA.Graphics;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Traits
@@ -102,7 +101,7 @@ namespace OpenRA.Mods.Common.Traits
 			}
 		}
 
-		void IPostWorldLoaded.PostWorldLoaded(World world, WorldRenderer wr)
+		void IPostWorldLoaded.PostWorldLoaded(World world)
 		{
 			// Reset any bogus pre-existing state
 			Game.Sound.DisableWorldSounds = info.DisableWorldSounds;

@@ -24,6 +24,10 @@ namespace OpenRA.Mods.Common.Traits
 		protected RenderPostProcessPassBase(string name, PostProcessPassType type)
 		{
 			this.type = type;
+
+			if (!Game.Host.Profile.HasDisplay)
+				return;
+
 			renderer = Game.Renderer;
 			shader = renderer.CreateShader(new RenderPostProcessPassShaderBindings(name));
 			var vertices = new RenderPostProcessPassVertex[]
