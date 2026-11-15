@@ -272,6 +272,7 @@ World:
 	RadarPings:
 	StartGameNotification:
 		SavedTextNotification: notification-game-saved
+		NotSavedTextNotification: notification-game-not-saved
 	ObjectivesPanel:
 		PanelName: SKIRMISH_STATS
 	LoadWidgetAtGameStart:

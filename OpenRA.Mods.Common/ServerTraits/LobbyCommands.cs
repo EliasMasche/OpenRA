@@ -82,6 +82,9 @@ namespace OpenRA.Mods.Common.Server
 		[FluentReference]
 		const string StateUnchangedReady = "notification-state-unchanged-ready";
 
+		[FluentReference]
+		const string LobbyOfASave = "notification-lobby-of-a-save";
+
 		[FluentReference("command")]
 		const string StateUnchangedGameStarted = "notification-state-unchanged-game-started";
 
@@ -160,6 +163,14 @@ namespace OpenRA.Mods.Common.Server
 		[FluentReference]
 		const string VoteKickDisabled = "notification-vote-kick-disabled";
 
+		// The commands that change the slots, the players or the options. A save with a snapshot holds the world
+		// that they made, so the lobby of such a save keeps those of the save.
+		static readonly FrozenSet<string> GameChangingCommands = new[]
+		{
+			"slot", "spectate", "slot_close", "slot_open", "slot_bot", "option", "reset_options", "assignteams", "make_admin",
+			"make_spectator", "faction", "team", "handicap", "spawn", "clear_spawn", "color", "sync_lobby"
+		}.ToFrozenSet();
+
 		readonly IDictionary<string, Func<S, Connection, Session.Client, string, bool>> commandHandlers =
 			new Dictionary<string, Func<S, Connection, Session.Client, string, bool>>
 			{
@@ -225,6 +236,11 @@ namespace OpenRA.Mods.Common.Server
 				else if (client.State == Session.ClientState.Ready && !(command.StartsWith("state", StringComparison.Ordinal) || command == "startgame"))
 				{
 					server.SendFluentMessageTo(conn, StateUnchangedReady);
+					return false;
+				}
+				else if (server.HasSnapshotSave && GameChangingCommands.Contains(command.Split(' ')[0]))
+				{
+					server.SendFluentMessageTo(conn, LobbyOfASave);
 					return false;
 				}
 
@@ -584,6 +600,9 @@ namespace OpenRA.Mods.Common.Server
 							return;
 
 						server.LobbyInfo.GlobalSettings.Map = map.Uid;
+
+						// A save that the lobby holds is of the map before.
+						server.ForgetGameSave();
 
 						var oldSlots = server.LobbyInfo.Slots.Keys.ToArray();
 						server.Map = server.ModData.MapCache[server.LobbyInfo.GlobalSettings.Map];
@@ -1467,6 +1486,9 @@ namespace OpenRA.Mods.Common.Server
 		{
 			lock (server.LobbyInfoLock)
 			{
+				// The people of the save left. The next people start a new game.
+				server.ForgetGameSave();
+
 				// Expire any temporary bans
 				server.TempBans.Clear();
 

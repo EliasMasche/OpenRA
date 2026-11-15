@@ -13,6 +13,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Frozen;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
@@ -25,6 +26,7 @@ using System.Threading.Tasks;
 using OpenRA.FileFormats;
 using OpenRA.Network;
 using OpenRA.Primitives;
+using OpenRA.Scripting;
 using OpenRA.Support;
 using OpenRA.Traits;
 
@@ -46,7 +48,7 @@ namespace OpenRA.Server
 	}
 
 	[IncludeStaticFluentReferences(typeof(PlayerMessageTracker), typeof(VoteKickTracker))]
-	public sealed class Server
+	public sealed partial class Server
 	{
 		[FluentReference]
 		const string CustomRules = "notification-custom-rules";
@@ -929,7 +931,10 @@ namespace OpenRA.Server
 				// TODO: Replace static latency with a dynamic order buffering system
 				if (data.Length == 0 || data[0] != (byte)OrderType.SyncHash)
 				{
-					frame += OrderLatency;
+					// A game that goes on from a save can have more packets in transit than this server's latency
+					// gives, when the save is of a server with a longer one. A packet is never applied on a frame
+					// that the client already has a packet for, so such a game keeps the latency it was saved with.
+					frame = Math.Max(frame + OrderLatency, conn.LastOrdersFrame + 1);
 					DispatchFrameToClient(conn, conn.PlayerIndex, CreateAckFrame(frame, 1));
 
 					orderBuffer?.AddOrderTimestamp(conn.PlayerIndex);
@@ -1040,7 +1045,7 @@ namespace OpenRA.Server
 
 					case "GameSaveTraitData":
 					{
-						if (GameSave != null)
+						if (GameSave != null && AcceptsSaveOrder(conn, o.OrderString))
 						{
 							var data = MiniYaml.FromString(o.TargetString, o.OrderString).First();
 							GameSave.AddTraitData(OpenRA.Exts.ParseInt32Invariant(data.Key), data.Value);
@@ -1051,26 +1056,45 @@ namespace OpenRA.Server
 
 					case "CreateGameSave":
 					{
+						// An order of another client than the admin writes no file.
+						if (!AcceptsSaveOrder(conn, o.OrderString))
+						{
+							DispatchOrdersToClient(conn, 0, 0, Order.FromTargetString("GameNotSaved", o.TargetString, true, o.ExtraData).Serialize());
+							break;
+						}
+
 						if (GameSave != null)
 						{
-							// Sanitize potentially malicious input
-							var filename = o.TargetString;
-							var invalidIndex = -1;
-							var invalidChars = Path.GetInvalidFileNameChars();
-							while ((invalidIndex = filename.IndexOfAny(invalidChars)) != -1)
-								filename = filename.Remove(invalidIndex, 1);
-
+							var filename = SanitizeFilename(o.TargetString);
 							var baseSavePath = Path.Combine(
 								Platform.SupportDir,
 								"Saves",
 								ModData.Manifest.Id,
 								ModData.Manifest.Metadata.Version);
 
-							if (!Directory.Exists(baseSavePath))
-								Directory.CreateDirectory(baseSavePath);
+							// A file that cannot be written, as on a full disk or over a file that is locked, is no reason
+							// to end the server. The client tells the player that the game was not saved.
+							try
+							{
+								if (!Directory.Exists(baseSavePath))
+									Directory.CreateDirectory(baseSavePath);
 
-							GameSave.Save(Path.Combine(baseSavePath, filename));
+								GameSave.Save(Path.Combine(baseSavePath, filename));
+							}
+							catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+							{
+								Log.Write("server", $"The game was not saved to {filename}: {e.Message}");
+								DispatchServerOrdersToClients(Order.FromTargetString("GameNotSaved", filename, true, o.ExtraData));
+								break;
+							}
+
 							DispatchServerOrdersToClients(Order.FromTargetString("GameSaved", filename, true, o.ExtraData));
+						}
+						else
+						{
+							// A game that keeps no order log, as one that went on from a snapshot, has no save of every order.
+							Log.Write("server", $"The game keeps no order log, so it was not saved to {o.TargetString}.");
+							DispatchServerOrdersToClients(Order.FromTargetString("GameNotSaved", o.TargetString, true, o.ExtraData));
 						}
 
 						break;
@@ -1078,26 +1102,43 @@ namespace OpenRA.Server
 
 					case "LoadGameSave":
 					{
-						if (Type == ServerType.Dedicated || State >= ServerState.GameStarted)
+						if (State >= ServerState.GameStarted)
 							break;
 
-						// Sanitize potentially malicious input
-						var filename = o.TargetString;
-						var invalidIndex = -1;
-						var invalidChars = Path.GetInvalidFileNameChars();
-						while ((invalidIndex = filename.IndexOfAny(invalidChars)) != -1)
-							filename = filename.Remove(invalidIndex, 1);
+						if (!TryReadSaveToLoad(conn, o.TargetString, out var load))
+							break;
 
-						var savePath = Path.Combine(
-							Platform.SupportDir,
-							"Saves",
-							ModData.Manifest.Id,
-							ModData.Manifest.Metadata.Version,
-							filename);
+						var (filename, save, _) = load;
 
-						GameSave = new GameSave(savePath);
+						ForgetGameSave();
+						GameSave = save;
+
+						// The settings that the settings of this server decide stay those of this server. A save can
+						// be of another server, or of this one before its settings changed.
+						var serverSettings = LobbyInfo.GlobalSettings;
 						LobbyInfo.GlobalSettings = GameSave.GlobalSettings;
+						LobbyInfo.GlobalSettings.ServerName = serverSettings.ServerName;
+						LobbyInfo.GlobalSettings.EnableSingleplayer = serverSettings.EnableSingleplayer;
+						LobbyInfo.GlobalSettings.EnableMapGeneration = serverSettings.EnableMapGeneration;
+						LobbyInfo.GlobalSettings.EnableSyncReports = serverSettings.EnableSyncReports;
+						LobbyInfo.GlobalSettings.Dedicated = serverSettings.Dedicated;
 						LobbyInfo.Slots = GameSave.Slots;
+
+						// The save can be of a game that went on from a save. That save is not the save of this lobby.
+						LobbyInfo.GlobalSettings.HoldsSnapshotSave = false;
+
+						// The lobby can be of another map, as the lobby of a multiplayer server is. The game, its
+						// players and its rules are those of the map of the save.
+						Map = ModData.MapCache[LobbyInfo.GlobalSettings.Map];
+						LobbyInfo.GlobalSettings.MapStatus = MapStatusCache[Map];
+
+						// Each client makes a generated map from its arguments, as after the order GenerateMap. A client
+						// that joins later gets them when it joins.
+						if (Map.Class == MapClassification.Generated && save.MapGenerationArgs != null)
+						{
+							GeneratedMapData = save.MapGenerationArgs.Serialize().WriteToString();
+							DispatchServerOrdersToClients(Order.FromTargetString("GenerateMap", GeneratedMapData, true));
+						}
 
 						// Reassign clients to slots
 						//  - Bot ordering is preserved
@@ -1105,7 +1146,7 @@ namespace OpenRA.Server
 						//  - Leftover humans become spectators
 
 						// Start by removing all bots and assigning all players as spectators
-						foreach (var c in LobbyInfo.Clients)
+						foreach (var c in LobbyInfo.Clients.ToList())
 						{
 							if (c.Bot != null)
 								LobbyInfo.Clients.Remove(c);
@@ -1114,7 +1155,6 @@ namespace OpenRA.Server
 						}
 
 						// Rebuild/remap the saved client state
-						// TODO: Multiplayer saves should leave all humans as spectators so they can manually pick slots
 						var adminClientIndex = LobbyInfo.Clients.First(c => c.IsAdmin).Index;
 						foreach (var kv in GameSave.SlotClients)
 						{
@@ -1132,15 +1172,20 @@ namespace OpenRA.Server
 							}
 							else
 							{
-								// This will throw if the server doesn't have enough human clients to fill all player slots
-								// See TODO above - this isn't a problem in practice because MP saves won't use this
+								// The server refused a save with more people than the lobby holds, so a person without
+								// a slot is here.
 								var client = LobbyInfo.Clients.First(c => c.Slot == null);
 								kv.Value.ApplyTo(client);
 							}
 						}
 
+						HoldSaveInLobby(load);
+
 						SyncLobbyInfo();
 						SyncLobbyClients();
+
+						// The save changed the slots and the options of everybody in the lobby, as a change of the map does.
+						SendFluentMessage(LoadedSave, "player", GetClient(conn).Name, "save", Path.GetFileNameWithoutExtension(filename));
 
 						break;
 					}
@@ -1356,6 +1401,9 @@ namespace OpenRA.Server
 		{
 			lock (LobbyInfoLock)
 			{
+				if (!SaveAllowsStart())
+					return;
+
 				WriteLineWithTimeStamp(FluentProvider.GetMessage(GameStarted));
 
 				// Drop any players who are not ready
@@ -1365,8 +1413,8 @@ namespace OpenRA.Server
 					DropClient(c);
 				}
 
-				// Enable game saves for singleplayer missions only
-				// TODO: Enable for multiplayer (non-dedicated servers only) once the lobby UI has been created
+				// A game of one person saves on a server that is not dedicated.
+				var hasScript = Map.WorldActorInfo.HasTraitInfo<IWorldScriptInfo>();
 				LobbyInfo.GlobalSettings.EnableGameSaves = Type != ServerType.Dedicated && LobbyInfo.NonBotClients.Count() == 1;
 
 				// Player list for win/loss tracking
@@ -1394,6 +1442,14 @@ namespace OpenRA.Server
 					if (p != null)
 						gameInfo.Players.Add(p);
 
+				// A game that goes on from a save starts in the middle, and its replay could not be played. The recorder
+				// makes its file at the start order, so a recorder that is disposed before it writes none.
+				if (recorder != null && HasSnapshotSave)
+				{
+					recorder.Dispose();
+					recorder = null;
+				}
+
 				if (recorder != null)
 					recorder.Metadata = new ReplayMetadata(gameInfo);
 
@@ -1414,7 +1470,12 @@ namespace OpenRA.Server
 
 				LobbyInfo.GlobalSettings.GameTimestep = gameSpeed.Timestep;
 
-				if (GameSave == null && LobbyInfo.GlobalSettings.EnableGameSaves)
+				// The order log is the save of every order. A client asks for it only when a snapshot cannot hold the
+				// state of the scripts of the map, so a game on a map without scripts keeps none. The log replays a
+				// game from its first frame, so a game that goes on from a later one keeps none either. A dedicated
+				// server saves no game.
+				var keepsOrders = LobbyInfo.GlobalSettings.EnableGameSaves && startFrame == 1 && hasScript && Type != ServerType.Dedicated;
+				if (GameSave == null && keepsOrders)
 					GameSave = new GameSave();
 
 				var startGameData = "";
@@ -1431,12 +1492,15 @@ namespace OpenRA.Server
 					}
 				}
 
+				if (snapshotSave.Length > 0)
+					startGameData = new List<MiniYamlNode>() { new("SaveSnapshot", snapshotSave) }.WriteToString();
+
 				DispatchServerOrdersToClients(Order.FromTargetString("StartGame", startGameData, true));
 
 				foreach (var t in serverTraits.WithInterface<IStartGame>())
 					t.GameStarted(this);
 
-				var firstFrame = 1;
+				var firstFrame = startFrame;
 				if (GameSave != null && GameSave.LastOrdersFrame >= 0)
 				{
 					GameSave.ParseOrders(LobbyInfo, (frame, client, data) =>
@@ -1449,23 +1513,31 @@ namespace OpenRA.Server
 					firstFrame += GameSave.LastOrdersFrame;
 				}
 
+				// A loaded save of every order sent its orders. The game keeps them only as a game that starts does.
+				if (!keepsOrders)
+					GameSave = null;
+
 				// ReceiveOrders projects player orders into the future so that all players can
 				// apply them on the same world tick.
 				// Clients require every frame to have an orders packet associated with it, so we must
 				// inject an empty packet for each frame that we are skipping forwards.
 				// TODO: Replace static latency with a dynamic order buffering system
+				// A game that goes on from a saved position has no gap: the packets that were in transit fill
+				// these frames. A position that was saved on a stalled frame holds one packet more than the latency.
 				var conns = Conns.Where(c => c.Validated).ToList();
 				foreach (var from in conns)
 				{
-					for (var i = 0; i < OrderLatency; i++)
+					var packets = startPackets;
+					for (var i = 0; i < Math.Max(OrderLatency, packets.Length); i++)
 					{
 						from.LastOrdersFrame = firstFrame + i;
-						var frameData = CreateFrame(from.PlayerIndex, from.LastOrdersFrame, []);
+						var orders = i < packets.Length ? packets[i] : [];
+						var frameData = CreateFrame(from.PlayerIndex, from.LastOrdersFrame, orders);
 						foreach (var to in conns)
 							DispatchFrameToClient(to, from.PlayerIndex, frameData);
 
-						RecordOrder(from.LastOrdersFrame, [], from.PlayerIndex);
-						GameSave?.DispatchOrders(from, from.LastOrdersFrame, []);
+						RecordOrder(from.LastOrdersFrame, orders, from.PlayerIndex);
+						GameSave?.DispatchOrders(from, from.LastOrdersFrame, orders);
 					}
 				}
 			}

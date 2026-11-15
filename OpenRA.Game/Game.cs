@@ -29,7 +29,7 @@ using OpenRA.Widgets;
 namespace OpenRA
 {
 	[IncludeStaticFluentReferences(typeof(Server.Server), typeof(Player), typeof(UnitOrders), typeof(OrderManager))]
-	public static class Game
+	public static partial class Game
 	{
 		[FluentReference("filename")]
 		const string SavedScreenshot = "notification-saved-screenshot";

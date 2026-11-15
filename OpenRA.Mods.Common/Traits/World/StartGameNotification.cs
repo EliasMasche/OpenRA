@@ -35,10 +35,16 @@ namespace OpenRA.Mods.Common.Traits
 		[FluentReference(optional: true)]
 		public readonly string SavedTextNotification = null;
 
+		[NotificationReference("Speech")]
+		public readonly string NotSavedNotification = null;
+
+		[FluentReference(optional: true)]
+		public readonly string NotSavedTextNotification = null;
+
 		public override object Create(ActorInitializer init) { return new StartGameNotification(this); }
 	}
 
-	sealed class StartGameNotification : IPostWorldLoaded, INotifyGameLoaded, INotifyGameSaved
+	sealed class StartGameNotification : IPostWorldLoaded, INotifyGameLoaded, INotifyGameSaved, INotifyGameNotSaved
 	{
 		readonly StartGameNotificationInfo info;
 		public StartGameNotification(StartGameNotificationInfo info)
@@ -72,6 +78,17 @@ namespace OpenRA.Mods.Common.Traits
 					Game.Sound.PlayNotification(world.Map.Rules, null, "Speech", info.SavedNotification, world.RenderPlayer?.Faction.InternalName);
 
 				TextNotificationsManager.AddTransientLine(null, info.SavedTextNotification);
+			}
+		}
+
+		void INotifyGameNotSaved.GameNotSaved(World world, bool isAutosave)
+		{
+			if (!world.IsReplay)
+			{
+				if (!isAutosave)
+					Game.Sound.PlayNotification(world.Map.Rules, null, "Speech", info.NotSavedNotification, world.RenderPlayer?.Faction.InternalName);
+
+				TextNotificationsManager.AddTransientLine(null, info.NotSavedTextNotification);
 			}
 		}
 	}

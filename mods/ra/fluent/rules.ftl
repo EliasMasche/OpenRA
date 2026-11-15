@@ -28,6 +28,7 @@ notification-silos-needed = Silos needed.
 
 ## world.yaml
 notification-game-saved = Game saved.
+notification-game-not-saved = Game not saved.
 
 options-starting-units =
     .mcv-only = MCV Only

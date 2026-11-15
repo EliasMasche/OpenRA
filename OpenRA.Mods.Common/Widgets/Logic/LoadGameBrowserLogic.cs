@@ -166,6 +166,7 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 		readonly ScrollItemWidget dateHeaderTemplate;
 		readonly List<SaveEntry> saves = [];
 		readonly Action onStart;
+		readonly Action<string, string> onLoad;
 		readonly ModData modData;
 		readonly string baseSavePath;
 
@@ -174,8 +175,12 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 		GameSave selectedSave;
 		bool filtersVisible;
 
+		/// <summary>
+		/// <paramref name="onLoad"/> loads the selected save. It gets the file name of the save in the folder of saves,
+		/// and the map of the save. The menus pass <see cref="LoadOnLocalServer"/>, and a lobby loads the save on its server.
+		/// </summary>
 		[ObjectCreator.UseCtor]
-		public LoadGameBrowserLogic(Widget widget, ModData modData, Action onExit, Action onStart)
+		public LoadGameBrowserLogic(Widget widget, ModData modData, Action onExit, Action onStart, Action<string, string> onLoad)
 		{
 			// Reset filters to their neutral state every time the panel opens.
 			filter = new Filter();
@@ -185,6 +190,7 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 
 			this.modData = modData;
 			this.onStart = onStart;
+			this.onLoad = onLoad;
 			Game.BeforeGameStart += OnGameStart;
 
 			var mod = modData.Manifest;
@@ -999,14 +1005,18 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 				return;
 
 			Ui.CloseWindow();
+			onLoad(Path.GetFileName(selectedPath), mapPreview.Uid);
+		}
 
+		public static void LoadOnLocalServer(string file, string map)
+		{
 			var orders = new List<Order>
 			{
-				Order.FromTargetString("LoadGameSave", Path.GetFileName(selectedPath), true),
+				Order.FromTargetString("LoadGameSave", file, true),
 				Order.Command($"state {Session.ClientState.Ready}")
 			};
 
-			Game.CreateAndStartLocalServer(mapPreview.Uid, orders);
+			Game.CreateAndStartLocalServer(map, orders);
 		}
 
 		void OnGameStart()

@@ -224,6 +224,12 @@ namespace OpenRA.Network
 			// Timestep in milliseconds used for converting frame count to game duration
 			public int GameTimestep = 0;
 
+			/// <summary>
+			/// Whether the lobby holds a loaded save with a snapshot. Its slots and options are those of the save, and
+			/// the server refuses a command that changes them.
+			/// </summary>
+			public bool HoldsSnapshotSave;
+
 			[FieldLoader.Ignore]
 			public Dictionary<string, LobbyOptionState> LobbyOptions = [];
 

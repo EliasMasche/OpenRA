@@ -27,6 +27,15 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 		[FluentReference]
 		const string LoadingNews = "label-loading-news";
 
+		[FluentReference]
+		const string GameCouldNotStartTitle = "dialog-game-could-not-start-title";
+
+		[FluentReference("reason")]
+		const string GameCouldNotStartText = "dialog-game-could-not-start-text";
+
+		[FluentReference]
+		const string Continue = "button-continue";
+
 		[FluentReference("message")]
 		const string NewsRetrivalFailed = "label-news-retrieval-failed";
 
@@ -516,6 +525,7 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 			{
 				{ "onExit", () => SwitchMenu(MenuType.Singleplayer) },
 				{ "onStart", () => { RemoveShellmapUI(); lastGameState = MenuPanel.GameSaves; } },
+				{ "onLoad", (Action<string, string>)LoadGameBrowserLogic.LoadOnLocalServer },
 			});
 		}
 
@@ -533,6 +543,16 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 
 		void OpenMenuBasedOnLastGame()
 		{
+			// A game that this client could not start, as a save it cannot load, ends here. The player learns why.
+			var reason = Game.TakeStartFailure();
+			if (reason.Length > 0)
+			{
+				lastGameState = MenuPanel.None;
+				ConfirmationDialogs.ButtonPrompt(modData, GameCouldNotStartTitle, GameCouldNotStartText,
+					textArguments: ["reason", reason], onConfirm: () => { }, confirmText: Continue);
+				return;
+			}
+
 			switch (lastGameState)
 			{
 				case MenuPanel.Missions:

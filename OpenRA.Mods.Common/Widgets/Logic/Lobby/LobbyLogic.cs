@@ -237,9 +237,12 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 			foreach (var f in modRules.Actors[SystemActors.World].TraitInfos<FactionInfo>())
 				factions.Add(f.InternalName, new LobbyFaction { Selectable = f.Selectable, Name = f.Name, Side = f.Side, Description = f.Description });
 
-			Func<bool> configurationDisabled = () => !Game.IsHost || gameStarting ||
+			bool ConfigurationDisabled() => !Game.IsHost || gameStarting ||
 				panel == PanelType.Kick || panel == PanelType.ForceStart || !MapIsPlayable ||
 				map.PlayerActorInfo == null || orderManager.LocalClient == null || orderManager.LocalClient.IsReady;
+
+			// The slots and the options of the lobby of a save are those of the save. The server refuses a change.
+			bool SlotsAndOptionsDisabled() => ConfigurationDisabled() || LobbyUtils.HoldsSave(orderManager);
 
 			var mapButton = lobby.GetOrNull<ButtonWidget>("CHANGEMAP_BUTTON");
 			if (mapButton != null)
@@ -291,11 +294,31 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 				};
 			}
 
+			var loadButton = lobby.GetOrNull<ButtonWidget>("LOAD_GAME_BUTTON");
+			if (loadButton != null)
+			{
+				// The host loads a save from the folder of saves of its machine, and the server of the lobby takes it.
+				loadButton.IsVisible = () => panel != PanelType.Servers;
+				loadButton.IsDisabled = () => !Game.IsHost || gameStarting ||
+					panel == PanelType.Kick || panel == PanelType.ForceStart ||
+					orderManager.LocalClient == null || orderManager.LocalClient.IsReady ||
+					!LoadGameBrowserLogic.IsLoadPanelEnabled(modData.Manifest);
+
+				void Load(string file, string map) => orderManager.IssueOrder(Order.FromTargetString("LoadGameSave", file, true));
+
+				loadButton.OnClick = () => Ui.OpenWindow("LOAD_GAME_BROWSER_PANEL", new WidgetArgs()
+				{
+					{ "onExit", DoNothing },
+					{ "onStart", DoNothing },
+					{ "onLoad", (Action<string, string>)Load },
+				});
+			}
+
 			var slotsButton = lobby.GetOrNull<DropDownButtonWidget>("SLOTS_DROPDOWNBUTTON");
 			if (slotsButton != null)
 			{
 				slotsButton.IsVisible = () => panel != PanelType.Servers && panel != PanelType.Options;
-				slotsButton.IsDisabled = () => configurationDisabled() || panel != PanelType.Players ||
+				slotsButton.IsDisabled = () => SlotsAndOptionsDisabled() || panel != PanelType.Players ||
 					(orderManager.LobbyInfo.Clients.Count == 1 && !mapSupportsBots) ||
 					(orderManager.LobbyInfo.Slots.Values.All(s => !s.AllowBots) &&
 					!orderManager.LobbyInfo.Slots.Any(s => !s.Value.LockTeam && orderManager.LobbyInfo.ClientInSlot(s.Key) != null));
@@ -393,7 +416,7 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 			if (resetOptionsButton != null)
 			{
 				resetOptionsButton.IsVisible = () => panel == PanelType.Options;
-				resetOptionsButton.IsDisabled = () => configurationDisabled() || !resetOptionsButtonEnabled;
+				resetOptionsButton.IsDisabled = () => SlotsAndOptionsDisabled() || !resetOptionsButtonEnabled;
 				resetOptionsButton.OnMouseDown = _ => orderManager.IssueOrder(Order.Command("reset_options"));
 			}
 
@@ -401,7 +424,7 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 			{
 				{ "orderManager", orderManager },
 				{ "getMap", () => map },
-				{ "configurationDisabled", configurationDisabled }
+				{ "configurationDisabled", (Func<bool>)SlotsAndOptionsDisabled }
 			});
 
 			optionsBin.IsVisible = () => panel == PanelType.Options;
@@ -482,7 +505,7 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 			var startGameButton = lobby.GetOrNull<ButtonWidget>("START_GAME_BUTTON");
 			if (startGameButton != null)
 			{
-				startGameButton.IsDisabled = () => configurationDisabled() || StartDisabled();
+				startGameButton.IsDisabled = () => ConfigurationDisabled() || StartDisabled();
 
 				startGameButton.OnClick = () =>
 				{
@@ -793,7 +816,7 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 
 					var join = template.Get<ButtonWidget>("JOIN");
 					join.IsVisible = () => !slot.Closed;
-					join.IsDisabled = () => orderManager.LocalClient.IsReady;
+					join.IsDisabled = () => orderManager.LocalClient.IsReady || LobbyUtils.HoldsSave(orderManager);
 					join.OnClick = () => orderManager.IssueOrder(Order.Command("slot " + key));
 				}
 				else if ((client.Index == orderManager.LocalClient.Index) ||
@@ -922,7 +945,7 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 
 				var btn = spec.Get<ButtonWidget>("SPECTATE");
 				btn.OnClick = () => orderManager.IssueOrder(Order.Command("spectate"));
-				btn.IsDisabled = () => orderManager.LocalClient.IsReady;
+				btn.IsDisabled = () => orderManager.LocalClient.IsReady || LobbyUtils.HoldsSave(orderManager);
 				btn.IsVisible = () => orderManager.LobbyInfo.GlobalSettings.AllowSpectators
 					|| orderManager.LocalClient.IsAdmin;
 

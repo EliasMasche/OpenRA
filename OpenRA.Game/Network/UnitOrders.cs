@@ -182,6 +182,10 @@ namespace OpenRA.Network
 					if (!string.IsNullOrEmpty(order.TargetString))
 					{
 						var data = MiniYaml.FromString(order.TargetString, order.OrderString).ToList();
+
+						if (orderManager.TryStartFromSnapshot(data))
+							break;
+
 						var saveLastOrdersFrame = data.FirstOrDefault(n => n.Key == "SaveLastOrdersFrame");
 						if (saveLastOrdersFrame != null)
 							orderManager.GameSaveLastFrame =
@@ -212,6 +216,11 @@ namespace OpenRA.Network
 				case "GameSaved":
 					foreach (var nsr in orderManager.World.WorldActor.TraitsImplementing<INotifyGameSaved>())
 						nsr.GameSaved(orderManager.World, order.ExtraData != 0);
+					break;
+
+				case "GameNotSaved":
+					foreach (var nsr in orderManager.World.WorldActor.TraitsImplementing<INotifyGameNotSaved>())
+						nsr.GameNotSaved(orderManager.World, order.ExtraData != 0);
 					break;
 
 				case "PauseGame":

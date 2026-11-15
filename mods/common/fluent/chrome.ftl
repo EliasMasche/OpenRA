@@ -395,6 +395,7 @@ button-multiplayer-tabs-players-tab = Players
 button-multiplayer-tabs-options-tab = Options
 button-multiplayer-tabs-servers-tab = Servers
 button-server-lobby-changemap = Change Map
+button-server-lobby-load-game = Load
 
 button-lobbychat-chat-mode =
     .label = Team

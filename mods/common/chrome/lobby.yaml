@@ -100,11 +100,18 @@ Background@SERVER_LOBBY:
 			Width: 675
 			Height: 219
 		Button@CHANGEMAP_BUTTON:
-			X: PARENT_WIDTH - WIDTH - 20
+			X: PARENT_WIDTH - 194
 			Y: 291
-			Width: 174
+			Width: 109
 			Height: 25
 			Text: button-server-lobby-changemap
+			Font: Bold
+		Button@LOAD_GAME_BUTTON:
+			X: PARENT_WIDTH - WIDTH - 20
+			Y: 291
+			Width: 60
+			Height: 25
+			Text: button-server-lobby-load-game
 			Font: Bold
 		Container@LOBBYCHAT:
 			X: 20

@@ -14,11 +14,15 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.IO;
 using System.Linq;
+using System.Net;
 
 namespace OpenRA.Network
 {
 	public sealed partial class OrderManager
 	{
+		/// <summary>Why this client left the game before it started, as when it cannot load its save. Null otherwise.</summary>
+		public string StartFailure { get; internal set; }
+
 		/// <summary>
 		/// Where the actors that the world of this game starts with come from. Whoever joins the game decides it,
 		/// before the order that starts the game builds the world. That order decides it again when the server
@@ -84,6 +88,25 @@ namespace OpenRA.Network
 				throw new InvalidOperationException($"The first packet in transit is for frame {packets[0].Frame}, and the game is at net frame {NetFrameNumber}.");
 
 			return new OrderManagerPosition(localClient, LocalFrameNumber, NetFrameNumber, sentOrdersFrame, [.. packets], Unsent(network.UnsentOrders), [.. left]);
+		}
+
+		// Starts the game of the save that data of the order that starts a game names, and gives true. Gives false
+		// for a game that does not go on from a snapshot.
+		internal bool TryStartFromSnapshot(List<MiniYamlNode> data)
+		{
+			// A save that holds a snapshot holds no orders to apply. Its game starts where the snapshot was taken.
+			var saveSnapshot = data.FirstOrDefault(n => n.Key == "SaveSnapshot");
+			if (saveSnapshot == null)
+				return false;
+
+			// A save is a file of this player. A server that is not on this machine, or that others have
+			// joined, has no say in which of them this client reads.
+			if (Connection is NetworkConnection network && ServerMayNameSave(network.EndPoint, LobbyInfo))
+				Game.StartGameFromSnapshot(LobbyInfo.GlobalSettings.Map, saveSnapshot.Value.Value);
+			else
+				Game.LeaveUnstartableGame("its server names a save, and it is not the server of this player's own game.");
+
+			return true;
 		}
 
 		// The orders that are issued and not sent. Those that a restored game had not sent yet go out ahead of the
@@ -201,6 +224,17 @@ namespace OpenRA.Network
 				if (client != null)
 					client.State = Session.ClientState.Disconnected;
 			}
+		}
+
+		/// <summary>
+		/// Whether the server at <paramref name="server"/> may name a save for this client to load when it starts
+		/// the game. A save is a file of this player, and it holds the game of one person. So only a server on this
+		/// machine may, and only while nobody else is in its lobby. Any other server could make a client read a file
+		/// of its own into a game that others play.
+		/// </summary>
+		public static bool ServerMayNameSave(IPEndPoint server, Session lobbyInfo)
+		{
+			return server != null && IPAddress.IsLoopback(server.Address) && lobbyInfo.NonBotClients.Count() == 1;
 		}
 	}
 }

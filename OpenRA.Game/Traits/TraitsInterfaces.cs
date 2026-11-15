@@ -393,6 +393,7 @@ namespace OpenRA.Traits
 	public interface INotifyGameLoading { void GameLoading(World w); }
 	public interface INotifyGameLoaded { void GameLoaded(World w); }
 	public interface INotifyGameSaved { void GameSaved(World w, bool isAutoSave); }
+	public interface INotifyGameNotSaved { void GameNotSaved(World w, bool isAutoSave); }
 
 	public interface IGameSaveTraitData
 	{
@@ -683,30 +684,23 @@ namespace OpenRA.Traits
 	}
 
 	/// <summary>
-	/// A trait whose actor needs an init to be created by a snapshot load, and must create nothing else, such as its
-	/// passengers. <c>saved</c> gives the text of a saved field of this trait by name, or null.
-	/// <c>savedActor</c> gives the actor that such a field names. That actor has a lower ID.
+	/// The info of a trait that adds inits for an actor that a snapshot load creates. An init gives a creation input
+	/// from the save, or stops creation of what the snapshot already holds. <c>saved</c> gives a saved field of this
+	/// trait, and <c>savedActor</c> gives the actor that such a field names.
 	/// </summary>
 	public interface ISnapshotCreationInfo : ITraitInfoInterface
 	{
 		void AddSnapshotInits(TypeDictionary inits, Player owner, Func<string, string> saved, Func<string, Actor> savedActor);
 	}
 
-	/// <summary>
-	/// A trait or an effect that builds again, after a snapshot load, state that the snapshot leaves out.
-	/// It must not change saved state. <c>self</c> is null for an effect.
-	/// </summary>
+	/// <summary>Builds again, after a snapshot load, state that the snapshot leaves out. <c>self</c> is null for an effect.</summary>
 	[RequireExplicitImplementation]
 	public interface IRebuildAfterLoad
 	{
 		void RebuildAfterLoad(Actor self);
 	}
 
-	/// <summary>
-	/// A trait, an activity or an effect that waits for an animation. A snapshot keeps the frame, not the callback,
-	/// so after a load this attaches the callback again. A second call changes nothing.
-	/// <c>self</c> is null for an effect.
-	/// </summary>
+	/// <summary>Attaches an animation callback again after a snapshot load. <c>self</c> is null for an effect.</summary>
 	[RequireExplicitImplementation]
 	public interface IResumeAnimations : IActivityInterface
 	{

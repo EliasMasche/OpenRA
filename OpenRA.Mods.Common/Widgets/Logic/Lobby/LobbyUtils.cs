@@ -237,7 +237,7 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 
 		public static void SelectSpawnPoint(OrderManager orderManager, MapPreviewWidget mapPreview, MapPreview preview, MouseInput mi)
 		{
-			if (orderManager.LocalClient.State == Session.ClientState.Ready)
+			if (orderManager.LocalClient.State == Session.ClientState.Ready || HoldsSave(orderManager))
 				return;
 
 			if (mi.Button == MouseButton.Left)
@@ -445,7 +445,7 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 		{
 			var slot = parent.Get<DropDownButtonWidget>("SLOT_OPTIONS");
 			slot.IsVisible = () => true;
-			slot.IsDisabled = () => orderManager.LocalClient.IsReady;
+			slot.IsDisabled = () => orderManager.LocalClient.IsReady || HoldsSave(orderManager);
 
 			var truncated = new CachedTransform<string, string>(name =>
 				WidgetUtils.TruncateText(name, slot.Bounds.Width - slot.Bounds.Height - slot.LeftMargin - slot.RightMargin,
@@ -553,7 +553,7 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 			OrderManager orderManager, WorldRenderer worldRenderer, IColorPickerManagerInfo colorManager)
 		{
 			var colorDropdown = parent.Get<DropDownButtonWidget>("COLOR");
-			colorDropdown.IsDisabled = () => (s != null && s.LockColor) || orderManager.LocalClient.IsReady;
+			colorDropdown.IsDisabled = () => (s != null && s.LockColor) || orderManager.LocalClient.IsReady || HoldsSave(orderManager);
 			colorDropdown.OnMouseDown = _ => colorManager.ShowColorDropDown(colorDropdown, c.Color, c.Faction, worldRenderer, color =>
 			{
 				if (c == orderManager.LocalClient)
@@ -578,7 +578,7 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 			Dictionary<string, LobbyFaction> factions)
 		{
 			var dropdown = parent.Get<DropDownButtonWidget>("FACTION");
-			dropdown.IsDisabled = () => s.LockFaction || orderManager.LocalClient.IsReady;
+			dropdown.IsDisabled = () => s.LockFaction || orderManager.LocalClient.IsReady || HoldsSave(orderManager);
 			dropdown.OnMouseDown = _ => ShowFactionDropDown(dropdown, c, orderManager, factions);
 
 			var description = factions[c.Faction].Description != null ? FluentProvider.GetMessage(factions[c.Faction].Description) : null;
@@ -606,7 +606,7 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 		{
 			var dropdown = parent.Get<DropDownButtonWidget>("TEAM_DROPDOWN");
 			dropdown.IsVisible = () => true;
-			dropdown.IsDisabled = () => s.LockTeam || orderManager.LocalClient.IsReady;
+			dropdown.IsDisabled = () => s.LockTeam || orderManager.LocalClient.IsReady || HoldsSave(orderManager);
 			dropdown.OnMouseDown = _ => ShowTeamDropDown(dropdown, c, orderManager, map.PlayerCount);
 			dropdown.GetText = () => (c.Team == 0) ? "-" : c.Team.ToString(NumberFormatInfo.CurrentInfo);
 
@@ -625,7 +625,7 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 		{
 			var dropdown = parent.Get<DropDownButtonWidget>("HANDICAP_DROPDOWN");
 			dropdown.IsVisible = () => true;
-			dropdown.IsDisabled = () => s.LockHandicap || orderManager.LocalClient.IsReady;
+			dropdown.IsDisabled = () => s.LockHandicap || orderManager.LocalClient.IsReady || HoldsSave(orderManager);
 			dropdown.OnMouseDown = _ => ShowHandicapDropDown(dropdown, c, orderManager);
 
 			var handicapLabel = new CachedTransform<int, string>(h => $"{h}%");
@@ -648,7 +648,7 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 		{
 			var dropdown = parent.Get<DropDownButtonWidget>("SPAWN_DROPDOWN");
 			dropdown.IsVisible = () => true;
-			dropdown.IsDisabled = () => s.LockSpawn || orderManager.LocalClient.IsReady;
+			dropdown.IsDisabled = () => s.LockSpawn || orderManager.LocalClient.IsReady || HoldsSave(orderManager);
 			dropdown.OnMouseDown = _ =>
 			{
 				var spawnPoints = Enumerable.Range(0, map.SpawnPoints.Length + 1).Except(
@@ -688,6 +688,13 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 			}
 			else
 				status.IsChecked = () => true;
+		}
+
+		// Whether the lobby holds a loaded save. Its slots, players and options are those of the save, and the
+		// server refuses a command that changes them.
+		internal static bool HoldsSave(OrderManager orderManager)
+		{
+			return orderManager.LobbyInfo.GlobalSettings.HoldsSnapshotSave;
 		}
 
 		public static void SetupReadyWidget(Widget parent, Session.Client c)

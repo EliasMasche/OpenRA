@@ -417,6 +417,7 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 				{
 					{ "onExit", () => hideMenu = false },
 					{ "onStart", CloseMenu },
+					{ "onLoad", (Action<string, string>)LoadGameBrowserLogic.LoadOnLocalServer },
 				}, menuRoot);
 			};
 		}

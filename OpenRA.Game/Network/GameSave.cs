@@ -32,10 +32,17 @@ namespace OpenRA.Network
 
 		public readonly string BotName;
 
+		/// <summary>The name of the person in the slot, also of a person who left.</summary>
+		public readonly string Name;
+
+		/// <summary>The client index in the saved game. A snapshot names the client of each packet in transit by it.</summary>
+		public readonly int Index;
+
 		public SlotClient() { }
 
 		public SlotClient(Session.Client client)
 		{
+			Index = client.Index;
 			Color = client.Color;
 			Faction = client.Faction;
 			SpawnPoint = client.SpawnPoint;
@@ -47,6 +54,8 @@ namespace OpenRA.Network
 
 			if (client.Bot != null)
 				BotName = client.Name;
+			else
+				Name = client.Name;
 		}
 
 		public void ApplyTo(Session.Client client)
@@ -75,11 +84,17 @@ namespace OpenRA.Network
 		}
 	}
 
-	public class GameSave
+	public partial class GameSave
 	{
 		public const int EOFMarker = -2;
 		public const int MetadataMarker = -1;
 		public const int TraitDataMarker = -3;
+		public const int SnapshotMarker = -4;
+
+		public const int MaxTraitData = 4096;
+
+		// The length of the three numbers that end a file: two offsets and the end marker.
+		const int TrailerLength = 12;
 
 		readonly MemoryStream ordersStream = new();
 
@@ -93,6 +108,7 @@ namespace OpenRA.Network
 		public Dictionary<string, Session.Slot> Slots { get; private set; }
 		public Dictionary<string, SlotClient> SlotClients { get; private set; }
 		public Dictionary<int, MiniYaml> TraitData = [];
+
 		public MapGenerationArgs MapGenerationArgs;
 
 		// Set on game start
@@ -106,10 +122,13 @@ namespace OpenRA.Network
 		}
 
 		public GameSave(string filepath)
+			: this(File.OpenRead(filepath), filepath) { }
+
+		GameSave(Stream stream, string filepath)
 		{
-			using (var rs = File.OpenRead(filepath))
+			using (var rs = stream)
 			{
-				rs.Seek(-12, SeekOrigin.End);
+				rs.Seek(-TrailerLength, SeekOrigin.End);
 				var metadataOffset = rs.ReadInt32();
 				var traitDataOffset = rs.ReadInt32();
 				if (rs.ReadInt32() != EOFMarker)
@@ -152,6 +171,8 @@ namespace OpenRA.Network
 				var traitData = MiniYaml.FromString(rs.ReadLengthPrefixedString(Encoding.UTF8, Connection.MaxOrderLength), $"{filepath}:traitData");
 				foreach (var td in traitData)
 					TraitData.Add(Exts.ParseInt32Invariant(td.Key), td.Value);
+
+				ReadSnapshot(rs, filepath);
 
 				rs.Seek(0, SeekOrigin.Begin);
 				ordersStream.Write(rs.ReadBytes(metadataOffset), 0, metadataOffset);
@@ -273,6 +294,12 @@ namespace OpenRA.Network
 
 		public void AddTraitData(int traitIndex, MiniYaml data)
 		{
+			if (!TraitData.ContainsKey(traitIndex) && TraitData.Count >= MaxTraitData)
+			{
+				Log.Write("server", $"The data of the trait {traitIndex} is ignored: a save holds the data of {MaxTraitData} traits at most.");
+				return;
+			}
+
 			TraitData[traitIndex] = data;
 		}
 
@@ -289,17 +316,49 @@ namespace OpenRA.Network
 			//   - Lobby slot-client data (yaml)
 			// - Trait data start marker
 			//   - Custom trait yaml
+			// - Snapshot start marker, only in a save that holds a snapshot and no orders
+			//   - Snapshot (length-prefixed bytes of a SnapshotFile)
 			// - File offset of metadata start marker
 			// - File offset of custom trait data
 			// - Metadata end marker
-			using (var file = File.Create(path))
+
+			// The snapshot can be in the file that this writes.
+			var snapshotBytes = ReadSnapshot();
+
+			// Written beside its file and then moved over it, so a reader never sees half a save.
+			var written = path + ".tmp";
+			try
+			{
+				Write(written, snapshotBytes);
+				File.Move(written, path, true);
+			}
+			catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+			{
+				try
+				{
+					File.Delete(written);
+				}
+				catch (Exception d) when (d is IOException or UnauthorizedAccessException)
+				{
+					Log.Write("debug", $"The file {written} of a save that was not written stays: {d.Message}");
+				}
+
+				throw;
+			}
+		}
+
+		void Write(string written, byte[] snapshotBytes)
+		{
+			using (var file = File.Create(written))
 			{
 				ordersStream.Seek(0, SeekOrigin.Begin);
 				ordersStream.CopyTo(file);
 				file.Write(MetadataMarker);
 				file.Write(LastOrdersFrame);
 				file.Write(LastSyncFrame);
-				file.Write(lastSyncPacket, 0, Order.SyncHashOrderLength);
+
+				var syncPacket = lastSyncPacket.Length == Order.SyncHashOrderLength ? lastSyncPacket : new byte[Order.SyncHashOrderLength];
+				file.Write(syncPacket, 0, Order.SyncHashOrderLength);
 
 				var globalSettingsNodes = new List<MiniYamlNode>() { GlobalSettings.Serialize() };
 				file.WriteLengthPrefixedString(Encoding.UTF8, globalSettingsNodes.WriteToString());
@@ -323,6 +382,13 @@ namespace OpenRA.Network
 					.Select(kv => new MiniYamlNode(kv.Key.ToStringInvariant(), kv.Value))
 					.ToList();
 				file.WriteLengthPrefixedString(Encoding.UTF8, traitDataNodes.WriteToString());
+
+				if (snapshotBytes.Length > 0)
+				{
+					file.Write(SnapshotMarker);
+					file.Write(snapshotBytes.Length);
+					file.Write(snapshotBytes);
+				}
 
 				file.Write((int)ordersStream.Length);
 				file.Write((int)traitDataOffset);

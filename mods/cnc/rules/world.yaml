@@ -270,6 +270,7 @@ World:
 		LoadedNotification:
 		SavedNotification:
 		SavedTextNotification: notification-game-saved
+		NotSavedTextNotification: notification-game-not-saved
 	LoadWidgetAtGameStart:
 		ShellmapRoot: MENU_BACKGROUND
 	ScriptTriggers:

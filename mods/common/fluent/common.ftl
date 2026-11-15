@@ -15,6 +15,7 @@ notification-no-start-without-players = Game cannot start without players.
 notification-insufficient-enabled-spawn-points = Unable to start the game until more spawn points are enabled.
 notification-malformed-command = Malformed { $command } command.
 notification-state-unchanged-ready = Cannot change state when marked as ready.
+notification-lobby-of-a-save = The slots and options are those of the loaded save. Change the map to start a new game.
 notification-invalid-faction-selected = Invalid faction selected: { $faction }.
 notification-state-unchanged-game-started = State cannot be changed once the game has started ({ $command }).
 notification-requires-host = Only the host can do that.
@@ -92,6 +93,13 @@ notification-game-unpaused = The game has been un-paused by { $player }.
 
 ## Server
 notification-game-started = Game started.
+notification-save-of-one-player = This save holds the game of one player. It cannot be loaded or started while another player is in the lobby.
+notification-save-of-more-players = This save holds the game of more players than are in the lobby. It cannot be loaded until each of them is in the lobby.
+notification-save-cannot-be-loaded = This save cannot be loaded. The file is damaged or missing, or another version of the game wrote it.
+notification-loaded-save = { $player } loaded the save { $save }.
+notification-save-not-on-this-server = A dedicated server does not load a save.
+dialog-game-could-not-start-title = The game could not start
+dialog-game-could-not-start-text = You left the game before it started: { $reason }
 
 ## PlayerMessageTracker
 notification-chat-temp-disabled =

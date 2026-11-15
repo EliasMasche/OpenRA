@@ -92,11 +92,17 @@ Container@SERVER_LOBBY:
 							Height: 31
 							Text: button-multiplayer-tabs-servers-tab
 				Button@CHANGEMAP_BUTTON:
-					X: PARENT_WIDTH - WIDTH - 15
+					X: PARENT_WIDTH - 189
 					Y: 254
-					Width: 174
+					Width: 109
 					Height: 25
 					Text: button-bg-changemap
+				Button@LOAD_GAME_BUTTON:
+					X: PARENT_WIDTH - WIDTH - 15
+					Y: 254
+					Width: 60
+					Height: 25
+					Text: button-bg-load-game
 				Container@TOP_PANELS_ROOT:
 					X: 15
 					Y: 30

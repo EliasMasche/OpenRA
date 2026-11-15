@@ -584,7 +584,11 @@ namespace OpenRA
 			}
 		}
 
-		public void RequestGameSave(string filename, bool isAutosave)
+		/// <summary>
+		/// Asks the server for a save that holds every order of the game, which a load applies again from the start.
+		/// It is the save of a world that <see cref="RequestGameSave"/> cannot take a snapshot of.
+		/// </summary>
+		public void RequestOrderSave(string filename, bool isAutosave)
 		{
 			// Allow traits to save arbitrary data that will be passed back via IGameSaveTraitData.ResolveTraitData
 			// at the end of the save restoration
