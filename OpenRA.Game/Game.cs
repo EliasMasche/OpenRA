@@ -132,14 +132,14 @@ namespace OpenRA
 			OrderManager = om;
 		}
 
-		public static void JoinReplay(string replayFile)
+		public static void JoinReplay(string replayFile, StartupActors startupActors = StartupActors.FromMap)
 		{
-			JoinInner(new OrderManager(new ReplayConnection(replayFile)));
+			JoinInner(new OrderManager(new ReplayConnection(replayFile), startupActors));
 		}
 
-		static void JoinLocal()
+		internal static void JoinLocal(StartupActors startupActors = StartupActors.FromMap)
 		{
-			JoinInner(new OrderManager(new EchoConnection()));
+			JoinInner(new OrderManager(new EchoConnection(), startupActors));
 
 			// Add a spectator client for the local player
 			// On the shellmap this player is controlling the map via scripted orders

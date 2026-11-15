@@ -115,9 +115,10 @@ namespace OpenRA.Network
 			Connection.StartGame();
 		}
 
-		public OrderManager(IConnection conn)
+		public OrderManager(IConnection conn, StartupActors startupActors = StartupActors.FromMap)
 		{
 			Connection = conn;
+			StartupActors = startupActors;
 			syncReport = new SyncReport(this);
 
 			LastTickTime = new TickTime(() => SuggestedTimestep, Game.RunTime);
