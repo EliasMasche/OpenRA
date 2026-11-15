@@ -292,6 +292,7 @@ namespace OpenRA.Network
 
 		public void TickImmediate()
 		{
+			SendNextUploadChunk();
 			SendImmediateOrders();
 
 			ReceiveAllOrdersAndCheckSync();
@@ -299,6 +300,9 @@ namespace OpenRA.Network
 
 		public bool TryTick()
 		{
+			// A save order applies to the tick before. Its save ran between that tick and this one.
+			savesAfterThisTick = false;
+
 			var shouldTick = true;
 
 			if (IsNetFrame)

@@ -18,15 +18,11 @@ namespace OpenRA
 {
 	public static partial class Game
 	{
-		// The snapshot of saveFile is loaded into the world before its first tick. A save that cannot be read or
-		// loaded ends the game for this client.
+		// A save that cannot be read or loaded ends the game for this client.
 		internal static void StartGameFromSnapshot(string uid, string saveFile)
 		{
-			// The file is in the folder that the server of this game reads its saves from.
 			var path = Path.Combine(Platform.SupportDir, "Saves", ModData.Manifest.Id, ModData.Manifest.Metadata.Version, Path.GetFileName(saveFile));
 
-			// The file can change after the server read it. As on the server, an exception of this read means that
-			// the save cannot be loaded.
 			SnapshotFile snapshot;
 			GameSave save;
 			try
@@ -40,12 +36,12 @@ namespace OpenRA
 				return;
 			}
 
-			// A replay runs a game from its first tick, and this game goes on from a later one. So it is not recorded.
-			// The connection hands the order that starts the game to the recording after this call, so no file exists yet.
+			// A replay starts at the first tick, and this game at a later one, so it is not recorded.
 			if (OrderManager.Connection is NetworkConnection connection)
 				connection.StopRecording();
 
 			OrderManager.StartupActors = StartupActors.FromSnapshot;
+			OrderManager.SavedSlotClients = save.SlotClients;
 			StartGame(uid, WorldType.Regular);
 			try
 			{
@@ -64,10 +60,7 @@ namespace OpenRA
 
 		static string startFailure = "";
 
-		/// <summary>
-		/// Why the last game left before it started, until the menu has told the player. Empty when there is nothing to tell. It
-		/// gives the reason once.
-		/// </summary>
+		/// <summary>Why the last game left before it started, once, or empty.</summary>
 		public static string TakeStartFailure()
 		{
 			var reason = startFailure;
@@ -75,8 +68,7 @@ namespace OpenRA
 			return reason;
 		}
 
-		// Leaves a game that the server started and that this client cannot run. A host without a display has no
-		// menu to go back to, so its world is disposed and the game is over. A player who sees the menu is told why.
+		// Leaves a game that the server started and that this client cannot run.
 		internal static void LeaveUnstartableGame(string reason)
 		{
 			Log.Write("debug", $"The game was left before it started: {reason}");

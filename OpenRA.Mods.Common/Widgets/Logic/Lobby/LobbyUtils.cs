@@ -674,7 +674,10 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 		{
 			var status = parent.Get<CheckboxWidget>("STATUS_CHECKBOX");
 			status.IsVisible = () => true;
-			status.IsDisabled = () => c.Bot != null || map.Status != MapStatus.Available || !isEnabled;
+
+			// A client without its copy of the save that the lobby loads from copies has no world to start.
+			status.IsDisabled = () => c.Bot != null || map.Status != MapStatus.Available || !isEnabled ||
+				(LoadsFromCopies(orderManager) && !c.HasSaveCopy);
 			if (c.Bot == null)
 			{
 				var isChecked = new PredictedCachedTransform<Session.Client, bool>(cc => cc.IsReady);
@@ -695,6 +698,27 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 		internal static bool HoldsSave(OrderManager orderManager)
 		{
 			return orderManager.LobbyInfo.GlobalSettings.HoldsSnapshotSave;
+		}
+
+		// Whether the lobby loads its save from the copies of its people. Each person of such a lobby takes a slot that
+		// the save holds for a person. The person can change slots until the game starts.
+		internal static bool LoadsFromCopies(OrderManager orderManager)
+		{
+			return orderManager.LobbyInfo.GlobalSettings.SnapshotSave != null;
+		}
+
+		// Whether the save of the lobby refuses that the local client takes slot. The slots of a save do not change, so
+		// a person can take only a free slot that the save holds for a person. The server applies the same rule.
+		internal static bool SaveRefusesSlot(OrderManager orderManager, string slot)
+		{
+			return HoldsSave(orderManager) && !orderManager.LobbyInfo.IsSavedSlotFree(slot);
+		}
+
+		// Whether the save of the lobby refuses that the local client leaves its slot. Only the lobby of a save that
+		// loads from copies lets a person do it.
+		internal static bool SaveRefusesSpectator(OrderManager orderManager)
+		{
+			return HoldsSave(orderManager) && !LoadsFromCopies(orderManager);
 		}
 
 		public static void SetupReadyWidget(Widget parent, Session.Client c)

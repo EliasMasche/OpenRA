@@ -408,6 +408,11 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 			if (world.Type != WorldType.Regular || !world.LobbyInfo.GlobalSettings.EnableGameSaves || world.IsReplay)
 				return;
 
+			// A load leaves this game for a game on a server of this player. The others of a game of more than one
+			// person load a save from the lobby of their server.
+			if (world.LobbyInfo.NonBotClients.Count() > 1)
+				return;
+
 			var button = AddButton("LOAD_GAME", LoadGameButton);
 			button.IsDisabled = () => leaving || !LoadGameBrowserLogic.IsLoadPanelEnabled(modData.Manifest);
 			button.OnClick = () =>
@@ -425,6 +430,10 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 		void CreateSaveGameButton()
 		{
 			if (world.Type != WorldType.Regular || !world.LobbyInfo.GlobalSettings.EnableGameSaves || world.IsReplay)
+				return;
+
+			// The host saves a game of more than one person, and each client writes its own copy.
+			if (world.LobbyInfo.NonBotClients.Count() > 1 && !Game.IsHost)
 				return;
 
 			var button = AddButton("SAVE_GAME", SaveGameButton);

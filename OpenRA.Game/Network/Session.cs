@@ -11,6 +11,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
@@ -94,6 +95,18 @@ namespace OpenRA.Network
 			return Clients.SingleOrDefault(c => c.Slot == slot);
 		}
 
+		/// <summary>Whether a person can take <paramref name="slot"/>: the save holds it for a person, and it is free.</summary>
+		public bool IsSavedSlotFree(string slot)
+		{
+			return slot != null && GlobalSettings.SnapshotSaveSlots.Contains(slot) && ClientInSlot(slot) == null;
+		}
+
+		/// <summary>The free saved slots of a person. The game of the save starts when there are none.</summary>
+		public IEnumerable<string> EmptySavedSlots()
+		{
+			return GlobalSettings.SnapshotSaveSlots.Where(IsSavedSlotFree);
+		}
+
 		public string FirstEmptySlot()
 		{
 			return Slots.FirstOrDefault(s => !s.Value.Closed && ClientInSlot(s.Key) == null).Key;
@@ -154,6 +167,8 @@ namespace OpenRA.Network
 
 			// Linked to the online player database
 			public string Fingerprint;
+
+			public bool HasSaveCopy;
 
 			public MiniYamlNode Serialize()
 			{
@@ -224,11 +239,25 @@ namespace OpenRA.Network
 			// Timestep in milliseconds used for converting frame count to game duration
 			public int GameTimestep = 0;
 
-			/// <summary>
-			/// Whether the lobby holds a loaded save with a snapshot. Its slots and options are those of the save, and
-			/// the server refuses a command that changes them.
-			/// </summary>
+			/// <summary>Whether the lobby holds a loaded save with a snapshot. The server refuses changes of its slots and options.</summary>
 			public bool HoldsSnapshotSave;
+
+			/// <summary>
+			/// The name of the snapshot save of a multiplayer lobby, or null. A copy is of this save when its game is
+			/// <see cref="GameUid"/> and its snapshot has this tick and this sync hash.
+			/// </summary>
+			public string SnapshotSave;
+			public int SnapshotSaveTick;
+			public int SnapshotSaveSyncHash;
+
+			/// <summary>The SHA-256 and size of the file of the admin that the server holds, or empty and zero.</summary>
+			public string SnapshotSaveFileHash;
+			public int SnapshotSaveFileSize;
+
+			/// <summary>
+			/// The saved slots of a person, also of a person who left. Empty when the lobby holds no such save.
+			/// </summary>
+			public ImmutableArray<string> SnapshotSaveSlots = [];
 
 			[FieldLoader.Ignore]
 			public Dictionary<string, LobbyOptionState> LobbyOptions = [];

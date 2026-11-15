@@ -164,7 +164,8 @@ namespace OpenRA.Mods.Common.Server
 		const string VoteKickDisabled = "notification-vote-kick-disabled";
 
 		// The commands that change the slots, the players or the options. A save with a snapshot holds the world
-		// that they made, so the lobby of such a save keeps those of the save.
+		// that they made, so the lobby of such a save keeps those of the save. The exception is a person who takes
+		// a saved slot of a person, or none, in the lobby of a save that loads from copies.
 		static readonly FrozenSet<string> GameChangingCommands = new[]
 		{
 			"slot", "spectate", "slot_close", "slot_open", "slot_bot", "option", "reset_options", "assignteams", "make_admin",
@@ -238,7 +239,7 @@ namespace OpenRA.Mods.Common.Server
 					server.SendFluentMessageTo(conn, StateUnchangedReady);
 					return false;
 				}
-				else if (server.HasSnapshotSave && GameChangingCommands.Contains(command.Split(' ')[0]))
+				else if (server.HasSnapshotSave && GameChangingCommands.Contains(command.Split(' ')[0]) && !SeatsSavedPlayer(server, command))
 				{
 					server.SendFluentMessageTo(conn, LobbyOfASave);
 					return false;
@@ -246,6 +247,17 @@ namespace OpenRA.Mods.Common.Server
 
 				return true;
 			}
+		}
+
+		// Whether command puts a person in a free saved slot of a person, or in no slot. Only for the lobby of a save
+		// that loads from copies. Each person takes a slot of such a lobby, and can change slots until the game starts.
+		static bool SeatsSavedPlayer(S server, string command)
+		{
+			if (!server.LoadsFromCopies)
+				return false;
+
+			var parts = command.Split(' ', 2);
+			return parts[0] == "spectate" || (parts[0] == "slot" && parts.Length == 2 && server.LobbyInfo.IsSavedSlotFree(parts[1]));
 		}
 
 		public bool InterpretCommand(S server, Connection conn, Session.Client client, string cmd)
@@ -381,6 +393,15 @@ namespace OpenRA.Mods.Common.Server
 
 				if (slot.Closed || server.LobbyInfo.ClientInSlot(s) != null)
 					return false;
+
+				// A saved slot has the faction, team, color, spawn point and handicap of the save.
+				if (server.LoadsFromCopies)
+				{
+					server.SeatInSavedSlot(client, s);
+					server.SyncLobbyClients();
+					CheckAutoStart(server);
+					return true;
+				}
 
 				// If the previous slot had a locked spawn then we must not carry that to the new slot
 				var oldSlot = client.Slot != null ? server.LobbyInfo.Slots[client.Slot] : null;
@@ -978,6 +999,9 @@ namespace OpenRA.Mods.Common.Server
 				server.SendFluentMessage(NewAdmin, "player", newAdminClient.Name);
 				Log.Write("server", $"{newAdminClient.Name} is now the admin.");
 				server.SyncLobbyClients();
+
+				// The new admin gives the file that the lobby still lacks.
+				server.RequestSharedFile();
 
 				return true;
 			}

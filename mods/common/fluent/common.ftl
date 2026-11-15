@@ -96,8 +96,16 @@ notification-game-started = Game started.
 notification-save-of-one-player = This save holds the game of one player. It cannot be loaded or started while another player is in the lobby.
 notification-save-of-more-players = This save holds the game of more players than are in the lobby. It cannot be loaded until each of them is in the lobby.
 notification-save-cannot-be-loaded = This save cannot be loaded. The file is damaged or missing, or another version of the game wrote it.
+notification-copy-of-another-save = Your copy of this save is not a copy of the save that the host loaded.
+notification-no-copy-of-the-save = You have no copy of the save { $save } that the host loaded. The file is missing or damaged, or it is of another save. The game of this save cannot start while you are in the lobby.
 notification-loaded-save = { $player } loaded the save { $save }.
+notification-save-needs-each-player = The game of this save starts once a person sits in each slot of a player of the save, and each person in the lobby has a copy of the save. People without a copy, and slots without a person: { $players }.
 notification-save-not-on-this-server = A dedicated server does not load a save.
+notification-asking-for-shared-save = You have no copy of the save { $save }, so you ask the server for the file of the host ({ $size } KB).
+notification-took-shared-save =You have no copy of the save { $save }, so the server gave you the file of the host ({ $size } KB).
+notification-shared-save-refused = The file of the save that the server gave you is refused: { $reason } The game of this save cannot start while you are in the lobby.
+notification-copy-too-large-to-share = Your copy of the save is too large to give to the players who have none ({ $size } KB, and the server allows { $limit } KB).
+notification-shared-save-not-taken = The server did not take the file of your save: { $reason }
 dialog-game-could-not-start-title = The game could not start
 dialog-game-could-not-start-text = You left the game before it started: { $reason }
 

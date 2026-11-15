@@ -22,7 +22,7 @@ namespace OpenRA.Mods.Common.Traits
 
 	[TraitLocation(SystemActors.World | SystemActors.EditorWorld)]
 	[CosmeticState("The selection of the player of this client. Another client has its own, and the simulation never reads it.")]
-	public class Selection : ISelection, INotifyCreated, INotifyOwnerChanged, ITick, IGameSaveTraitData
+	public class Selection : ISelection, INotifyCreated, INotifyOwnerChanged, ITick, IGameSaveTraitData, INotifyGameLoaded
 	{
 		public int Hash { get; private set; }
 		public IReadOnlyCollection<Actor> Actors => actors;
@@ -82,6 +82,14 @@ namespace OpenRA.Mods.Common.Traits
 				Remove(a);
 			else
 				UpdateHash();
+		}
+
+		void INotifyGameLoaded.GameLoaded(World w)
+		{
+			// A loaded copy can be of another client, as the file of the admin is, or of another slot. Its selection is
+			// of the player of that copy, so this client keeps only the actors of its own player.
+			foreach (var a in actors.Where(a => a.Owner != w.LocalPlayer).ToList())
+				Remove(a);
 		}
 
 		public bool Contains(Actor a)

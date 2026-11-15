@@ -548,10 +548,11 @@ namespace OpenRA.Server
 				{
 					lock (LobbyInfoLock)
 					{
-						client.Slot = LobbyInfo.FirstEmptySlot();
+						// In the lobby of a save that loads from copies, a person is a spectator until it takes a saved slot.
+						client.Slot = LoadsFromCopies ? null : LobbyInfo.FirstEmptySlot();
 						client.IsAdmin = !LobbyInfo.Clients.Any(c => c.IsAdmin);
 
-						if (client.IsObserver && !LobbyInfo.GlobalSettings.AllowSpectators)
+						if (client.IsObserver && !LobbyInfo.GlobalSettings.AllowSpectators && !LoadsFromCopies)
 						{
 							SendOrderTo(newConn, "ServerError", Full);
 							DropClient(newConn);
@@ -931,9 +932,8 @@ namespace OpenRA.Server
 				// TODO: Replace static latency with a dynamic order buffering system
 				if (data.Length == 0 || data[0] != (byte)OrderType.SyncHash)
 				{
-					// A game that goes on from a save can have more packets in transit than this server's latency
-					// gives, when the save is of a server with a longer one. A packet is never applied on a frame
-					// that the client already has a packet for, so such a game keeps the latency it was saved with.
+					// A game that continues from a save keeps the latency of the save, because its packets in transit
+					// fill those frames.
 					frame = Math.Max(frame + OrderLatency, conn.LastOrdersFrame + 1);
 					DispatchFrameToClient(conn, conn.PlayerIndex, CreateAckFrame(frame, 1));
 
@@ -1072,8 +1072,7 @@ namespace OpenRA.Server
 								ModData.Manifest.Id,
 								ModData.Manifest.Metadata.Version);
 
-							// A file that cannot be written, as on a full disk or over a file that is locked, is no reason
-							// to end the server. The client tells the player that the game was not saved.
+							// A file that cannot be written does not end the server.
 							try
 							{
 								if (!Directory.Exists(baseSavePath))
@@ -1108,13 +1107,12 @@ namespace OpenRA.Server
 						if (!TryReadSaveToLoad(conn, o.TargetString, out var load))
 							break;
 
-						var (filename, save, _) = load;
+						var (filename, save, _, _, _, fromCopies) = load;
 
 						ForgetGameSave();
 						GameSave = save;
 
-						// The settings that the settings of this server decide stay those of this server. A save can
-						// be of another server, or of this one before its settings changed.
+						// The settings of this server stay those of this server.
 						var serverSettings = LobbyInfo.GlobalSettings;
 						LobbyInfo.GlobalSettings = GameSave.GlobalSettings;
 						LobbyInfo.GlobalSettings.ServerName = serverSettings.ServerName;
@@ -1126,14 +1124,18 @@ namespace OpenRA.Server
 
 						// The save can be of a game that went on from a save. That save is not the save of this lobby.
 						LobbyInfo.GlobalSettings.HoldsSnapshotSave = false;
+						LobbyInfo.GlobalSettings.SnapshotSave = null;
+						LobbyInfo.GlobalSettings.SnapshotSaveTick = 0;
+						LobbyInfo.GlobalSettings.SnapshotSaveSyncHash = 0;
+						LobbyInfo.GlobalSettings.SnapshotSaveSlots = [];
+						LobbyInfo.GlobalSettings.SnapshotSaveFileHash = null;
+						LobbyInfo.GlobalSettings.SnapshotSaveFileSize = 0;
 
-						// The lobby can be of another map, as the lobby of a multiplayer server is. The game, its
-						// players and its rules are those of the map of the save.
+						// The game, its players and its rules are those of the map of the save.
 						Map = ModData.MapCache[LobbyInfo.GlobalSettings.Map];
 						LobbyInfo.GlobalSettings.MapStatus = MapStatusCache[Map];
 
-						// Each client makes a generated map from its arguments, as after the order GenerateMap. A client
-						// that joins later gets them when it joins.
+						// Each client makes a generated map from its arguments, as after GenerateMap.
 						if (Map.Class == MapClassification.Generated && save.MapGenerationArgs != null)
 						{
 							GeneratedMapData = save.MapGenerationArgs.Serialize().WriteToString();
@@ -1151,10 +1153,20 @@ namespace OpenRA.Server
 							if (c.Bot != null)
 								LobbyInfo.Clients.Remove(c);
 							else
+							{
 								c.Slot = null;
+
+								if (fromCopies)
+								{
+									c.SpawnPoint = 0;
+									c.Team = 0;
+									c.Handicap = 0;
+									c.Color = Color.White;
+								}
+							}
 						}
 
-						// Rebuild/remap the saved client state
+						// Rebuild/remap the saved client state.
 						var adminClientIndex = LobbyInfo.Clients.First(c => c.IsAdmin).Index;
 						foreach (var kv in GameSave.SlotClients)
 						{
@@ -1170,6 +1182,12 @@ namespace OpenRA.Server
 								kv.Value.ApplyTo(bot);
 								LobbyInfo.Clients.Add(bot);
 							}
+							else if (fromCopies)
+							{
+								// Also the slot of a person who left: the world keeps the player, and a new person
+								// takes the slot.
+								savedPeople[kv.Value.Index] = kv.Value;
+							}
 							else
 							{
 								// The server refused a save with more people than the lobby holds, so a person without
@@ -1184,9 +1202,28 @@ namespace OpenRA.Server
 						SyncLobbyInfo();
 						SyncLobbyClients();
 
-						// The save changed the slots and the options of everybody in the lobby, as a change of the map does.
 						SendFluentMessage(LoadedSave, "player", GetClient(conn).Name, "save", Path.GetFileNameWithoutExtension(filename));
 
+						break;
+					}
+
+					case GameSaveCopy.OrderString:
+					{
+						if (State < ServerState.GameStarted && LoadsFromCopies)
+							TakeCopy(conn, o.TargetString);
+
+						break;
+					}
+
+					case SharedSave.UploadOrder:
+					{
+						ReceiveSharedFileChunk(conn, o.TargetString);
+						break;
+					}
+
+					case SharedSave.RequestOrder:
+					{
+						SendSharedFile(conn, o.TargetString);
 						break;
 					}
 
@@ -1268,6 +1305,9 @@ namespace OpenRA.Server
 			{
 				orderBuffer?.RemovePlayer(toDrop.PlayerIndex);
 				Conns.Remove(toDrop);
+
+				copies.Remove(toDrop.PlayerIndex);
+				ForgetSharedFileClient(toDrop.PlayerIndex);
 
 				var dropClient = LobbyInfo.Clients.FirstOrDefault(c => c.Index == toDrop.PlayerIndex);
 				if (dropClient == null)
@@ -1413,9 +1453,13 @@ namespace OpenRA.Server
 					DropClient(c);
 				}
 
-				// A game of one person saves on a server that is not dedicated.
+				// A game of one person saves on a local or a multiplayer server. A game of more people saves only on a
+				// multiplayer server and on a map without a script. A snapshot does not hold the state of a script. A
+				// dedicated server never saves.
+				var people = LobbyInfo.NonBotClients.Count();
 				var hasScript = Map.WorldActorInfo.HasTraitInfo<IWorldScriptInfo>();
-				LobbyInfo.GlobalSettings.EnableGameSaves = Type != ServerType.Dedicated && LobbyInfo.NonBotClients.Count() == 1;
+				LobbyInfo.GlobalSettings.EnableGameSaves = Type != ServerType.Dedicated
+					&& (people == 1 || (Type == ServerType.Multiplayer && !hasScript));
 
 				// Player list for win/loss tracking
 				// HACK: NonCombatant and non-Playable players are set to null to simplify replay tracking
@@ -1442,8 +1486,7 @@ namespace OpenRA.Server
 					if (p != null)
 						gameInfo.Players.Add(p);
 
-				// A game that goes on from a save starts in the middle, and its replay could not be played. The recorder
-				// makes its file at the start order, so a recorder that is disposed before it writes none.
+				// A game that goes on from a save starts in the middle, so its replay could not be played.
 				if (recorder != null && HasSnapshotSave)
 				{
 					recorder.Dispose();
@@ -1453,6 +1496,11 @@ namespace OpenRA.Server
 				if (recorder != null)
 					recorder.Metadata = new ReplayMetadata(gameInfo);
 
+				// A game that goes on from copies applies the orders of a net frame in the order of the saved slots.
+				if (LoadsFromCopies)
+					LobbyInfo.Clients = [.. LobbyInfo.Clients.OrderBy(SavedIndexOf)];
+
+				ForgetSharedFile();
 				SyncLobbyInfo();
 
 				var gameSpeeds = Game.ModData.GetOrCreate<GameSpeeds>();
@@ -1470,10 +1518,7 @@ namespace OpenRA.Server
 
 				LobbyInfo.GlobalSettings.GameTimestep = gameSpeed.Timestep;
 
-				// The order log is the save of every order. A client asks for it only when a snapshot cannot hold the
-				// state of the scripts of the map, so a game on a map without scripts keeps none. The log replays a
-				// game from its first frame, so a game that goes on from a later one keeps none either. A dedicated
-				// server saves no game.
+				// The order log is the save of every order, only for a map with scripts and a game that starts at frame 1.
 				var keepsOrders = LobbyInfo.GlobalSettings.EnableGameSaves && startFrame == 1 && hasScript && Type != ServerType.Dedicated;
 				if (GameSave == null && keepsOrders)
 					GameSave = new GameSave();
@@ -1522,12 +1567,11 @@ namespace OpenRA.Server
 				// Clients require every frame to have an orders packet associated with it, so we must
 				// inject an empty packet for each frame that we are skipping forwards.
 				// TODO: Replace static latency with a dynamic order buffering system
-				// A game that goes on from a saved position has no gap: the packets that were in transit fill
-				// these frames. A position that was saved on a stalled frame holds one packet more than the latency.
+				// A game that goes on from a saved position has no gap: the packets in transit fill these frames.
 				var conns = Conns.Where(c => c.Validated).ToList();
 				foreach (var from in conns)
 				{
-					var packets = startPackets;
+					var packets = PacketsInTransit(from);
 					for (var i = 0; i < Math.Max(OrderLatency, packets.Length); i++)
 					{
 						from.LastOrdersFrame = firstFrame + i;

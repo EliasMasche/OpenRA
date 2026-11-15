@@ -500,7 +500,14 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 				orderManager.LobbyInfo.Slots.Any(sl => sl.Value.Required && orderManager.LobbyInfo.ClientInSlot(sl.Key) == null) ||
 				orderManager.LobbyInfo.Slots.All(sl => orderManager.LobbyInfo.ClientInSlot(sl.Key) == null) ||
 				(!orderManager.LobbyInfo.GlobalSettings.EnableSingleplayer && orderManager.LobbyInfo.NonBotPlayers.Count() < 2) ||
-				insufficientPlayerSpawns;
+				insufficientPlayerSpawns || AnyPlayerWithoutCopy() || AnyEmptySavedSlot();
+
+			// A save that loads from copies starts only when each person in the lobby has a copy. Also, each slot that
+			// the save holds for a person must have a person.
+			bool AnyPlayerWithoutCopy() => LobbyUtils.LoadsFromCopies(orderManager) &&
+				orderManager.LobbyInfo.NonBotClients.Any(c => !c.HasSaveCopy && c.State != Session.ClientState.Disconnected);
+
+			bool AnyEmptySavedSlot() => orderManager.LobbyInfo.EmptySavedSlots().Any();
 
 			var startGameButton = lobby.GetOrNull<ButtonWidget>("START_GAME_BUTTON");
 			if (startGameButton != null)
@@ -509,8 +516,8 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 
 				startGameButton.OnClick = () =>
 				{
-					// Bots and admins don't count
-					if (orderManager.LobbyInfo.Clients.Any(c => c.Slot != null && !c.IsAdmin && c.Bot == null && !c.IsReady))
+					// Bots and admins don't count, nor the slot of a person who left a saved game
+					if (orderManager.LobbyInfo.Clients.Any(c => c.Slot != null && !c.IsAdmin && c.Bot == null && !c.IsReady && c.State != Session.ClientState.Disconnected))
 						panel = PanelType.ForceStart;
 					else
 						StartGame();
@@ -816,7 +823,7 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 
 					var join = template.Get<ButtonWidget>("JOIN");
 					join.IsVisible = () => !slot.Closed;
-					join.IsDisabled = () => orderManager.LocalClient.IsReady || LobbyUtils.HoldsSave(orderManager);
+					join.IsDisabled = () => orderManager.LocalClient.IsReady || LobbyUtils.SaveRefusesSlot(orderManager, key);
 					join.OnClick = () => orderManager.IssueOrder(Order.Command("slot " + key));
 				}
 				else if ((client.Index == orderManager.LocalClient.Index) ||
@@ -945,7 +952,7 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 
 				var btn = spec.Get<ButtonWidget>("SPECTATE");
 				btn.OnClick = () => orderManager.IssueOrder(Order.Command("spectate"));
-				btn.IsDisabled = () => orderManager.LocalClient.IsReady || LobbyUtils.HoldsSave(orderManager);
+				btn.IsDisabled = () => orderManager.LocalClient.IsReady || LobbyUtils.SaveRefusesSpectator(orderManager);
 				btn.IsVisible = () => orderManager.LobbyInfo.GlobalSettings.AllowSpectators
 					|| orderManager.LocalClient.IsAdmin;
 

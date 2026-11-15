@@ -20,21 +20,64 @@ namespace OpenRA.Network
 {
 	public sealed partial class OrderManager
 	{
+		[FluentReference("save")]
+		const string NoCopyOfTheSave = "notification-no-copy-of-the-save";
+
+		[FluentReference("save", "size")]
+		const string AskingForTheSharedSave = "notification-asking-for-shared-save";
+
+		[FluentReference("save", "size")]
+		const string TookTheSharedSave = "notification-took-shared-save";
+
+		[FluentReference("reason")]
+		const string SharedSaveRefused = "notification-shared-save-refused";
+
+		[FluentReference("size", "limit")]
+		const string CopyTooLargeToShare = "notification-copy-too-large-to-share";
+
+		// The shortest game time, in seconds, between two save orders of a game of more people.
+		const int MinSecondsBetweenSaves = 5;
+
 		/// <summary>Why this client left the game before it started, as when it cannot load its save. Null otherwise.</summary>
 		public string StartFailure { get; internal set; }
 
-		/// <summary>
-		/// Where the actors that the world of this game starts with come from. Whoever joins the game decides it,
-		/// before the order that starts the game builds the world. That order decides it again when the server
-		/// starts the game of a save that holds a snapshot.
-		/// </summary>
+		/// <summary>Where the actors of the world come from. The order that starts the game of a snapshot save sets it.</summary>
 		public StartupActors StartupActors { get; internal set; }
 
+		// Whether the last tick applied a save order of a game of more people. Every client applies it on the same net frame.
+		bool savesAfterThisTick;
+
+		int? lastSaveOrderTick;
+
+		internal int SaveAllowedFromTick(World world)
+		{
+			return lastSaveOrderTick.HasValue ? lastSaveOrderTick.Value + TicksBetweenSaves(world) : 0;
+		}
+
+		static int TicksBetweenSaves(World world)
+		{
+			return MinSecondsBetweenSaves * 1000 / world.Timestep;
+		}
+
+		// The save that this client looked for its copy of, and the file that it reported, or "".
+		string copyLookedFor = "";
+		string copyReported = "";
+
+		// Whether the copy that this client reported is the file that the server gave it, which another person wrote.
+		bool reportedSharedFile;
+
+		string sharedFileAskedFor = "";
+		SharedSave sharedFile;
+
+		// One chunk goes out for each call of TickImmediate, as a packet is at most Connection.MaxOrderLength.
+		readonly Queue<string> chunksToUpload = [];
+
+		/// <summary>The slots of the save, with the client of each in the saved game. The game start sets it.</summary>
+		internal Dictionary<string, SlotClient> SavedSlotClients { get; set; }
+
 		/// <summary>
-		/// Where the order manager is between two ticks, for a save. A local game gives everything, and so does
-		/// a game on a server that one person plays. A replay gives its counters only, because its recording
-		/// holds the orders. Any other connection holds orders this client cannot give back, so it throws a
-		/// NotSupportedException.
+		/// Where the order manager is between two ticks. A replay gives its counters only. A connection that holds orders
+		/// this client cannot give back throws a NotSupportedException.
 		/// </summary>
 		public OrderManagerPosition CapturePosition()
 		{
@@ -59,19 +102,16 @@ namespace OpenRA.Network
 			return new OrderManagerPosition(Connection.LocalClientId, LocalFrameNumber, NetFrameNumber, sentOrdersFrame, [.. packets], Unsent(echo.UnsentOrders), []);
 		}
 
-		// A client keeps a packet that it has sent until the server acks it with the net frame it is applied on,
-		// and then holds it in its queue until that frame. The server stamps the packets of a client in the order
-		// they were sent, one net frame after the other. So the packets in transit follow each other from this net
-		// frame: the acked ones, then the ones that wait for their ack. A position holds the packets of this client
-		// only.
+		// The server stamps the packets of a client in order, one net frame after the other. So the packets in transit
+		// follow each other from this net frame: first the acked ones, then those that wait for their ack. Each client
+		// saves its own.
 		OrderManagerPosition CapturePosition(NetworkConnection network)
 		{
-			// A position holds the orders in transit of this client only.
-			if (LobbyInfo.NonBotClients.Count() > 1)
-				throw new NotSupportedException("orders in transit cannot be saved from a game that more than one person plays.");
+			// Writing a snapshot changes the layout of collections, so every client writes on the same tick or none does.
+			if (LobbyInfo.NonBotClients.Count() > 1 && !savesAfterThisTick)
+				throw new NotSupportedException("a game that more than one person plays is saved only after the tick of a save order, on which every client saves.");
 
-			// The world keeps the player of a person who left, and gives it no orders. A client takes note of the
-			// disconnect on the same frame as every other client, so every copy names the same people.
+			// Every client notes a disconnect on the same frame, so every copy names the same people.
 			var left = LobbyInfo.Clients.Where(c => !c.IsBot && c.Slot != null && !pendingOrders.ContainsKey(c.Index)).Select(c => c.Index).Order();
 
 			var localClient = Connection.LocalClientId;
@@ -90,27 +130,54 @@ namespace OpenRA.Network
 			return new OrderManagerPosition(localClient, LocalFrameNumber, NetFrameNumber, sentOrdersFrame, [.. packets], Unsent(network.UnsentOrders), [.. left]);
 		}
 
-		// Starts the game of the save that data of the order that starts a game names, and gives true. Gives false
-		// for a game that does not go on from a snapshot.
+		internal void ApplySaveOrder()
+		{
+			savesAfterThisTick = true;
+		}
+
+		// Every client applies the save order of the host on the same net frame, and every check reads shared state.
+		internal void HandleSaveGameOrder(World world, Order order, int clientId)
+		{
+			var client = LobbyInfo.ClientWithIndex(clientId);
+			if (world == null || world.IsReplay || client == null || !client.IsAdmin || !LobbyInfo.GlobalSettings.EnableGameSaves)
+				return;
+
+			if (!GameSaveCopy.IsCopyName(order.TargetString))
+				return;
+
+			// One save in MinSecondsBetweenSaves of game time at most. Every client drops the same order.
+			if (world.WorldTick < SaveAllowedFromTick(world))
+			{
+				Log.Write("debug", $"The save order {order.TargetString} is dropped: the last one was at tick {lastSaveOrderTick}.");
+				if (clientId != Connection.LocalClientId)
+					return;
+
+				world.NotifyGameNotSaved(order.ExtraData != 0);
+				return;
+			}
+
+			lastSaveOrderTick = world.WorldTick;
+			ApplySaveOrder();
+			world.SaveAfterThisTick(order.TargetString, order.ExtraData != 0);
+		}
+
+		// Starts the game of the save that the start order names, and gives true. Gives false for any other game.
 		internal bool TryStartFromSnapshot(List<MiniYamlNode> data)
 		{
-			// A save that holds a snapshot holds no orders to apply. Its game starts where the snapshot was taken.
 			var saveSnapshot = data.FirstOrDefault(n => n.Key == "SaveSnapshot");
 			if (saveSnapshot == null)
 				return false;
 
-			// A save is a file of this player. A server that is not on this machine, or that others have
-			// joined, has no say in which of them this client reads.
-			if (Connection is NetworkConnection network && ServerMayNameSave(network.EndPoint, LobbyInfo))
-				Game.StartGameFromSnapshot(LobbyInfo.GlobalSettings.Map, saveSnapshot.Value.Value);
+			// A server that is not on this machine, or that has other people, can only name the save of its lobby.
+			if (ServerMayNameSave(saveSnapshot.Value.Value))
+				Game.StartGameFromSnapshot(LobbyInfo.GlobalSettings.Map, copyReported.Length > 0 ? copyReported : saveSnapshot.Value.Value);
 			else
 				Game.LeaveUnstartableGame("its server names a save, and it is not the server of this player's own game.");
 
 			return true;
 		}
 
-		// The orders that are issued and not sent. Those that a restored game had not sent yet go out ahead of the
-		// ones issued since.
+		// Orders that a restored game had not sent go out ahead of the ones issued since.
 		byte[] Unsent(OrderPacket restoredUnsent)
 		{
 			var unsent = new OrderPacket(localOrders);
@@ -118,12 +185,9 @@ namespace OpenRA.Network
 		}
 
 		/// <summary>
-		/// Puts the order manager of a game that has just started where <see cref="CapturePosition()"/> found
-		/// another. In a local game each net frame applies the packet of its own number, so the packets have to
-		/// continue from the restored frame. A position without packets, as a replay gives, continues with
-		/// an empty one, in place of the packet a new game starts with. A replay takes its orders from its
-		/// recording, which then continues at the restored frame. A game on a server takes its packets from the
-		/// server, which starts at the net frame of the position.
+		/// Puts the order manager of a game that has just started where <see cref="CapturePosition()"/> found another.
+		/// A local game continues its packets from the restored frame, with an empty one when there are none. A replay
+		/// continues its recording there. A server starts at the net frame of the position.
 		/// </summary>
 		public void RestorePosition(OrderManagerPosition position)
 		{
@@ -158,22 +222,22 @@ namespace OpenRA.Network
 				queue.Enqueue((packet.Frame, new OrderPacket(new MemoryStream(packet.Orders))));
 		}
 
-		// The server hands out the packets that were in transit, as the first packets of its game. They can be here
-		// before the position is restored, so the queue stays as it is. Only the orders that were not sent go to
-		// the connection, which sends them ahead of the next ones.
+		// The server hands out the packets in transit, maybe before this. Only the unsent orders go to the connection.
 		void RestorePosition(NetworkConnection network, OrderManagerPosition position)
 		{
-			// A position holds the orders in transit of one client.
-			if (LobbyInfo.NonBotClients.Count() > 1)
-				throw new NotSupportedException("a position cannot be restored into a game that more than one person plays.");
+			if (LobbyInfo.NonBotClients.Count() > 1 && copyReported.Length == 0)
+				throw new NotSupportedException("a position cannot be restored into a game that more than one person plays, "
+					+ "unless it is the copy that this client reported.");
+
+			// A person who does not sit where the writer sat starts as in a new game, with no orders in transit.
+			if (copyReported.Length > 0 && !SitsInWriterSeat(position))
+				position = position with { Packets = [], LocalOrders = [] };
 
 			RestoreFrames(position, position.Packets);
 			network.RestoreOrders(TakeUnsent(position));
 		}
 
-		// Sets the three counters of position. Each packet has to be of the client of the position, and they have
-		// to follow each other from the net frame of the position. The client of a game that goes on from a save
-		// can have another index than in the saved game.
+		// Sets the three counters. The packets are of the client of the position and follow each other from its net frame.
 		void RestoreFrames(OrderManagerPosition position, ImmutableArray<OrderManagerPosition.Packet> packets)
 		{
 			for (var i = 0; i < packets.Length; i++)
@@ -186,16 +250,27 @@ namespace OpenRA.Network
 			sentOrdersFrame = position.SentOrdersFrame;
 		}
 
-		// Forgets the orders issued since, and gives the orders that the position had not sent, or null.
 		OrderPacket TakeUnsent(OrderManagerPosition position)
 		{
 			localOrders.Clear();
 			return position.LocalOrders.Length > 0 ? new OrderPacket(new MemoryStream(position.LocalOrders)) : null;
 		}
 
-		// The recording continues at the restored net frame. A packet of an earlier frame is dropped, also one that
-		// was received before the restore: the game the position comes from has applied it. A client that left
-		// before that frame sends nothing more, so no frame waits for it.
+		// Whether this person sits where the writer of the copy sat: in its slot, or among the spectators. As on the server.
+		bool SitsInWriterSeat(OrderManagerPosition position)
+		{
+			if (SavedSlotClients == null)
+				return false;
+
+			var slot = LocalClient?.Slot;
+			if (slot != null)
+				return SavedSlotClients.TryGetValue(slot, out var saved) && saved.Index == position.Client;
+
+			return !reportedSharedFile && !SavedSlotClients.Values.Any(c => c.Index == position.Client);
+		}
+
+		// The recording continues at the restored net frame. This drops the earlier packets, and a client that left
+		// sends no more.
 		void RestorePosition(ReplayConnection replay, OrderManagerPosition position)
 		{
 			if (position.HasOrders)
@@ -227,14 +302,179 @@ namespace OpenRA.Network
 		}
 
 		/// <summary>
-		/// Whether the server at <paramref name="server"/> may name a save for this client to load when it starts
-		/// the game. A save is a file of this player, and it holds the game of one person. So only a server on this
-		/// machine may, and only while nobody else is in its lobby. Any other server could make a client read a file
-		/// of its own into a game that others play.
+		/// Whether a server may name a save for this client to load: only a server on this machine, while nobody else is in
+		/// its lobby. Any other server could make a client read its own file into a game that others play.
 		/// </summary>
 		public static bool ServerMayNameSave(IPEndPoint server, Session lobbyInfo)
 		{
 			return server != null && IPAddress.IsLoopback(server.Address) && lobbyInfo.NonBotClients.Count() == 1;
+		}
+
+		// Also the save of the lobby of a game of more people, when this client reported a copy of it.
+		internal bool ServerMayNameSave(string save)
+		{
+			if (copyReported.Length > 0)
+				return save == LobbyInfo.GlobalSettings.SnapshotSave;
+
+			return Connection is NetworkConnection network && ServerMayNameSave(network.EndPoint, LobbyInfo);
+		}
+
+		// The admin tells the server of its copy of the save that the lobby holds, once for each save. Every other client
+		// asks the server for the file of the admin, and reports that file when it has it. So every client loads the same
+		// bytes. The server does not start the game of the save while this client is in the lobby without a copy.
+		internal void ReportSaveCopy()
+		{
+			var settings = LobbyInfo.GlobalSettings;
+			var save = string.IsNullOrEmpty(settings.SnapshotSave) ? ""
+				: $"{settings.GameUid} {settings.SnapshotSave} {settings.SnapshotSaveTick} {settings.SnapshotSaveSyncHash}";
+
+			if (save != copyLookedFor)
+			{
+				copyLookedFor = save;
+				copyReported = "";
+				reportedSharedFile = false;
+				sharedFileAskedFor = "";
+				sharedFile = null;
+				chunksToUpload.Clear();
+				if (save.Length > 0 && LocalClient?.IsAdmin == true)
+				{
+					var report = GameSaveCopy.Report(settings, settings.SnapshotSave);
+					if (report == null)
+						TextNotificationsManager.AddSystemLine(NoCopyOfTheSave, "save", Path.GetFileNameWithoutExtension(settings.SnapshotSave));
+					else
+					{
+						copyReported = settings.SnapshotSave;
+						IssueOrder(Order.FromTargetString(GameSaveCopy.OrderString, report, true));
+					}
+				}
+			}
+
+			RequestSharedFile();
+		}
+
+		void RequestSharedFile()
+		{
+			var settings = LobbyInfo.GlobalSettings;
+			var hash = settings.SnapshotSaveFileHash ?? "";
+			if (copyLookedFor.Length == 0 || copyReported.Length > 0 || hash == sharedFileAskedFor)
+				return;
+
+			sharedFileAskedFor = hash;
+			sharedFile = null;
+			if (hash.Length == 0)
+				return;
+
+			var size = settings.SnapshotSaveFileSize;
+			if (!SharedSave.IsHash(hash) || size <= 0 || size > SharedSave.MaxSize)
+			{
+				TextNotificationsManager.AddSystemLine(SharedSaveRefused, "reason", "the lobby names a file that no server shares.");
+				return;
+			}
+
+			sharedFile = new SharedSave(size);
+			TextNotificationsManager.AddSystemLine(AskingForTheSharedSave,
+				"save", Path.GetFileNameWithoutExtension(settings.SnapshotSave), "size", (size + 1023) / 1024);
+			IssueOrder(Order.FromTargetString(SharedSave.RequestOrder, hash, true));
+		}
+
+		// Checks the file when it is complete. The file is then the copy of this client.
+		internal void ReceiveSharedFileChunk(string chunk)
+		{
+			if (sharedFile == null)
+				return;
+
+			if (!sharedFile.TryAdd(chunk, out var refusal))
+			{
+				sharedFile = null;
+				TextNotificationsManager.AddSystemLine(SharedSaveRefused, "reason", refusal);
+				return;
+			}
+
+			if (!sharedFile.IsComplete)
+				return;
+
+			var file = sharedFile.Bytes;
+			sharedFile = null;
+			var settings = LobbyInfo.GlobalSettings;
+			try
+			{
+				SharedSave.Check(file, settings.SnapshotSaveFileHash, settings);
+				StoreSharedFile(file, settings.SnapshotSaveFileHash);
+			}
+			catch (Exception e)
+			{
+				Log.Write("client", $"The file of the save {settings.SnapshotSave} from the server is refused: {e}");
+				TextNotificationsManager.AddSystemLine(SharedSaveRefused, "reason", e.Message);
+			}
+		}
+
+		void StoreSharedFile(byte[] file, string hash)
+		{
+			var settings = LobbyInfo.GlobalSettings;
+			if (disposed || settings.SnapshotSaveFileHash != hash)
+				return;
+
+			try
+			{
+				// Written beside its name and then moved, as a save is.
+				var name = SharedSave.FileName(settings.SnapshotSaveFileHash);
+				var path = GameSaveCopy.SavePath(name);
+				Directory.CreateDirectory(Path.GetDirectoryName(path));
+				File.WriteAllBytes(path + ".tmp", file);
+				File.Move(path + ".tmp", path, true);
+
+				var report = GameSaveCopy.Report(settings, name);
+				if (report == null)
+				{
+					File.Delete(path);
+					throw new InvalidDataException("the file is not a copy of the save of the lobby.");
+				}
+
+				SharedSave.DeleteOlderFiles(Path.GetDirectoryName(path), name);
+				copyReported = name;
+				reportedSharedFile = true;
+				IssueOrder(Order.FromTargetString(GameSaveCopy.OrderString, report, true));
+				TextNotificationsManager.AddSystemLine(TookTheSharedSave,
+					"save", Path.GetFileNameWithoutExtension(settings.SnapshotSave), "size", (file.Length + 1023) / 1024);
+			}
+			catch (Exception e)
+			{
+				Log.Write("client", $"The file of the save {settings.SnapshotSave} from the server is refused: {e}");
+				TextNotificationsManager.AddSystemLine(SharedSaveRefused, "reason", e.Message);
+			}
+		}
+
+		// The server asks for the file of the copy of the admin. One chunk goes out for each call of TickImmediate.
+		internal void UploadCopy(string limitText)
+		{
+			chunksToUpload.Clear();
+			if (GameStarted || copyReported.Length == 0 || !Exts.TryParseInt32Invariant(limitText, out var limit))
+				return;
+
+			var path = GameSaveCopy.SavePath(copyReported);
+			try
+			{
+				var size = new FileInfo(path).Length;
+				if (size == 0 || size > Math.Min(limit, SharedSave.MaxSize))
+				{
+					TextNotificationsManager.AddSystemLine(CopyTooLargeToShare, "size", (size + 1023) / 1024, "limit", (limit + 1023) / 1024);
+					return;
+				}
+
+				var file = File.ReadAllBytes(path);
+				foreach (var chunk in SharedSave.Split(file))
+					chunksToUpload.Enqueue(chunk);
+			}
+			catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+			{
+				Log.Write("client", $"The copy {copyReported} cannot be read to share it: {e.Message}");
+			}
+		}
+
+		void SendNextUploadChunk()
+		{
+			if (!GameStarted && chunksToUpload.TryDequeue(out var chunk))
+				IssueOrder(Order.FromTargetString(SharedSave.UploadOrder, chunk, true));
 		}
 	}
 }

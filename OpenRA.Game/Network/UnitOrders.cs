@@ -223,6 +223,10 @@ namespace OpenRA.Network
 						nsr.GameNotSaved(orderManager.World, order.ExtraData != 0);
 					break;
 
+				case "CreateGameSnapshot":
+					orderManager.HandleSaveGameOrder(world, order, clientId);
+					break;
+
 				case "PauseGame":
 				{
 					var client = orderManager.LobbyInfo.ClientWithIndex(clientId);
@@ -321,6 +325,7 @@ namespace OpenRA.Network
 				case "SyncInfo":
 				{
 					orderManager.LobbyInfo = Session.Deserialize(order.TargetString, order.OrderString);
+					orderManager.ReportSaveCopy();
 					Game.SyncLobbyInfo();
 					break;
 				}
@@ -370,6 +375,7 @@ namespace OpenRA.Network
 							orderManager.LobbyInfo.GlobalSettings = Session.Global.Deserialize(node.Value);
 					}
 
+					orderManager.ReportSaveCopy();
 					Game.SyncLobbyInfo();
 					break;
 				}
@@ -410,6 +416,14 @@ namespace OpenRA.Network
 
 					break;
 				}
+
+				case SharedSave.UploadRequestOrder:
+					orderManager.UploadCopy(order.TargetString);
+					break;
+
+				case SharedSave.ChunkOrder:
+					orderManager.ReceiveSharedFileChunk(order.TargetString);
+					break;
 
 				default:
 				{

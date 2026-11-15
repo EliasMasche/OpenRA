@@ -10,6 +10,8 @@
 #endregion
 
 using System;
+using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.IO;
 using System.Linq;
 using OpenRA.Network;
@@ -31,29 +33,53 @@ namespace OpenRA.Server
 		[FluentReference]
 		const string RequiresHost = "notification-requires-host";
 
+		[FluentReference]
+		const string CopyOfAnotherSave = "notification-copy-of-another-save";
+
+		[FluentReference("players")]
+		const string SaveNeedsEachPlayer = "notification-save-needs-each-player";
+
 		[FluentReference("player", "save")]
 		const string LoadedSave = "notification-loaded-save";
 
 		[FluentReference]
 		const string SaveNotOnThisServer = "notification-save-not-on-this-server";
 
-		// A new game starts at net frame 1 with empty packets. A game that goes on from a saved position starts
-		// at the net frame of the position, with the packets that were in transit there.
+		[FluentReference("reason")]
+		const string SharedSaveNotTaken = "notification-shared-save-not-taken";
+
+		// A game that goes on from a saved position starts at its net frame, with the packets in transit there.
 		int startFrame = 1;
 		byte[][] startPackets = [];
 
-		// The file of the save that this game goes on from, when the save holds a snapshot. The client loads the
-		// snapshot from it.
 		string snapshotSave = "";
 
-		/// <summary>
-		/// Whether the lobby holds a save with a snapshot. Its slots and options are those of the save, and the
-		/// game goes on from the save when it starts.
-		/// </summary>
+		/// <summary>Whether the lobby holds a save with a snapshot, with the slots and options of the save.</summary>
 		public bool HasSnapshotSave => snapshotSave.Length > 0;
 
-		// Whether the server takes the save order named by order from conn. Only the admin saves the game. Any
-		// other client could write files into the folder of saves of this machine, as often as it sends the order.
+		/// <summary>Whether the save loads from copies. Each person takes a saved slot with the lobby command slot.</summary>
+		public bool LoadsFromCopies => LobbyInfo.GlobalSettings.SnapshotSave != null;
+
+		// The people of the saved slots, by their client index in the saved game, also a person who left.
+		readonly Dictionary<int, SlotClient> savedPeople = [];
+
+		// The copy that each connection reported: its client index in the saved game and its packets in transit. The admin
+		// reports its own file. Each other person reports the file of the admin, which the server gave it.
+		readonly Dictionary<int, (int SavedIndex, byte[][] Packets, bool IsShared)> copies = [];
+
+		ImmutableArray<int> savedLeft = [];
+
+		// The file of the admin, which the server hands to each other person.
+		byte[] sharedSave;
+
+		SharedSave upload;
+		int uploadFrom = -1;
+
+		int fileRequestedFrom = -1;
+
+		readonly HashSet<int> sentFileTo = [];
+
+		// Only the admin saves: any other client could write files into the folder of saves of this machine.
 		bool AcceptsSaveOrder(Connection conn, string order)
 		{
 			var client = GetClient(conn);
@@ -75,11 +101,9 @@ namespace OpenRA.Server
 			return filename;
 		}
 
-		// What the order that loads a save has read and checked, before the lobby changes.
-		readonly record struct SaveToLoad(string Filename, GameSave Save, OrderManagerPosition Position);
+		readonly record struct SaveToLoad(string Filename, GameSave Save, OrderManagerPosition Position, int Tick, int SyncHash, bool FromCopies);
 
-		// Reads the save that a client names in the order that loads a save, and checks it. A save that this server
-		// does not load tells the client why, and changes nothing.
+		// Reads and checks the save that the load order names. A refused save tells the client why and changes nothing.
 		bool TryReadSaveToLoad(Connection conn, string target, out SaveToLoad load)
 		{
 			load = default;
@@ -91,7 +115,6 @@ namespace OpenRA.Server
 				return false;
 			}
 
-			// A dedicated server runs no world, so it has no folder of saves of a player.
 			if (Type == ServerType.Dedicated)
 			{
 				SendFluentMessageTo(conn, SaveNotOnThisServer);
@@ -101,18 +124,15 @@ namespace OpenRA.Server
 			var filename = SanitizeFilename(target);
 			var savePath = Path.Combine(Platform.SupportDir, "Saves", ModData.Manifest.Id, ModData.Manifest.Metadata.Version, filename);
 
-			// A save is a file that can be damaged, changed by hand, written by another build, or gone. The
-			// server reads and checks each part that the load uses before the lobby changes. An exception
-			// of this read means that the save cannot be loaded. The server then refuses the save and tells
-			// the client. The lobby stays as it was, so the player can load another save or start a new game.
+			// A save can be damaged, changed by hand, of another build, or gone. An exception here refuses it.
 			GameSave save;
 			OrderManagerPosition position = null;
+			var (tick, syncHash) = (0, 0);
 			try
 			{
 				save = new GameSave(savePath);
 
-				// The game of a save starts on the map of the save, so this server needs that map. A generated
-				// map is made again from the arguments that the save holds, as the order GenerateMap makes it.
+				// Makes a generated map again from the arguments in the save, as GenerateMap does.
 				var preview = ModData.MapCache[save.GlobalSettings.Map];
 				if (preview.Status != MapStatus.Available && preview.Class != MapClassification.Generated
 					&& save.MapGenerationArgs?.Uid == save.GlobalSettings.Map && LobbyInfo.GlobalSettings.EnableMapGeneration)
@@ -126,8 +146,7 @@ namespace OpenRA.Server
 				if (MapPool != null && !MapPool.Contains(save.GlobalSettings.Map))
 					throw new InvalidDataException($"The map {save.GlobalSettings.Map} of the save is not in the map pool of this server.");
 
-				// The start of the game reads the game speed and the slots of the lobby, and a value that it
-				// does not know ends the server there. A save that was changed by hand can hold one.
+				// A value that the start does not know ends the server there.
 				var gameSpeeds = ModData.GetOrCreate<GameSpeeds>();
 				var gameSpeed = save.GlobalSettings.OptionOrDefault("gamespeed", gameSpeeds.DefaultSpeed);
 				if (!gameSpeeds.Speeds.ContainsKey(gameSpeed))
@@ -144,6 +163,7 @@ namespace OpenRA.Server
 				{
 					var snapshot = SnapshotFile.Read(save.ReadSnapshot());
 					position = OrdersSection.ReadPosition(snapshot.Section(SnapshotFormat.Sections.Orders));
+					(tick, syncHash) = (snapshot.Tick, snapshot.SyncHash);
 				}
 
 				if (position != null)
@@ -156,31 +176,33 @@ namespace OpenRA.Server
 				return false;
 			}
 
-			// A save with a snapshot holds the packets in transit of one client, so it is the game of one person. The
-			// server refuses it while another person is in the lobby, and changes nothing.
-			if (save.HasSnapshot && LobbyInfo.NonBotClients.Count() > 1)
+			// A multiplayer server loads a snapshot save from copies, and any copy loads for any person. A server of this
+			// machine loads the save of one person: its people share one folder of saves.
+			var fromCopies = save.HasSnapshot && Type == ServerType.Multiplayer;
+			if (!fromCopies)
 			{
-				SendFluentMessageTo(conn, SaveOfOnePlayer);
-				return false;
+				// A save with a snapshot holds the packets in transit of one client.
+				if (save.HasSnapshot && LobbyInfo.NonBotClients.Count() > 1)
+				{
+					SendFluentMessageTo(conn, SaveOfOnePlayer);
+					return false;
+				}
+
+				if (save.SlotClients.Values.Count(c => c.Bot == null) > LobbyInfo.NonBotClients.Count())
+				{
+					SendFluentMessageTo(conn, SaveOfMorePlayers);
+					return false;
+				}
 			}
 
-			// Each person of the save takes the place of a person in the lobby.
-			if (save.SlotClients.Values.Count(c => c.Bot == null) > LobbyInfo.NonBotClients.Count())
-			{
-				SendFluentMessageTo(conn, SaveOfMorePlayers);
-				return false;
-			}
-
-			load = new SaveToLoad(filename, save, position);
+			load = new SaveToLoad(filename, save, position, tick, syncHash, fromCopies);
 			return true;
 		}
 
 		void HoldSaveInLobby(SaveToLoad load)
 		{
-			var (filename, _, position) = load;
+			var (filename, _, position, tick, syncHash, fromCopies) = load;
 
-			// A save that holds a snapshot holds no orders to send. Its game goes on from the position of
-			// the snapshot, and the client loads the snapshot from the same file.
 			if (position != null)
 			{
 				ContinueFrom(position);
@@ -188,11 +210,20 @@ namespace OpenRA.Server
 				LobbyInfo.GlobalSettings.HoldsSnapshotSave = true;
 				GameSave = null;
 			}
+
+			if (fromCopies)
+			{
+				LobbyInfo.GlobalSettings.SnapshotSave = filename;
+				LobbyInfo.GlobalSettings.SnapshotSaveTick = tick;
+				LobbyInfo.GlobalSettings.SnapshotSaveSyncHash = syncHash;
+				savedLeft = position.Left;
+
+				LobbyInfo.GlobalSettings.SnapshotSaveSlots = savedPeople.Values.Select(p => p.Slot).Where(s => s != null).ToImmutableArray();
+			}
 		}
 
-		// Lets the game go on from position in place of a new start. The game begins at the net frame of the
-		// position, and its client gets the packets that were in transit there. Such a game keeps no order log,
-		// because the log would start in the middle of the game.
+		// The game starts at the net frame of position, with its packets in transit. It keeps no order log, which would
+		// start mid-game.
 		internal void ContinueFrom(OrderManagerPosition position)
 		{
 			lock (LobbyInfoLock)
@@ -206,9 +237,7 @@ namespace OpenRA.Server
 			}
 		}
 
-		/// <summary>
-		/// Forgets the save that the lobby holds, as when the map changes. The game that starts next is a new game.
-		/// </summary>
+		/// <summary>Forgets the save of the lobby, as when the map changes.</summary>
 		public void ForgetGameSave()
 		{
 			lock (LobbyInfoLock)
@@ -219,11 +248,214 @@ namespace OpenRA.Server
 				snapshotSave = "";
 
 				LobbyInfo.GlobalSettings.HoldsSnapshotSave = false;
+				LobbyInfo.GlobalSettings.SnapshotSave = null;
+				LobbyInfo.GlobalSettings.SnapshotSaveTick = 0;
+				LobbyInfo.GlobalSettings.SnapshotSaveSyncHash = 0;
+				LobbyInfo.GlobalSettings.SnapshotSaveSlots = [];
+				savedPeople.Clear();
+				copies.Clear();
+				savedLeft = [];
+				fileRequestedFrom = -1;
+				ForgetSharedFile();
+				foreach (var c in LobbyInfo.Clients)
+					c.HasSaveCopy = false;
 			}
 		}
 
-		// Refuses a position that a game cannot start from: a net frame before the first one, or packets that are
-		// not for the frames that follow the net frame of the position.
+		void ForgetSharedFile()
+		{
+			sharedSave = null;
+			upload = null;
+			uploadFrom = -1;
+			sentFileTo.Clear();
+			LobbyInfo.GlobalSettings.SnapshotSaveFileHash = null;
+			LobbyInfo.GlobalSettings.SnapshotSaveFileSize = 0;
+		}
+
+		/// <summary>Asks the admin once for the file of its copy, while the lobby loads from copies and holds no file.</summary>
+		public void RequestSharedFile()
+		{
+			lock (LobbyInfoLock)
+			{
+				if (State != ServerState.WaitingPlayers || !LoadsFromCopies || sharedSave != null)
+					return;
+
+				var admin = LobbyInfo.Clients.FirstOrDefault(c => c.IsAdmin && c.Bot == null);
+				var conn = admin == null ? null : Conns.FirstOrDefault(c => c.PlayerIndex == admin.Index);
+				if (conn == null || !admin.HasSaveCopy || fileRequestedFrom == conn.PlayerIndex)
+					return;
+
+				fileRequestedFrom = conn.PlayerIndex;
+				SendOrderTo(conn, SharedSave.UploadRequestOrder, SharedSave.MaxSize.ToStringInvariant());
+			}
+		}
+
+		void ForgetSharedFileClient(int index)
+		{
+			sentFileTo.Remove(index);
+			if (uploadFrom == index)
+			{
+				upload = null;
+				uploadFrom = -1;
+			}
+
+			if (fileRequestedFrom == index)
+				fileRequestedFrom = -1;
+		}
+
+		// The server takes a chunk from the admin only, before the start, and checks the whole file when it is here.
+		void ReceiveSharedFileChunk(Connection conn, string chunk)
+		{
+			var client = GetClient(conn);
+			var ignored = State >= ServerState.GameStarted ? "the game has started"
+				: !LoadsFromCopies ? "the lobby holds no save that loads from copies"
+				: sharedSave != null ? "the server holds the file"
+				: client?.IsAdmin != true ? "the sender is not the admin"
+				: null;
+
+			if (ignored != null)
+			{
+				Log.Write("server", $"A chunk of a file from {client?.Name} is ignored: {ignored}");
+				return;
+			}
+
+			if (upload == null || uploadFrom != conn.PlayerIndex)
+			{
+				upload = new SharedSave(SharedSave.MaxSize);
+				uploadFrom = conn.PlayerIndex;
+			}
+
+			if (!upload.TryAdd(chunk, out var refusal))
+			{
+				RefuseSharedFile(conn, refusal);
+				return;
+			}
+
+			if (!upload.IsComplete)
+				return;
+
+			var file = upload.Bytes;
+			upload = null;
+			uploadFrom = -1;
+			try
+			{
+				GameSaveCopy.CheckedSnapshot(LobbyInfo.GlobalSettings, GameSave.FromBytes(file, "the file of the admin"));
+			}
+			catch (Exception e)
+			{
+				RefuseSharedFile(conn, e.Message);
+				return;
+			}
+
+			sharedSave = file;
+			LobbyInfo.GlobalSettings.SnapshotSaveFileHash = SharedSave.Hash(file);
+			LobbyInfo.GlobalSettings.SnapshotSaveFileSize = file.Length;
+			SyncLobbyGlobalSettings();
+		}
+
+		void RefuseSharedFile(Connection conn, string reason)
+		{
+			upload = null;
+			uploadFrom = -1;
+			Log.Write("server", $"The file of {GetClient(conn)?.Name} is refused: {reason}");
+			SendFluentMessageTo(conn, SharedSaveNotTaken, ["reason", reason]);
+		}
+
+		// The server sends the file once to each connection, while it holds the file with that hash.
+		void SendSharedFile(Connection conn, string hash)
+		{
+			if (State >= ServerState.GameStarted || sharedSave == null || hash != LobbyInfo.GlobalSettings.SnapshotSaveFileHash || !sentFileTo.Add(conn.PlayerIndex))
+			{
+				Log.Write("server", $"The request for a file from {GetClient(conn)?.Name} is ignored.");
+				return;
+			}
+
+			foreach (var chunk in SharedSave.Split(sharedSave))
+				SendOrderTo(conn, SharedSave.ChunkOrder, chunk);
+		}
+
+		// A copy places no person in a slot. Its packets in transit go to the person in the slot of its writer. Every client
+		// loads the bytes of one file: the admin its own, each other person the file of the admin.
+		void TakeCopy(Connection conn, string report)
+		{
+			var client = GetClient(conn);
+			var isShared = sentFileTo.Contains(conn.PlayerIndex);
+			if (!client.IsAdmin && !isShared)
+			{
+				Log.Write("server", $"The copy of {client.Name} is ignored: a person who is not the admin loads the file of the admin.");
+				return;
+			}
+
+			OrderManagerPosition copy;
+			try
+			{
+				copy = GameSaveCopy.PositionIn(report, LobbyInfo.GlobalSettings);
+				if (copy.NetFrameNumber != startFrame)
+					throw new InvalidDataException($"The copy is at net frame {copy.NetFrameNumber}, and the save at {startFrame}.");
+
+				CheckStartPosition(copy);
+				if (!copy.Left.SequenceEqual(savedLeft))
+					throw new InvalidDataException($"The copy names the people {string.Join(", ", copy.Left)} who had left, and the save {string.Join(", ", savedLeft)}.");
+			}
+			catch (Exception e)
+			{
+				Log.Write("server", $"The copy of {client.Name} is not a copy of the save {snapshotSave}: {e.Message}");
+				SendFluentMessageTo(conn, CopyOfAnotherSave);
+				return;
+			}
+
+			client.HasSaveCopy = true;
+			copies[conn.PlayerIndex] = (copy.Client, copy.Packets.Select(p => p.Orders).ToArray(), isShared);
+			SyncLobbyClients();
+			RequestSharedFile();
+		}
+
+		/// <summary>Puts <paramref name="client"/> in a free saved slot. It keeps its name, index and admin flag.</summary>
+		public void SeatInSavedSlot(Session.Client client, string slot)
+		{
+			lock (LobbyInfoLock)
+			{
+				var isAdmin = client.IsAdmin;
+				savedPeople.Values.First(p => p.Slot == slot).ApplyTo(client);
+				client.IsAdmin = isAdmin;
+			}
+		}
+
+		// The packets of its copy when the person sits where the writer sat, and none otherwise.
+		internal byte[][] PacketsInTransit(Connection from)
+		{
+			if (!LoadsFromCopies)
+				return startPackets;
+
+			return SitsInWriterSeat(from) ? copies[from.PlayerIndex].Packets : [];
+		}
+
+		// In the slot of the writer, or among the spectators when the writer watched. The packets of a spectator carry the
+		// orders of its bots, so a spectator takes those of its own copy only. The client applies the same rule.
+		bool SitsInWriterSeat(Connection from)
+		{
+			var client = GetClient(from);
+			if (client == null || !copies.TryGetValue(from.PlayerIndex, out var copy))
+				return false;
+
+			if (client.Slot != null)
+				return savedPeople.TryGetValue(copy.SavedIndex, out var writer) && writer.Slot == client.Slot;
+
+			return !copy.IsShared && !savedPeople.ContainsKey(copy.SavedIndex);
+		}
+
+		// The saved client index of the slot of client, or of the writer whose seat a spectator holds, else int.MaxValue.
+		// The clients of the loaded game apply the orders of a net frame in this order, as the saved game did.
+		int SavedIndexOf(Session.Client client)
+		{
+			var slot = client.Slot;
+			if (slot != null)
+				return savedPeople.Values.FirstOrDefault(p => p.Slot == slot) is { } person ? person.Index : int.MaxValue;
+
+			var conn = Conns.FirstOrDefault(c => c.PlayerIndex == client.Index);
+			return conn != null && SitsInWriterSeat(conn) ? copies[conn.PlayerIndex].SavedIndex : int.MaxValue;
+		}
+
 		static void CheckStartPosition(OrderManagerPosition position)
 		{
 			if (position.NetFrameNumber < 1)
@@ -235,12 +467,24 @@ namespace OpenRA.Server
 						+ $"A game at net frame {position.NetFrameNumber} expects frame {position.NetFrameNumber + i}.");
 		}
 
-		// Whether the saved game that the lobby holds can start. If not, the people in the lobby learn why.
 		bool SaveAllowsStart()
 		{
-			// A saved position holds the packets of one client, and each connection would get them. So the game of such a
-			// position does not start while a person who joined after it was taken is in the lobby.
-			if ((startFrame != 1 || startPackets.Length > 0 || snapshotSave.Length > 0) && LobbyInfo.NonBotClients.Count() > 1)
+			// Each saved slot needs a person, and each person needs a copy.
+			if (LoadsFromCopies)
+			{
+				var missing = LobbyInfo.NonBotClients.Where(c => !c.HasSaveCopy).Select(c => c.Name)
+					.Concat(LobbyInfo.EmptySavedSlots())
+					.ToArray();
+
+				if (missing.Length > 0)
+				{
+					SendFluentMessage(SaveNeedsEachPlayer, "players", string.Join(", ", missing));
+					return false;
+				}
+			}
+
+			// Any other saved position holds the packets of one client, which each connection would get.
+			else if ((startFrame != 1 || startPackets.Length > 0 || snapshotSave.Length > 0) && LobbyInfo.NonBotClients.Count() > 1)
 			{
 				SendFluentMessage(SaveOfOnePlayer);
 				return false;
