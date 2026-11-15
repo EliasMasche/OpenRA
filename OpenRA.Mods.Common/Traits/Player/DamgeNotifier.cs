@@ -61,6 +61,7 @@ namespace OpenRA.Mods.Common.Traits
 		readonly RadarPings radarPings;
 		readonly DamageNotifierInfo info;
 
+		[NotSaved("Wall-clock time of the next notification. A load starts the clock over.")]
 		long nextActiveTick = 0;
 
 		public DamageNotifier(Actor self, DamageNotifierInfo info)

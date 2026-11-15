@@ -67,6 +67,7 @@ namespace OpenRA.Mods.Common.Traits
 		public override object Create(ActorInitializer init) { return new EditorResourceLayer(init.Self, this); }
 	}
 
+	[NotSaved("Editor world only. A game save never contains it.")]
 	public class EditorResourceLayer : IResourceLayer, IWorldLoaded, INotifyActorDisposing
 	{
 		readonly EditorResourceLayerInfo info;

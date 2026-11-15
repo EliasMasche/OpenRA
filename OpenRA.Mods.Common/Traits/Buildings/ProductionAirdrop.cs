@@ -10,7 +10,6 @@
 #endregion
 
 using System.Linq;
-using OpenRA.Activities;
 using OpenRA.Mods.Common.Activities;
 using OpenRA.Primitives;
 using OpenRA.Traits;
@@ -51,7 +50,7 @@ namespace OpenRA.Mods.Common.Traits
 		public override object Create(ActorInitializer init) { return new ProductionAirdrop(init, this); }
 	}
 
-	sealed class ProductionAirdrop : Production
+	sealed class ProductionAirdrop : Production, IDeliversProduction
 	{
 		public ProductionAirdrop(ActorInitializer init, ProductionAirdropInfo info)
 			: base(init, info) { }
@@ -115,21 +114,7 @@ namespace OpenRA.Mods.Common.Traits
 				actor.QueueActivity(new Land(actor, Target.FromActor(self), WDist.Zero, info.LandOffset, info.Facing, clearCells: [exitCell]));
 				if (info.WaitTickBeforeProduce > 0)
 					actor.QueueActivity(new Wait(info.WaitTickBeforeProduce));
-				actor.QueueActivity(new CallFunc(() =>
-				{
-					if (!self.IsInWorld || self.IsDead)
-					{
-						owner.PlayerActor.Trait<PlayerResources>().RefundCash(refundableValue);
-						return;
-					}
-
-					foreach (var cargo in self.TraitsImplementing<INotifyDelivery>())
-						cargo.Delivered(self);
-
-					self.World.AddFrameEndTask(ww => DoProduction(self, producee, exit, productionType, inits));
-					Game.Sound.PlayNotification(self.World.Map.Rules, self.Owner, "Speech", info.ReadyAudio, self.Owner.Faction.InternalName);
-					TextNotificationsManager.AddTransientLine(self.Owner, info.ReadyTextNotification);
-				}));
+				actor.QueueActivity(new CompleteProductionDelivery(this, self, owner, producee, exit, productionType, inits, refundableValue));
 				if (info.WaitTickAfterProduce > 0)
 					actor.QueueActivity(new Wait(info.WaitTickAfterProduce));
 				actor.QueueActivity(new FlyOffMap(actor, Target.FromCell(w, endPos)));
@@ -137,6 +122,13 @@ namespace OpenRA.Mods.Common.Traits
 			});
 
 			return true;
+		}
+
+		public void PlayDeliveredNotifications(Actor self)
+		{
+			var info = (ProductionAirdropInfo)Info;
+			Game.Sound.PlayNotification(self.World.Map.Rules, self.Owner, "Speech", info.ReadyAudio, self.Owner.Faction.InternalName);
+			TextNotificationsManager.AddTransientLine(self.Owner, info.ReadyTextNotification);
 		}
 	}
 }

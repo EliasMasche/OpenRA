@@ -64,7 +64,7 @@ namespace OpenRA.Mods.D2k.Traits
 		}
 	}
 
-	public class SpiceBloom : ITick, INotifyKilled
+	public class SpiceBloom : ITick, INotifyKilled, IResumeAnimations
 	{
 		readonly SpiceBloomInfo info;
 		readonly IResourceLayer resourceLayer;
@@ -89,7 +89,17 @@ namespace OpenRA.Mods.D2k.Traits
 
 			spurt = new Animation(self.World, rs.GetImage(self));
 			rs.Add(new AnimationWithOffset(spurt, null, () => !showSpurt));
-			spurt.PlayThen(info.SpurtSequence, () => showSpurt = false);
+			spurt.PlayThen(info.SpurtSequence, SpurtFinished);
+		}
+
+		void SpurtFinished()
+		{
+			showSpurt = false;
+		}
+
+		void IResumeAnimations.ResumeAnimations(Actor self)
+		{
+			spurt.ContinueThen(SpurtFinished);
 		}
 
 		void ITick.Tick(Actor self)
@@ -113,7 +123,7 @@ namespace OpenRA.Mods.D2k.Traits
 					body.Play(info.GrowthSequences[bodyFrame]);
 
 					showSpurt = true;
-					spurt.PlayThen(info.SpurtSequence, () => showSpurt = false);
+					spurt.PlayThen(info.SpurtSequence, SpurtFinished);
 				}
 			}
 		}
@@ -139,7 +149,6 @@ namespace OpenRA.Mods.D2k.Traits
 				{
 					Weapon = self.World.Map.Rules.Weapons[info.Weapon.ToLowerInvariant()],
 					Facing = WAngle.Zero,
-					CurrentMuzzleFacing = () => WAngle.Zero,
 
 					DamageModifiers = self.TraitsImplementing<IFirepowerModifier>()
 						.Select(a => a.GetFirepowerModifier()).ToArray(),
@@ -151,7 +160,7 @@ namespace OpenRA.Mods.D2k.Traits
 						.Select(a => a.GetRangeModifier()).ToArray(),
 
 					Source = self.CenterPosition,
-					CurrentSource = () => self.CenterPosition,
+					Muzzle = new ActorCenterMuzzleSource(self),
 					SourceActor = self,
 					PassiveTarget = self.World.Map.CenterOfCell(cell)
 				});

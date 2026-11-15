@@ -83,6 +83,7 @@ namespace OpenRA.Mods.Cnc.Traits
 	{
 		readonly DropPodsPowerInfo info;
 		readonly string[] unitTypes;
+		[NotSaved("One launch position function per unit type, built from the rules.")]
 		readonly Dictionary<string, Func<CPos, WPos>> getLaunchLocation = [];
 		readonly Dictionary<string, FrozenSet<string>> landableTerrainTypes = [];
 

@@ -60,7 +60,9 @@ namespace OpenRA.Mods.Common.Traits
 		public int PowerOutageTotalTicks { get; private set; }
 		public bool PlayLowPowerNotification { get; set; }
 
+		[NotSaved("Wall-clock time of the last notification. A load starts the clock over.")]
 		long lastPowerAdviceTime;
+
 		bool isLowPower;
 		bool wasLowPower;
 		bool wasHackEnabled;

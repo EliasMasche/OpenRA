@@ -80,6 +80,11 @@ namespace OpenRA.Mods.D2k.Traits.Buildings
 		{
 			base.AddedToWorld(self);
 
+			// A load adds the building to the world again, which is not an event of the game. The snapshot holds the
+			// concrete, the health and the counts of the tiles, as they were at the placement.
+			if (self.World.IsLoadingSnapshot)
+				return;
+
 			if (layer != null && (info.ConcretePrerequisites.Length == 0 || techTree == null || techTree.HasPrerequisites(info.ConcretePrerequisites)))
 			{
 				var map = self.World.Map;

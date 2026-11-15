@@ -108,6 +108,7 @@ namespace OpenRA.Mods.Common.Traits
 
 		int resCells;
 
+		[NotSaved("Renderers and the harvester bot module subscribe when they are created.")]
 		public event Action<CPos, string> CellChanged;
 
 		public ResourceLayer(Actor self, ResourceLayerInfo info)

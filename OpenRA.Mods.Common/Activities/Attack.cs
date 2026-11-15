@@ -25,7 +25,7 @@ namespace OpenRA.Mods.Common.Activities
 		[Flags]
 		protected enum AttackStatus { UnableToAttack, NeedsToTurn, NeedsToMove, Attacking }
 
-		readonly IEnumerable<AttackFrontal> attackTraits;
+		readonly AttackFrontal[] allAttackTraits;
 		readonly RevealsShroud[] revealsShroud;
 		readonly IMove move;
 		readonly Mobile mobile;
@@ -53,7 +53,7 @@ namespace OpenRA.Mods.Common.Activities
 			this.forceAttack = forceAttack;
 			ChildHasPriority = false;
 
-			attackTraits = self.TraitsImplementing<AttackFrontal>().ToArray().Where(t => !t.IsTraitDisabled);
+			allAttackTraits = self.TraitsImplementing<AttackFrontal>().ToArray();
 			revealsShroud = self.TraitsImplementing<RevealsShroud>().ToArray();
 			facing = self.Trait<IFacing>();
 			positionable = self.Trait<IPositionable>();
@@ -73,7 +73,7 @@ namespace OpenRA.Mods.Common.Activities
 
 				// Lambdas can't use 'in' variables, so capture a copy for later
 				var rangeTarget = target;
-				lastVisibleMaximumRange = attackTraits.Min(x => x.GetMaximumRangeVersusTarget(rangeTarget));
+				lastVisibleMaximumRange = EnabledAttackTraits().Min(x => x.GetMaximumRangeVersusTarget(rangeTarget));
 
 				if (target.Type == TargetType.Actor)
 				{
@@ -93,6 +93,11 @@ namespace OpenRA.Mods.Common.Activities
 			return target.Recalculate(self.Owner, out targetIsHiddenActor);
 		}
 
+		IEnumerable<AttackFrontal> EnabledAttackTraits()
+		{
+			return allAttackTraits.Where(t => !t.IsTraitDisabled);
+		}
+
 		public override bool Tick(Actor self)
 		{
 			if (!IsCanceling && !HasArmamentsFor(target))
@@ -109,7 +114,7 @@ namespace OpenRA.Mods.Common.Activities
 			if (!targetIsHiddenActor && target.Type == TargetType.Actor)
 			{
 				lastVisibleTarget = Target.FromTargetPositions(target);
-				lastVisibleMaximumRange = attackTraits.Min(x => x.GetMaximumRangeVersusTarget(target));
+				lastVisibleMaximumRange = EnabledAttackTraits().Min(x => x.GetMaximumRangeVersusTarget(target));
 
 				lastVisibleOwner = target.Actor.Owner;
 				lastVisibleTargetTypes = target.Actor.GetEnabledTargetTypes();
@@ -143,7 +148,7 @@ namespace OpenRA.Mods.Common.Activities
 
 			attackStatus = AttackStatus.UnableToAttack;
 
-			foreach (var attack in attackTraits)
+			foreach (var attack in EnabledAttackTraits())
 			{
 				var status = TickAttack(self, attack);
 				attack.IsAiming = status == AttackStatus.Attacking || status == AttackStatus.NeedsToTurn;
@@ -157,7 +162,7 @@ namespace OpenRA.Mods.Common.Activities
 
 		protected override void OnLastRun(Actor self)
 		{
-			foreach (var attack in attackTraits)
+			foreach (var attack in EnabledAttackTraits())
 				attack.IsAiming = false;
 		}
 
@@ -277,7 +282,7 @@ namespace OpenRA.Mods.Common.Activities
 
 		bool HasArmamentsFor(Target target)
 		{
-			return attackTraits.Any(attack => attack.ChooseArmamentsForTarget(target, forceAttack).Any());
+			return EnabledAttackTraits().Any(attack => attack.ChooseArmamentsForTarget(target, forceAttack).Any());
 		}
 	}
 }

@@ -42,6 +42,7 @@ namespace OpenRA.Mods.Common.Traits
 		public override object Create(ActorInitializer init) { return new EditorActorLayer(this); }
 	}
 
+	[NotSaved("Editor world only. A game save never contains it.")]
 	public class EditorActorLayer : IWorldLoaded, ITickRender, IRender, IRadarSignature, ICreatePlayers, IRenderAnnotations, INotifyActorDisposing
 	{
 		const string ActorPrefix = "Actor";

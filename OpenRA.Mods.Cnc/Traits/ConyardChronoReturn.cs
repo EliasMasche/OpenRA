@@ -117,12 +117,14 @@ namespace OpenRA.Mods.Cnc.Traits
 
 			triggered = true;
 
-			self.World.AddFrameEndTask(w => w.Add(new ConyardChronoVortex(self, () =>
-			{
-				triggered = false;
-				if (conditionToken != Actor.InvalidConditionToken && !self.Disposed)
-					conditionToken = self.RevokeCondition(conditionToken);
-			})));
+			self.World.AddFrameEndTask(w => w.Add(new ConyardChronoVortex(self, this)));
+		}
+
+		internal void VortexCompleted()
+		{
+			triggered = false;
+			if (conditionToken != Actor.InvalidConditionToken && !self.Disposed)
+				conditionToken = self.RevokeCondition(conditionToken);
 		}
 
 		CPos? ChooseBestDestinationCell(MobileInfo mobileInfo, CPos destination)

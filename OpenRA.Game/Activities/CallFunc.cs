@@ -13,6 +13,7 @@ using System;
 
 namespace OpenRA.Activities
 {
+	[NotSaved("Only a script queues it, and a world that runs a script is not saved as a snapshot.")]
 	public class CallFunc : Activity
 	{
 		public CallFunc(Action a) { this.a = a; }

@@ -10,7 +10,6 @@
 #endregion
 
 using System.Linq;
-using OpenRA.Effects;
 using OpenRA.Primitives;
 using OpenRA.Traits;
 
@@ -24,7 +23,7 @@ namespace OpenRA.Mods.Common.Traits
 		public override object Create(ActorInitializer init) { return new LegacyBridgeHut(init); }
 	}
 
-	public class LegacyBridgeHut : IDemolishable
+	public class LegacyBridgeHut : IDemolishable, IDelayedDemolition
 	{
 		public Bridge FirstBridge { get; private set; }
 		public Bridge Bridge { get; private set; }
@@ -46,7 +45,13 @@ namespace OpenRA.Mods.Common.Traits
 		public void Repair(Actor repairer)
 		{
 			repairDirections = Bridge.GetHut(0) != this && Bridge.GetHut(1) != this ? 2 : 1;
-			Bridge.Do((b, d) => b.Repair(repairer, d, () => repairDirections--));
+			Bridge.Do((b, d) => b.Repair(repairer, d, this));
+		}
+
+		// The bridge calls this when the repair gets to the end of one direction.
+		internal void RepairDirectionCompleted()
+		{
+			repairDirections--;
 		}
 
 		bool IDemolishable.IsValidTarget(Actor self, Actor saboteur)
@@ -57,18 +62,20 @@ namespace OpenRA.Mods.Common.Traits
 		void IDemolishable.Demolish(Actor self, Actor saboteur, int delay, BitSet<DamageType> damageTypes)
 		{
 			// TODO: Handle using ITick
-			self.World.Add(new DelayedAction(delay, () =>
-			{
-				if (self.IsDead)
-					return;
+			self.World.Add(new DelayedDemolition(this, self, saboteur, damageTypes, delay));
+		}
 
-				var modifiers = self.TraitsImplementing<IDamageModifier>()
-					.Concat(self.Owner.PlayerActor.TraitsImplementing<IDamageModifier>())
-					.Select(t => t.GetDamageModifier(self, null));
+		void IDelayedDemolition.Demolish(Actor self, Actor saboteur, BitSet<DamageType> damageTypes)
+		{
+			if (self.IsDead)
+				return;
 
-				if (Util.ApplyPercentageModifiers(100, modifiers) > 0)
-					Bridge.Do((b, d) => b.Demolish(saboteur, d, damageTypes));
-			}));
+			var modifiers = self.TraitsImplementing<IDamageModifier>()
+				.Concat(self.Owner.PlayerActor.TraitsImplementing<IDamageModifier>())
+				.Select(t => t.GetDamageModifier(self, null));
+
+			if (Util.ApplyPercentageModifiers(100, modifiers) > 0)
+				Bridge.Do((b, d) => b.Demolish(saboteur, d, damageTypes));
 		}
 	}
 }

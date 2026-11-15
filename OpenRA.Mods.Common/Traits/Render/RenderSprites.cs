@@ -141,10 +141,18 @@ namespace OpenRA.Mods.Common.Traits.Render
 			}
 		}
 
+		// The saved field that holds the faction the images come from. A load creates the actor with it.
+		internal const string FactionField = nameof(faction);
+
 		public readonly RenderSpritesInfo Info;
 		readonly string faction;
+		[NotSaved("Each render trait adds its animations when it is created.")]
 		readonly List<AnimationWrapper> anims = [];
 		readonly IEnumerable<IRenderable> renderables;
+
+		// A saved value of false would keep the animations of a load without a palette. Creation builds them without
+		// one, and a render fills it only when this field is true.
+		[NotSaved("Each render trait adds its animations when it is created, which sets it.")]
 		bool shouldRefreshPalettes;
 		string cachedImage;
 

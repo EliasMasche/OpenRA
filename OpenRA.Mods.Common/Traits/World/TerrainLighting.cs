@@ -52,6 +52,7 @@ namespace OpenRA.Mods.Common.Traits
 		readonly Vector3 globalTint;
 		int nextLightSourceToken = 1;
 
+		[NotSaved("Only terrain sprite layers subscribe, when the renderer loads.")]
 		public event Action<MPos> CellChanged = null;
 
 		public TerrainLighting(World world, TerrainLightingInfo info)

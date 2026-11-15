@@ -39,7 +39,7 @@ namespace OpenRA.Mods.Common.Warheads
 			var firedBy = args.SourceActor;
 			var world = firedBy.World;
 
-			if (Chance < world.LocalRandom.Next(100))
+			if (Chance < Game.CosmeticRandom.Next(100))
 				return;
 
 			var pos = target.CenterPosition;

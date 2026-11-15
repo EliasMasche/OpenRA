@@ -137,14 +137,20 @@ namespace OpenRA.Mods.Common.Traits
 		/// <summary>
 		/// Raised when the movement cost for a cell changes, providing the old and new costs.
 		/// </summary>
+		[NotSaved("The pathfinder subscribes when it is created.")]
 		public event Action<CPos, short, short> CellCostChanged;
 
 		readonly LocomotorInfo.TerrainInfo[] terrainInfos;
 		readonly World world;
+		[NotSaved("Marks cells of the blocking cache, which is built again when the world loads.")]
 		readonly HashSet<CPos> dirtyCells = [];
+
 		readonly bool sharesCell;
 
+		[NotSaved("A cache of terrain costs, built from the map when the world loads.")]
 		CellLayer<short>[] cellsCost;
+
+		[NotSaved("A cache of what blocks each cell, built when the world loads and kept current as actors move.")]
 		CellLayer<CellCache>[] blockingCache;
 
 		IActorMap actorMap;

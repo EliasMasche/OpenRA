@@ -104,7 +104,7 @@ namespace OpenRA.Mods.Common.Projectiles
 		}
 	}
 
-	public class Railgun : IProjectile, ISync
+	public class Railgun : IProjectile, ISync, IResumeAnimations
 	{
 		readonly ProjectileArgs args;
 		readonly RailgunInfo info;
@@ -191,12 +191,22 @@ namespace OpenRA.Mods.Common.Projectiles
 			SourceToTarget = info.QuantizationCount * CycleCount * ForwardStep;
 		}
 
+		void HitAnimationFinished()
+		{
+			animationComplete = true;
+		}
+
+		void IResumeAnimations.ResumeAnimations(Actor self)
+		{
+			hitanim?.ContinueThen(HitAnimationFinished);
+		}
+
 		public void Tick(World world)
 		{
 			if (ticks == 0)
 			{
 				if (hitanim != null)
-					hitanim.PlayThen(info.HitAnimSequence, () => animationComplete = true);
+					hitanim.PlayThen(info.HitAnimSequence, HitAnimationFinished);
 				else
 					animationComplete = true;
 

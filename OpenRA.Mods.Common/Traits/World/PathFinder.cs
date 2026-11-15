@@ -45,7 +45,10 @@ namespace OpenRA.Mods.Common.Traits
 		readonly World world;
 		readonly PathFinderInfo info;
 		PathFinderOverlay pathFinderOverlay;
+		[NotSaved("The path graph is built from the map and the actor map.")]
 		Dictionary<Locomotor, HierarchicalPathFinder> hierarchicalPathFindersBlockedByNoneByLocomotor;
+
+		[NotSaved("The path graph is built from the map and the actor map.")]
 		Dictionary<Locomotor, HierarchicalPathFinder> hierarchicalPathFindersBlockedByImmovableByLocomotor;
 
 		public PathFinder(Actor self, PathFinderInfo info)

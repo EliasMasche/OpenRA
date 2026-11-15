@@ -15,6 +15,7 @@ using OpenRA.Graphics;
 
 namespace OpenRA.Effects
 {
+	[NotSaved("Only a script creates it, and a world that runs a script is not saved as a snapshot.")]
 	public class DelayedAction : IEffect
 	{
 		readonly Action a;

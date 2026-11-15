@@ -67,7 +67,7 @@ namespace OpenRA.Mods.Common.Traits.Render
 		}
 	}
 
-	public class WithInfantryBody : ConditionalTrait<WithInfantryBodyInfo>, ITick, INotifyAttack, INotifyIdle
+	public class WithInfantryBody : ConditionalTrait<WithInfantryBodyInfo>, ITick, INotifyAttack, INotifyIdle, IResumeAnimations
 	{
 		readonly IMove move;
 		protected readonly Animation DefaultAnimation;
@@ -193,6 +193,20 @@ namespace OpenRA.Mods.Common.Traits.Render
 				PlayStandAnimation(self);
 
 			dirty = false;
+		}
+
+		/// <summary>
+		/// The attack and the idle animation both go back to standing when they finish.
+		/// Standing starts the wait for the next idle animation, which draws from the shared random.
+		/// </summary>
+		protected virtual void ResumeAnimations(Actor self)
+		{
+			DefaultAnimation.ContinueThen(() => PlayStandAnimation(self));
+		}
+
+		void IResumeAnimations.ResumeAnimations(Actor self)
+		{
+			ResumeAnimations(self);
 		}
 
 		void INotifyIdle.TickIdle(Actor self)

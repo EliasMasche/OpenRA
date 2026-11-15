@@ -16,6 +16,7 @@ using OpenRA.Graphics;
 
 namespace OpenRA.Mods.Common.Effects
 {
+	[NotSaved("A cosmetic sprite that the simulation never reads.")]
 	public class SpriteEffect : IEffect, ISpatiallyPartitionable
 	{
 		readonly World world;

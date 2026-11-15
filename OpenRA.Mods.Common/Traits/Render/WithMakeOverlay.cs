@@ -36,6 +36,8 @@ namespace OpenRA.Mods.Common.Traits.Render
 	{
 		readonly WithMakeOverlayInfo info;
 		readonly AnimationWithOffset anim;
+
+		[NotSaved("Shows the overlay while its animation plays. The animation is not saved, so a load ends the overlay.")]
 		bool visible;
 
 		public WithMakeOverlay(Actor self, WithMakeOverlayInfo info)

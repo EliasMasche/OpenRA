@@ -72,7 +72,7 @@ namespace OpenRA.Mods.Common.Traits
 		public override object Create(ActorInitializer init) { return new MissionObjectives(init.Self.Owner, this); }
 	}
 
-	public class MissionObjectives : INotifyWinStateChanged, ISync, IResolveOrder, IWorldLoaded
+	public class MissionObjectives : INotifyWinStateChanged, ISync, IResolveOrder, IWorldLoaded, IRebuildAfterLoad
 	{
 		public readonly MissionObjectivesInfo Info;
 		readonly List<MissionObjective> objectives = [];
@@ -174,6 +174,20 @@ namespace OpenRA.Mods.Common.Traits
 			}
 		}
 
+		// The end of a game waits for a moment after its last player wins or loses, and that wait is not state of the
+		// world. A save in that moment holds every player decided and no end to come, so a loaded world asks again. It
+		// asks for a player whose own objectives decided the result, as the saved world did. A result that came another
+		// way did not lead to an end there either.
+		void IRebuildAfterLoad.RebuildAfterLoad(Actor self)
+		{
+			if (self.World.IsGameOver)
+				return;
+
+			var required = objectives.Where(o => o.Required).ToArray();
+			if (required.Any(o => o.State == ObjectiveState.Failed) || (required.Length > 0 && required.All(o => o.State == ObjectiveState.Completed)))
+				CheckIfGameIsOver(player);
+		}
+
 		void INotifyWinStateChanged.OnPlayerWon(Player player)
 		{
 			if (Info.Cooperative)
@@ -255,6 +269,7 @@ namespace OpenRA.Mods.Common.Traits
 					MarkFailed(player, id);
 		}
 
+		[NotSaved("The initializer adds the only simulation handler. UI widgets subscribe again when they are created.")]
 		public event Action<Player, bool> ObjectiveAdded = (player, inhibitAnnouncement) => player.HasObjectives = true;
 
 		public void ResolveOrder(Actor self, Order order)

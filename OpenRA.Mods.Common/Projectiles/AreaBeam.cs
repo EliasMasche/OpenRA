@@ -209,7 +209,7 @@ namespace OpenRA.Mods.Common.Projectiles
 
 			if (tailTicks <= 0 && args.SourceActor.IsInWorld && !args.SourceActor.IsDead)
 			{
-				args.Source = args.CurrentSource();
+				args.Source = args.Muzzle.Position;
 				tailPos = args.Source;
 			}
 
@@ -251,7 +251,7 @@ namespace OpenRA.Mods.Common.Projectiles
 
 					var warheadArgs = new WarheadArgs(args)
 					{
-						ImpactOrientation = new WRot(WAngle.Zero, Util.GetVerticalAngle(args.Source, target), args.CurrentMuzzleFacing()),
+						ImpactOrientation = new WRot(WAngle.Zero, Util.GetVerticalAngle(args.Source, target), args.Muzzle.Facing),
 
 						// Calculating an impact position is bogus for line damage.
 						// FindActorsOnLine guarantees that the beam touches the target's HitShape,

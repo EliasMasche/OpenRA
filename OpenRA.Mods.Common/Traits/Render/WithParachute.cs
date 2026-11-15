@@ -110,6 +110,7 @@ namespace OpenRA.Mods.Common.Traits.Render
 		readonly Vector3 shadowColor;
 		readonly float shadowAlpha;
 
+		[NotSaved("Keeps a closing parachute drawn until its animation ends. The animation is not saved, so a load ends it.")]
 		bool renderProlonged = false;
 
 		public WithParachute(Actor self, WithParachuteInfo info)

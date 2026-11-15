@@ -34,6 +34,18 @@ namespace OpenRA.Mods.Common.Activities
 		}
 	}
 
+	/// <summary>
+	/// Never finishes by itself. It ends only when canceled, or when its parent stops ticking it.
+	/// </summary>
+	public class WaitForever : Activity
+	{
+		public override bool Tick(Actor self)
+		{
+			return IsCanceling;
+		}
+	}
+
+	[NotSaved("Only a script queues it, and a world that runs a script is not saved as a snapshot.")]
 	public class WaitFor : Activity
 	{
 		readonly Func<bool> f;

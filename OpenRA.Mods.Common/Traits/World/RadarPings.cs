@@ -33,6 +33,7 @@ namespace OpenRA.Mods.Common.Traits
 		public readonly List<RadarPing> Pings = [];
 		readonly RadarPingsInfo info;
 
+		[CosmeticState("The clock of the system decides how often a notification pings the radar, and only a hotkey reads where the last ping was.")]
 		public WPos? LastPingPosition;
 
 		public RadarPings(RadarPingsInfo info)
@@ -66,6 +67,7 @@ namespace OpenRA.Mods.Common.Traits
 		}
 	}
 
+	[NotSaved("A transient radar ping shown on the UI.")]
 	public class RadarPing
 	{
 		public Func<bool> IsVisible;

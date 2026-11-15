@@ -19,12 +19,23 @@ using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Activities
 {
+	/// <summary>
+	/// An activity that computes the path of the <see cref="Move"/> it queues as its child.
+	/// </summary>
+	public interface IMovePathSource
+	{
+		(bool AlreadyAtDestination, List<CPos> Path) CalculatePath(Actor self, BlockedByActor check);
+	}
+
 	public class Move : Activity
 	{
 		public WAngle ActorFacingModifier { get; private set; }
 		readonly Mobile mobile;
 		readonly WDist nearEnough;
-		readonly Func<BlockedByActor, (bool AlreadyAtDestination, List<CPos> Path)> getPath;
+		readonly IMovePathSource pathSource;
+
+		// A scripted move keeps its given cell, while the move retargets destination along the path.
+		readonly CPos? scriptedDestination;
 		readonly Actor ignoreActor;
 		readonly Color? targetLineColor;
 
@@ -59,15 +70,7 @@ namespace OpenRA.Mods.Common.Activities
 			// PERF: Because we can be sure that OccupiesSpace is Mobile here, we can save some performance by avoiding querying for the trait.
 			mobile = (Mobile)self.OccupiesSpace;
 
-			getPath = check =>
-			{
-				if (mobile.ToCell == destination)
-					return (true, PathFinder.NoPath);
-
-				return (false, mobile.PathFinder.FindPathToTargetCell(
-					self, [mobile.ToCell], destination, check, laneBias: false));
-			};
-
+			scriptedDestination = destination;
 			this.destination = destination;
 			this.targetLineColor = targetLineColor;
 			nearEnough = WDist.Zero;
@@ -79,18 +82,6 @@ namespace OpenRA.Mods.Common.Activities
 			// PERF: Because we can be sure that OccupiesSpace is Mobile here, we can save some performance by avoiding querying for the trait.
 			mobile = (Mobile)self.OccupiesSpace;
 
-			getPath = check =>
-			{
-				if (!this.destination.HasValue)
-					return (false, PathFinder.NoPath);
-
-				if (mobile.ToCell == this.destination.Value)
-					return (true, PathFinder.NoPath);
-
-				return (false, mobile.PathFinder.FindPathToTargetCell(
-					self, [mobile.ToCell], this.destination.Value, check, ignoreActor: ignoreActor));
-			};
-
 			// Note: Will be recalculated from OnFirstRun if evaluateNearestMovableCell is true
 			this.destination = destination;
 
@@ -100,23 +91,44 @@ namespace OpenRA.Mods.Common.Activities
 			this.targetLineColor = targetLineColor;
 		}
 
-		public Move(Actor self, Func<BlockedByActor, (bool AlreadyAtDestination, List<CPos> Path)> getPath, Color? targetLineColor = null)
+		public Move(Actor self, IMovePathSource pathSource, Color? targetLineColor = null)
 		{
 			// PERF: Because we can be sure that OccupiesSpace is Mobile here, we can save some performance by avoiding querying for the trait.
 			mobile = (Mobile)self.OccupiesSpace;
 
-			this.getPath = getPath;
+			this.pathSource = pathSource;
 
 			destination = null;
 			nearEnough = WDist.Zero;
 			this.targetLineColor = targetLineColor;
 		}
 
-		(bool AlreadyAtDestination, List<CPos> Path) EvalPath(BlockedByActor check)
+		(bool AlreadyAtDestination, List<CPos> Path) EvalPath(Actor self, BlockedByActor check)
 		{
-			var (alreadyAtDestination, path) = getPath(check);
+			var (alreadyAtDestination, path) = pathSource != null ? pathSource.CalculatePath(self, check) : PathToDestination(self, check);
 			path = path.TakeWhile(a => a != mobile.ToCell).ToList();
 			return (alreadyAtDestination, path);
+		}
+
+		(bool AlreadyAtDestination, List<CPos> Path) PathToDestination(Actor self, BlockedByActor check)
+		{
+			if (scriptedDestination.HasValue)
+			{
+				if (mobile.ToCell == scriptedDestination.Value)
+					return (true, PathFinder.NoPath);
+
+				return (false, mobile.PathFinder.FindPathToTargetCell(
+					self, [mobile.ToCell], scriptedDestination.Value, check, laneBias: false));
+			}
+
+			if (!destination.HasValue)
+				return (false, PathFinder.NoPath);
+
+			if (mobile.ToCell == destination.Value)
+				return (true, PathFinder.NoPath);
+
+			return (false, mobile.PathFinder.FindPathToTargetCell(
+				self, [mobile.ToCell], destination.Value, check, ignoreActor: ignoreActor));
 		}
 
 		protected override void OnFirstRun(Actor self)
@@ -133,7 +145,7 @@ namespace OpenRA.Mods.Common.Activities
 			// TODO: Change this to BlockedByActor.Stationary after improving the local avoidance behaviour
 			foreach (var check in PathSearchOrder)
 			{
-				(alreadyAtDestination, path) = EvalPath(check);
+				(alreadyAtDestination, path) = EvalPath(self, check);
 				if (alreadyAtDestination || path.Count > 0)
 					return;
 			}
@@ -256,7 +268,7 @@ namespace OpenRA.Mods.Common.Activities
 			// Something else might have moved us, so the path is no longer valid.
 			if (!Util.AreAdjacentCells(mobile.ToCell, nextCell))
 			{
-				(alreadyAtDestination, path) = EvalPath(BlockedByActor.Immovable);
+				(alreadyAtDestination, path) = EvalPath(self, BlockedByActor.Immovable);
 				return (null, false);
 			}
 
@@ -297,7 +309,7 @@ namespace OpenRA.Mods.Common.Activities
 				// There is no point in waiting for the other actor to move if it is incapable of moving.
 				if (!mobile.CanEnterCell(nextCell, ignoreActor, BlockedByActor.Immovable))
 				{
-					(alreadyAtDestination, path) = EvalPath(BlockedByActor.Immovable);
+					(alreadyAtDestination, path) = EvalPath(self, BlockedByActor.Immovable);
 					return (null, false);
 				}
 
@@ -323,7 +335,7 @@ namespace OpenRA.Mods.Common.Activities
 
 				// Calculate a new path
 				mobile.RemoveInfluence();
-				var (_, newPath) = EvalPath(BlockedByActor.All);
+				var (_, newPath) = EvalPath(self, BlockedByActor.All);
 				mobile.AddInfluence();
 
 				if (newPath.Count != 0)

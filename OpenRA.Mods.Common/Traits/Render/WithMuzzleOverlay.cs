@@ -29,6 +29,7 @@ namespace OpenRA.Mods.Common.Traits.Render
 
 	public sealed class WithMuzzleOverlay : ConditionalTrait<WithMuzzleOverlayInfo>, INotifyAttack, IRender, ITick
 	{
+		[NotSaved("Shows a muzzle flash while its animation plays. The animation is not saved, so a load ends the flash.")]
 		readonly Dictionary<Barrel, bool> visible = [];
 		readonly Dictionary<Barrel, AnimationWithOffset> anims = [];
 		readonly Func<WAngle> getFacing;

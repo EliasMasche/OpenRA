@@ -148,11 +148,22 @@ namespace OpenRA.Mods.Common.Traits
 		readonly int fadeInTick;
 		readonly int fadeOutTick;
 
+		[CosmeticState("The cosmetic random decides the wind, and the simulation never reads it.")]
 		float windStrength;
+
+		[CosmeticState("The cosmetic random decides the wind, and the simulation never reads it.")]
 		int targetWindStrengthIndex;
+
+		[CosmeticState("The cosmetic random decides the wind, and the simulation never reads it.")]
 		long windUpdateCountdown;
+
+		[CosmeticState("The cosmetic random places the particles, and the simulation never reads them.")]
 		Particle[] particles;
+
+		[CosmeticState("The screen of this client sets the area of the particles, and the simulation never reads it.")]
 		Size viewportSize;
+
+		[NotSaved("Holds the run time of this process, which another process does not share.")]
 		long lastRender;
 		bool initialTick = true;
 		int fadingInTick;
@@ -162,8 +173,8 @@ namespace OpenRA.Mods.Common.Traits
 			: base(info)
 		{
 			this.world = world;
-			targetWindStrengthIndex = info.ChangingWindLevel ? world.LocalRandom.Next(info.WindLevels.Length) : 0;
-			windUpdateCountdown = world.LocalRandom.Next(info.WindTick[0], info.WindTick[1]);
+			targetWindStrengthIndex = info.ChangingWindLevel ? Game.CosmeticRandom.Next(info.WindLevels.Length) : 0;
+			windUpdateCountdown = Game.CosmeticRandom.Next(info.WindTick[0], info.WindTick[1]);
 			windStrength = info.WindLevels[targetWindStrengthIndex];
 			fadeInTick = info.FadeInTicks > 0 ? info.FadeInTicks : 1;
 			fadeOutTick = info.FadeOutTicks > 0 ? info.FadeOutTicks : 1;
@@ -180,7 +191,7 @@ namespace OpenRA.Mods.Common.Traits
 			particles = new Particle[particleCount];
 			var rect = new Rectangle(int2.Zero, viewportSize);
 			for (var i = 0; i < particles.Length; i++)
-				particles[i] = new Particle(Info, world.LocalRandom, rect);
+				particles[i] = new Particle(Info, Game.CosmeticRandom, rect);
 		}
 
 		protected override void TraitEnabled(Actor self)
@@ -220,8 +231,8 @@ namespace OpenRA.Mods.Common.Traits
 
 			if (--windUpdateCountdown <= 0)
 			{
-				windUpdateCountdown = self.World.LocalRandom.Next(Info.WindTick[0], Info.WindTick[1]);
-				if (targetWindStrengthIndex > 0 && self.World.LocalRandom.Next(2) == 1)
+				windUpdateCountdown = Game.CosmeticRandom.Next(Info.WindTick[0], Info.WindTick[1]);
+				if (targetWindStrengthIndex > 0 && Game.CosmeticRandom.Next(2) == 1)
 					targetWindStrengthIndex--;
 				else if (targetWindStrengthIndex < Info.WindLevels.Length - 1)
 					targetWindStrengthIndex++;

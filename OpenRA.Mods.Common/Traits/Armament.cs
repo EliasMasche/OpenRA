@@ -25,6 +25,42 @@ namespace OpenRA.Mods.Common.Traits
 		public WAngle Yaw;
 	}
 
+	public sealed class ArmamentMuzzleSource : IMuzzleSource
+	{
+		readonly Armament armament;
+		readonly Barrel barrel;
+
+		public ArmamentMuzzleSource(Armament armament, Barrel barrel)
+		{
+			this.armament = armament;
+			this.barrel = barrel;
+		}
+
+		public WPos Position => armament.Actor.CenterPosition + armament.MuzzleOffset(armament.Actor, barrel);
+		public WAngle Facing => armament.MuzzleOrientation(armament.Actor, barrel).Yaw;
+	}
+
+	/// <summary>
+	/// A shot that fired, and that waits <c>FireDelay</c> ticks before its projectile leaves the barrel.
+	/// </summary>
+	public struct PendingShot
+	{
+		public int Ticks;
+		public readonly int Burst;
+		public readonly ProjectileArgs Args;
+		public readonly Target Target;
+		public readonly Barrel Barrel;
+
+		public PendingShot(int ticks, int burst, ProjectileArgs args, in Target target, Barrel barrel)
+		{
+			Ticks = ticks;
+			Burst = burst;
+			Args = args;
+			Target = target;
+			Barrel = barrel;
+		}
+	}
+
 	[Desc("Allows you to attach weapons to the unit (use @IdentifierSuffix for > 1)")]
 	public class ArmamentInfo : PausableConditionalTraitInfo, Requires<AttackBaseInfo>
 	{
@@ -132,7 +168,10 @@ namespace OpenRA.Mods.Common.Traits
 		int currentBarrel;
 		readonly int barrelCount;
 
-		readonly List<(int Ticks, int Burst, Action<int> Func)> delayedActions = [];
+		readonly List<PendingShot> pendingShots = [];
+
+		// Ticks left until each scheduled after-fire sound plays.
+		readonly List<int> pendingAfterFireSounds = [];
 
 		public WDist Recoil;
 		public int FireDelay { get; protected set; }
@@ -224,29 +263,27 @@ namespace OpenRA.Mods.Common.Traits
 
 			Recoil = new WDist(Math.Max(0, Recoil.Length - Info.RecoilRecovery.Length));
 
-			for (var i = 0; i < delayedActions.Count; i++)
+			for (var i = 0; i < pendingShots.Count; i++)
 			{
-				var x = delayedActions[i];
-				if (--x.Ticks <= 0)
-					x.Func(x.Burst);
-				delayedActions[i] = x;
+				var shot = pendingShots[i];
+				if (--shot.Ticks <= 0)
+					LaunchShot(self, shot.Args, shot.Target, shot.Barrel, shot.Burst);
+				pendingShots[i] = shot;
 			}
 
-			delayedActions.RemoveAll(a => a.Ticks <= 0);
+			pendingShots.RemoveAll(s => s.Ticks <= 0);
+
+			for (var i = 0; i < pendingAfterFireSounds.Count; i++)
+				if (--pendingAfterFireSounds[i] <= 0)
+					PlayAfterFireSound(self);
+
+			pendingAfterFireSounds.RemoveAll(t => t <= 0);
 		}
 
 		void ITick.Tick(Actor self)
 		{
 			// Split into a protected method to allow subclassing
 			Tick(self);
-		}
-
-		protected void ScheduleDelayedAction(int t, int b, Action<int> a)
-		{
-			if (t > 0)
-				delayedActions.Add((t, b, a));
-			else
-				a(b);
 		}
 
 		protected virtual bool CanFire(Actor self, in Target target)
@@ -298,11 +335,12 @@ namespace OpenRA.Mods.Common.Traits
 			foreach (var (notifyActor, notify) in notifyAttacks)
 				notify.PreparingAttack(notifyActor, target, this, barrel);
 
-			WPos MuzzlePosition() => self.CenterPosition + MuzzleOffset(self, barrel);
-			WAngle MuzzleFacing() => MuzzleOrientation(self, barrel).Yaw;
-			var muzzleOrientation = WRot.FromYaw(MuzzleFacing());
+			var muzzle = new ArmamentMuzzleSource(this, barrel);
+			var muzzleFacing = muzzle.Facing;
+			var muzzlePosition = muzzle.Position;
+			var muzzleOrientation = WRot.FromYaw(muzzleFacing);
 
-			var passiveTarget = Weapon.TargetActorCenter ? target.CenterPosition : target.Positions.ClosestToIgnoringPath(MuzzlePosition());
+			var passiveTarget = Weapon.TargetActorCenter ? target.CenterPosition : target.Positions.ClosestToIgnoringPath(muzzlePosition);
 			var initialOffset = Weapon.FirstBurstTargetOffset;
 			if (initialOffset != WVec.Zero)
 			{
@@ -322,8 +360,7 @@ namespace OpenRA.Mods.Common.Traits
 			var args = new ProjectileArgs
 			{
 				Weapon = Weapon,
-				Facing = MuzzleFacing(),
-				CurrentMuzzleFacing = MuzzleFacing,
+				Facing = muzzleFacing,
 
 				DamageModifiers = damageModifiers.ToArray(),
 
@@ -331,35 +368,43 @@ namespace OpenRA.Mods.Common.Traits
 
 				RangeModifiers = rangeModifiers.ToArray(),
 
-				Source = MuzzlePosition(),
-				CurrentSource = MuzzlePosition,
+				Source = muzzlePosition,
+				Muzzle = muzzle,
 				SourceActor = self,
 				PassiveTarget = passiveTarget,
 				GuidedTarget = target
 			};
 
-			// Lambdas can't use 'in' variables, so capture a copy for later
-			var delayedTarget = target;
-			ScheduleDelayedAction(Info.FireDelay, Burst, (burst) =>
+			if (Info.FireDelay > 0)
+				pendingShots.Add(new PendingShot(Info.FireDelay, Burst, args, target, barrel));
+			else
+				LaunchShot(self, args, target, barrel, Burst);
+		}
+
+		void LaunchShot(Actor self, ProjectileArgs args, in Target target, Barrel barrel, int burst)
+		{
+			if (args.Weapon.Projectile != null)
 			{
-				if (args.Weapon.Projectile != null)
-				{
-					var projectile = args.Weapon.Projectile.Create(args);
-					if (projectile != null)
-						self.World.Add(projectile);
+				var projectile = args.Weapon.Projectile.Create(args);
+				if (projectile != null)
+					self.World.Add(projectile);
 
-					if (args.Weapon.Report != null && args.Weapon.Report.Length > 0)
-						Game.Sound.Play(SoundType.World, args.Weapon.Report, self.World, self.CenterPosition);
+				if (args.Weapon.Report != null && args.Weapon.Report.Length > 0)
+					Game.Sound.Play(SoundType.World, args.Weapon.Report, self.World, self.CenterPosition);
 
-					if (burst == args.Weapon.Burst && args.Weapon.StartBurstReport != null && args.Weapon.StartBurstReport.Length > 0)
-						Game.Sound.Play(SoundType.World, args.Weapon.StartBurstReport, self.World, self.CenterPosition);
+				if (burst == args.Weapon.Burst && args.Weapon.StartBurstReport != null && args.Weapon.StartBurstReport.Length > 0)
+					Game.Sound.Play(SoundType.World, args.Weapon.StartBurstReport, self.World, self.CenterPosition);
 
-					Recoil = Info.Recoil;
-				}
+				Recoil = Info.Recoil;
+			}
 
-				foreach (var (notifyActor, notify) in notifyAttacks)
-					notify.Attacking(notifyActor, delayedTarget, this, barrel);
-			});
+			foreach (var (notifyActor, notify) in notifyAttacks)
+				notify.Attacking(notifyActor, target, this, barrel);
+		}
+
+		void PlayAfterFireSound(Actor self)
+		{
+			Game.Sound.Play(SoundType.World, Weapon.AfterFireSound, self.World, self.CenterPosition);
 		}
 
 		protected virtual void UpdateBurst(Actor self, in Target target)
@@ -381,10 +426,12 @@ namespace OpenRA.Mods.Common.Traits
 				Burst = Weapon.Burst;
 
 				if (Weapon.AfterFireSound != null && Weapon.AfterFireSound.Length > 0)
-					ScheduleDelayedAction(
-						Weapon.AfterFireSoundDelay,
-						Burst,
-						burst => Game.Sound.Play(SoundType.World, Weapon.AfterFireSound, self.World, self.CenterPosition));
+				{
+					if (Weapon.AfterFireSoundDelay > 0)
+						pendingAfterFireSounds.Add(Weapon.AfterFireSoundDelay);
+					else
+						PlayAfterFireSound(self);
+				}
 
 				foreach (var nbc in notifyBurstComplete)
 					nbc.FiredBurst(self, target, this);

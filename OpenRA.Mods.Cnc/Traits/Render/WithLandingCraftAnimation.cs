@@ -37,7 +37,7 @@ namespace OpenRA.Mods.Cnc.Traits.Render
 		public override object Create(ActorInitializer init) { return new WithLandingCraftAnimation(init, this); }
 	}
 
-	public class WithLandingCraftAnimation : ITick
+	public class WithLandingCraftAnimation : ITick, IResumeAnimations
 	{
 		readonly WithLandingCraftAnimationInfo info;
 		readonly Actor self;
@@ -70,11 +70,21 @@ namespace OpenRA.Mods.Cnc.Traits.Render
 				return;
 
 			open = true;
-			wsb.PlayCustomAnimation(self, info.OpenSequence, () =>
-			{
-				if (wsb.DefaultAnimation.HasSequence(info.UnloadSequence))
-					wsb.PlayCustomAnimationRepeating(self, info.UnloadSequence);
-			});
+			wsb.PlayCustomAnimation(self, info.OpenSequence, PlayUnloadSequence);
+		}
+
+		void PlayUnloadSequence()
+		{
+			if (wsb.DefaultAnimation.HasSequence(info.UnloadSequence))
+				wsb.PlayCustomAnimationRepeating(self, info.UnloadSequence);
+		}
+
+		// The opening goes on into the unload sequence. Closing passes no callback, and the body ends that
+		// animation itself. So the callback belongs to an animation that waits while the craft is open.
+		void IResumeAnimations.ResumeAnimations(Actor self)
+		{
+			if (open)
+				wsb.ContinueCustomAnimation(self, PlayUnloadSequence);
 		}
 
 		void Close()

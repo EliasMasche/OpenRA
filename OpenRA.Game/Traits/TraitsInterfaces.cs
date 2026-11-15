@@ -244,10 +244,21 @@ namespace OpenRA.Traits
 		IEnumerable<Actor> AllActors();
 		void AddInfluence(Actor self, IOccupySpace ios);
 		void RemoveInfluence(Actor self, IOccupySpace ios);
+
 		int AddCellTrigger(CPos[] cells, Action<Actor> onEntry, Action<Actor> onExit);
+
+		/// <summary>
+		/// Registers a trigger of a snapshot again, under its saved <paramref name="id"/>. Triggers tick in the order
+		/// of their IDs, so the loaded world ticks them as the saved world did. The trigger does not report the actors
+		/// <paramref name="inside"/> as entering.
+		/// </summary>
+		void RestoreCellTrigger(int id, CPos[] cells, Action<Actor> onEntry, Action<Actor> onExit, IEnumerable<Actor> inside);
 		IEnumerable<CPos> TriggerPositions();
 		void RemoveCellTrigger(int id);
 		int AddProximityTrigger(WPos pos, WDist range, WDist vRange, Action<Actor> onEntry, Action<Actor> onExit);
+
+		/// <summary>As <see cref="RestoreCellTrigger"/>, for a proximity trigger.</summary>
+		void RestoreProximityTrigger(int id, WPos pos, WDist range, WDist vRange, Action<Actor> onEntry, Action<Actor> onExit, IEnumerable<Actor> inside);
 		void RemoveProximityTrigger(int id);
 		void UpdateProximityTrigger(int id, WPos newPos, WDist newRange, WDist newVRange);
 		void AddPosition(Actor a, IOccupySpace ios);
@@ -669,5 +680,26 @@ namespace OpenRA.Traits
 		Map Generate(ModData modData, MapGenerationArgs args);
 		bool TryGenerateMetadata(ModData modData, MapGenerationArgs args, out MapPlayers players, out Dictionary<string, MiniYaml> rules);
 		bool ValidateArgs(ModData modData, MapGenerationArgs args);
+	}
+
+	/// <summary>
+	/// A trait or an effect that builds again, after a snapshot load, state that the snapshot leaves out.
+	/// It must not change saved state. <c>self</c> is null for an effect.
+	/// </summary>
+	[RequireExplicitImplementation]
+	public interface IRebuildAfterLoad
+	{
+		void RebuildAfterLoad(Actor self);
+	}
+
+	/// <summary>
+	/// A trait, an activity or an effect that waits for an animation. A snapshot keeps the frame, not the callback,
+	/// so after a load this attaches the callback again. A second call changes nothing.
+	/// <c>self</c> is null for an effect.
+	/// </summary>
+	[RequireExplicitImplementation]
+	public interface IResumeAnimations : IActivityInterface
+	{
+		void ResumeAnimations(Actor self);
 	}
 }

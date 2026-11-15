@@ -15,6 +15,7 @@ using OpenRA.Graphics;
 
 namespace OpenRA.Mods.Common.Effects
 {
+	[NotSaved("A cosmetic annotation that the simulation never reads.")]
 	public class SpriteAnnotation : IEffect, IEffectAnnotation
 	{
 		readonly string palette;

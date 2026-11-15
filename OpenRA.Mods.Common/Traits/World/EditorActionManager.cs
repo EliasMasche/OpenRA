@@ -20,6 +20,7 @@ namespace OpenRA.Mods.Common.Traits
 	[IncludeStaticFluentReferences(typeof(OpenMapAction))]
 	public class EditorActionManagerInfo : TraitInfo<EditorActionManager> { }
 
+	[NotSaved("Editor world only. A game save never contains it.")]
 	public class EditorActionManager : IWorldLoaded
 	{
 		readonly Stack<EditorActionContainer> undoStack = [];

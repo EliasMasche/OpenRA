@@ -16,8 +16,14 @@ using OpenRA.Traits;
 
 namespace OpenRA.Mods.Cnc.Effects
 {
-	public class IonCannon : IProjectile
+	public class IonCannon : IProjectile, IResumeAnimations
 	{
+		// Keeps the arguments of the constructor, so that a loader can run it again on the saved fields. That builds
+		// the animation, of which a save holds only the frame.
+		readonly World world;
+		readonly WPos launchPos;
+		readonly string effect;
+		readonly string sequence;
 		readonly Target target;
 		readonly Animation anim;
 		readonly Player firedBy;
@@ -27,18 +33,23 @@ namespace OpenRA.Mods.Cnc.Effects
 		int weaponDelay;
 		bool impacted = false;
 
-		public IonCannon(Player firedBy, WeaponInfo weapon, World world, WPos launchPos, in Target target, string effect, string sequence, string palette, int delay)
+		public IonCannon(Player firedBy, WeaponInfo weapon, World world, WPos launchPos, in Target target,
+			string effect, string sequence, string palette, int weaponDelay)
 		{
 			this.target = target;
 			this.firedBy = firedBy;
 			this.weapon = weapon;
 			this.palette = palette;
-			weaponDelay = delay;
-			anim = new Animation(world, effect);
-			anim.PlayThen(sequence, () => Finish(world));
+			this.weaponDelay = weaponDelay;
+			this.world = world;
+			this.launchPos = launchPos;
+			this.effect = effect;
+			this.sequence = sequence;
+			anim = new Animation(this.world, this.effect);
+			anim.PlayThen(this.sequence, () => Finish(this.world));
 
 			if (weapon.Report != null && weapon.Report.Length > 0)
-				Game.Sound.Play(SoundType.World, weapon.Report, world, launchPos);
+				Game.Sound.Play(SoundType.World, weapon.Report, this.world, this.launchPos);
 		}
 
 		public void Tick(World world)
@@ -68,6 +79,11 @@ namespace OpenRA.Mods.Cnc.Effects
 		void Finish(World world)
 		{
 			world.AddFrameEndTask(w => w.Remove(this));
+		}
+
+		void IResumeAnimations.ResumeAnimations(Actor self)
+		{
+			anim.ContinueThen(() => Finish(firedBy.World));
 		}
 	}
 }

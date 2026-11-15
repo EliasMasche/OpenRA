@@ -18,11 +18,18 @@ using OpenRA.Support;
 
 namespace OpenRA.Graphics
 {
+	/// <summary>What a save keeps of an animation. A load attaches the callback again.</summary>
+	public readonly record struct AnimationState(string Image, string Sequence, int Frame, bool Backwards, int TimeUntilNextFrame,
+		bool WaitsToFinish, bool Repeats = false);
+
 	public class Animation
 	{
 		public ISpriteSequence CurrentSequence { get; private set; }
 		public string Name { get; private set; }
 		public bool IsDecoration { get; set; }
+
+		/// <summary>The image of creation. A save keeps the image when <see cref="ChangeImage"/> replaced it.</summary>
+		public string CreatedName { get; }
 
 		readonly Map map;
 		readonly SequenceSet sequences;
@@ -32,8 +39,22 @@ namespace OpenRA.Graphics
 		int frame;
 		bool backwards;
 		bool tickAlways;
+		bool fetchesFrame;
 		int timeUntilNextFrame;
 		Action tickFunc;
+		bool hasCallback;
+
+		/// <summary>Whether it plays once towards a callback that has not run, as PlayThen does.</summary>
+		public bool WaitsToFinish { get; private set; }
+
+		/// <summary>Whether the animation that plays once has a callback. <see cref="Restore"/> leaves it without one.</summary>
+		public bool HasCallback => WaitsToFinish && hasCallback;
+
+		/// <summary>Whether the animation plays its sequence again from the start each time it ends, as PlayRepeating does.</summary>
+		public bool Repeats { get; private set; }
+
+		/// <summary>Whether it moves its frame itself: it plays once, repeats, or stands at the end of a sequence.</summary>
+		public bool AdvancesFrame => CurrentSequence != null && !fetchesFrame;
 
 		public Animation(World world, string name)
 			: this(world, name, () => WAngle.Zero) { }
@@ -48,7 +69,7 @@ namespace OpenRA.Graphics
 		{
 			map = world.Map;
 			sequences = world.Map.Sequences;
-			Name = name.ToLowerInvariant();
+			Name = CreatedName = name.ToLowerInvariant();
 			this.facingFunc = facingFunc;
 			this.paused = paused;
 		}
@@ -140,15 +161,20 @@ namespace OpenRA.Graphics
 		{
 			backwards = false;
 			tickAlways = false;
+			fetchesFrame = false;
+			WaitsToFinish = false;
+			Repeats = true;
 			PlaySequence(sequenceName);
 
 			frame = 0;
-			tickFunc = () =>
-			{
-				++frame;
-				if (frame >= CurrentSequence.Length)
-					frame = 0;
-			};
+			tickFunc = Repeat;
+		}
+
+		void Repeat()
+		{
+			++frame;
+			if (frame >= CurrentSequence.Length)
+				frame = 0;
 		}
 
 		public bool ReplaceAnim(string sequenceName)
@@ -166,19 +192,63 @@ namespace OpenRA.Graphics
 		{
 			backwards = false;
 			tickAlways = false;
+			fetchesFrame = false;
+			Repeats = false;
 			PlaySequence(sequenceName);
 
 			frame = 0;
-			tickFunc = () =>
+			WaitsToFinish = true;
+			hasCallback = after != null;
+			tickFunc = FinishThen(after);
+		}
+
+		Action FinishThen(Action after)
+		{
+			return () =>
 			{
 				++frame;
 				if (frame >= CurrentSequence.Length)
 				{
 					frame = CurrentSequence.Length - 1;
 					tickFunc = null;
+					WaitsToFinish = false;
 					after?.Invoke();
 				}
 			};
+		}
+
+		public AnimationState Capture()
+		{
+			return new AnimationState(Name, CurrentSequence?.Name, frame, backwards, timeUntilNextFrame, WaitsToFinish, Repeats);
+		}
+
+		/// <summary>Puts the animation back where <see cref="Capture"/> left it, without a callback.</summary>
+		public void Restore(AnimationState state)
+		{
+			Name = state.Image;
+			CurrentSequence = GetSequence(state.Sequence);
+			frame = state.Frame;
+			backwards = state.Backwards;
+			timeUntilNextFrame = state.TimeUntilNextFrame;
+			tickAlways = false;
+			fetchesFrame = false;
+			WaitsToFinish = state.WaitsToFinish;
+			Repeats = !WaitsToFinish && state.Repeats;
+			hasCallback = false;
+			tickFunc = WaitsToFinish ? FinishThen(null) : Repeats ? Repeat : null;
+		}
+
+		/// <summary>
+		/// Attaches <paramref name="after"/> to the animation that plays once. Does nothing when that animation is at
+		/// its end.
+		/// </summary>
+		public void ContinueThen(Action after)
+		{
+			if (WaitsToFinish)
+			{
+				hasCallback = after != null;
+				tickFunc = FinishThen(after);
+			}
 		}
 
 		public void PlayBackwardsThen(string sequenceName, Action after)
@@ -191,6 +261,9 @@ namespace OpenRA.Graphics
 		{
 			backwards = false;
 			tickAlways = true;
+			fetchesFrame = true;
+			WaitsToFinish = false;
+			Repeats = false;
 			PlaySequence(sequenceName);
 
 			frame = func();
@@ -200,6 +273,9 @@ namespace OpenRA.Graphics
 		public void PlayFetchDirection(string sequenceName, Func<int> direction)
 		{
 			tickAlways = false;
+			fetchesFrame = true;
+			WaitsToFinish = false;
+			Repeats = false;
 			PlaySequence(sequenceName);
 
 			frame = 0;

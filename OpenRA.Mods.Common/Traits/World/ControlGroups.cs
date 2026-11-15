@@ -26,6 +26,7 @@ namespace OpenRA.Mods.Common.Traits
 	}
 
 	[TraitLocation(SystemActors.World | SystemActors.EditorWorld)]
+	[CosmeticState("The control groups of the player of this client. Another client has its own, and the simulation never reads them.")]
 	public class ControlGroups : IControlGroups, ITick, IGameSaveTraitData
 	{
 		readonly World world;

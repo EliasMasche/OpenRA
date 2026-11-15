@@ -17,7 +17,7 @@ using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Effects
 {
-	public class RevealShroudEffect : IEffect
+	public class RevealShroudEffect : IEffect, IRebuildAfterLoad
 	{
 		static readonly PPos[] NoCells = [];
 
@@ -50,6 +50,15 @@ namespace OpenRA.Mods.Common.Effects
 		}
 
 		void RemoveCellsFromPlayerShroud(Player p) { p.Shroud.RemoveSource(this); }
+
+		// The effect holds a source from its first tick to its last, and a snapshot does not hold the cells of a
+		// source. Each shroud knows whether it held this source at the save.
+		void IRebuildAfterLoad.RebuildAfterLoad(Actor self)
+		{
+			var cells = ProjectedCells(player.World);
+			foreach (var p in player.World.Players)
+				p.Shroud.RestoreSource(this, cells);
+		}
 
 		PPos[] ProjectedCells(World world)
 		{

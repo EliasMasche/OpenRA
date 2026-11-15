@@ -39,6 +39,7 @@ namespace OpenRA.Mods.Common.Traits
 		public override object Create(ActorInitializer init) { return new MenuPostProcessEffect(this); }
 	}
 
+	[NotSaved("Fades the screen for menus by the wall clock, which the simulation never reads.")]
 	public class MenuPostProcessEffect : RenderPostProcessPassBase, INotifyGameLoaded, IPostWorldLoaded
 	{
 		public enum EffectType { None, Black, Desaturated }

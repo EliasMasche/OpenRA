@@ -83,7 +83,7 @@ namespace OpenRA.Mods.Common.Traits.Render
 		}
 	}
 
-	public class WithIdleOverlay : PausableConditionalTrait<WithIdleOverlayInfo>, INotifyDamageStateChanged
+	public class WithIdleOverlay : PausableConditionalTrait<WithIdleOverlayInfo>, INotifyDamageStateChanged, IResumeAnimations
 	{
 		readonly Animation overlay;
 
@@ -119,6 +119,13 @@ namespace OpenRA.Mods.Common.Traits.Render
 		void INotifyDamageStateChanged.DamageStateChanged(Actor self, AttackInfo e)
 		{
 			overlay.ReplaceAnim(RenderSprites.NormalizeSequence(overlay, e.DamageState, overlay.CurrentSequence.Name));
+		}
+
+		// The start sequence goes on into the repeating one. Without this the overlay stays on the last frame
+		// of its start sequence after a load.
+		void IResumeAnimations.ResumeAnimations(Actor self)
+		{
+			overlay.ContinueThen(() => overlay.PlayRepeating(RenderSprites.NormalizeSequence(overlay, self.GetDamageState(), Info.Sequence)));
 		}
 	}
 }

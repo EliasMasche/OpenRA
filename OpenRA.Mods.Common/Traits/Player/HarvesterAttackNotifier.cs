@@ -46,6 +46,7 @@ namespace OpenRA.Mods.Common.Traits
 		readonly RadarPings radarPings;
 		readonly HarvesterAttackNotifierInfo info;
 
+		[NotSaved("Wall-clock time of the last notification. A load starts the clock over.")]
 		long lastAttackTime;
 
 		public HarvesterAttackNotifier(Actor self, HarvesterAttackNotifierInfo info)

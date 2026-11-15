@@ -54,7 +54,7 @@ namespace OpenRA.Mods.Common.Projectiles
 		public IProjectile Create(ProjectileArgs args) { return new GravityBomb(this, args); }
 	}
 
-	public class GravityBomb : IProjectile, ISync
+	public class GravityBomb : IProjectile, ISync, IResumeAnimations
 	{
 		readonly GravityBombInfo info;
 		readonly Animation anim;
@@ -83,7 +83,7 @@ namespace OpenRA.Mods.Common.Projectiles
 				anim = new Animation(args.SourceActor.World, info.Image, () => args.Facing);
 
 				if (!string.IsNullOrEmpty(info.OpenSequence))
-					anim.PlayThen(info.OpenSequence, () => anim.PlayRepeating(info.Sequences.Random(args.SourceActor.World.SharedRandom)));
+					anim.PlayThen(info.OpenSequence, Opened);
 				else
 					anim.PlayRepeating(info.Sequences.Random(args.SourceActor.World.SharedRandom));
 			}
@@ -91,6 +91,18 @@ namespace OpenRA.Mods.Common.Projectiles
 			var sColor = info.ShadowColor.ToVector4();
 			shadowColor = sColor.AsVector3();
 			shadowAlpha = sColor.W;
+		}
+
+		// The open sequence hands over to a falling sequence picked with the shared random.
+		// That draw makes the callback simulation state.
+		void Opened()
+		{
+			anim.PlayRepeating(info.Sequences.Random(args.SourceActor.World.SharedRandom));
+		}
+
+		void IResumeAnimations.ResumeAnimations(Actor self)
+		{
+			anim?.ContinueThen(Opened);
 		}
 
 		public void Tick(World world)

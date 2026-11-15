@@ -88,7 +88,6 @@ namespace OpenRA.Mods.Common.Traits
 					{
 						Weapon = wep,
 						Facing = new WAngle(self.World.SharedRandom.Next(1024)),
-						CurrentMuzzleFacing = () => WAngle.Zero,
 
 						DamageModifiers = self.TraitsImplementing<IFirepowerModifier>()
 							.Select(a => a.GetFirepowerModifier()).ToArray(),
@@ -100,7 +99,7 @@ namespace OpenRA.Mods.Common.Traits
 							.Select(a => a.GetRangeModifier()).ToArray(),
 
 						Source = source,
-						CurrentSource = () => source,
+						Muzzle = new FixedMuzzleSource(source, WAngle.Zero),
 						SourceActor = self,
 						PassiveTarget = source + new WVec(range, 0, 0).Rotate(rotation)
 					};

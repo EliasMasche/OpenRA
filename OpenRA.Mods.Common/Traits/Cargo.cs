@@ -14,6 +14,7 @@ using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
+using OpenRA.Activities;
 using OpenRA.Mods.Common.Activities;
 using OpenRA.Mods.Common.Orders;
 using OpenRA.Primitives;
@@ -308,7 +309,27 @@ namespace OpenRA.Mods.Common.Traits
 				self.QueueActivity(new Land(self));
 			}
 
-			self.QueueActivity(new WaitFor(() => state != State.Locked, false));
+			self.QueueActivity(new WaitForUnlock(this));
+		}
+
+		// Holds the transport in place while passengers board it.
+		sealed class WaitForUnlock : Activity
+		{
+			readonly Cargo cargo;
+
+			public WaitForUnlock(Cargo cargo)
+			{
+				this.cargo = cargo;
+				IsInterruptible = false;
+			}
+
+			public override bool Tick(Actor self)
+			{
+				if (IsCanceling)
+					return true;
+
+				return cargo.state != Cargo.State.Locked;
+			}
 		}
 
 		void ReleaseLock(Actor self)

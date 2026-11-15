@@ -98,7 +98,9 @@ namespace OpenRA.Mods.Common.Traits
 		public override object Create(ActorInitializer init) { return new ResourceRenderer(init.Self, this); }
 	}
 
-	public class ResourceRenderer : IResourceRenderer, IWorldLoaded, IRenderOverlay, ITickRender, INotifyActorDisposing, IRadarTerrainLayer
+	[NotSaved("Rendering only. The simulation never reads it.")]
+	public class ResourceRenderer
+		: IResourceRenderer, IWorldLoaded, IRenderOverlay, ITickRender, INotifyActorDisposing, IRadarTerrainLayer, INotifyGameLoaded
 	{
 		protected readonly ResourceRendererInfo Info;
 		protected readonly IResourceLayer ResourceLayer;
@@ -183,6 +185,15 @@ namespace OpenRA.Mods.Common.Traits
 
 		void IWorldLoaded.WorldLoaded(World w, WorldRenderer wr) { WorldLoaded(w, wr); }
 
+		// A load puts the resources of the saved game in the layer and raises no cell change. So this renderer still
+		// draws what the map started with. It draws again each cell that holds a resource or that drew one.
+		void INotifyGameLoaded.GameLoaded(World w)
+		{
+			foreach (var cell in w.Map.AllCells)
+				if (ResourceLayer.GetResource(cell).Density > 0 || RenderContents[cell].Type != null)
+					dirty.Add(cell);
+		}
+
 		protected RendererCellContents CreateRenderCellContents(WorldRenderer wr, ResourceLayerContents contents, CPos cell)
 		{
 			if (contents.Type != null && contents.Density > 0 && Info.ResourceTypes.TryGetValue(contents.Type, out var resourceInfo))
@@ -259,7 +270,7 @@ namespace OpenRA.Mods.Common.Traits
 				return;
 
 			shadowLayer?.Dispose();
-			spriteLayer.Dispose();
+			spriteLayer?.Dispose();
 
 			ResourceLayer.CellChanged -= AddDirtyCell;
 
@@ -270,7 +281,7 @@ namespace OpenRA.Mods.Common.Traits
 
 		protected virtual ISpriteSequence ChooseVariant(string resourceType, CPos cell)
 		{
-			return Variants[resourceType].Values.Random(World.LocalRandom);
+			return Variants[resourceType].Values.Random(Game.CosmeticRandom);
 		}
 
 		protected virtual string GetRenderedResourceType(CPos cell) { return RenderContents[cell].Type; }

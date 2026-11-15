@@ -48,6 +48,7 @@ namespace OpenRA.Mods.Common.Traits
 
 		readonly SpriteFont font;
 
+		[NotSaved("The developer mode of the player of this client, which another client does not share.")]
 		DeveloperMode devMode;
 		World world;
 

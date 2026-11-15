@@ -12,7 +12,6 @@
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
-using OpenRA.Effects;
 using OpenRA.Primitives;
 using OpenRA.Traits;
 
@@ -41,7 +40,7 @@ namespace OpenRA.Mods.Common.Traits
 		public override object Create(ActorInitializer init) { return new BridgeHut(init.World, this); }
 	}
 
-	public class BridgeHut : INotifyCreated, IDemolishable, ITick
+	public class BridgeHut : INotifyCreated, IDemolishable, ITick, IDelayedDemolition
 	{
 		public readonly BridgeHutInfo Info;
 		readonly BridgeLayer bridgeLayer;
@@ -176,29 +175,31 @@ namespace OpenRA.Mods.Common.Traits
 		void IDemolishable.Demolish(Actor self, Actor saboteur, int delay, BitSet<DamageType> damageTypes)
 		{
 			// TODO: Handle using ITick
-			self.World.Add(new DelayedAction(delay, () =>
+			self.World.Add(new DelayedDemolition(this, self, saboteur, damageTypes, delay));
+		}
+
+		void IDelayedDemolition.Demolish(Actor self, Actor saboteur, BitSet<DamageType> damageTypes)
+		{
+			if (self.IsDead)
+				return;
+
+			var modifiers = self.TraitsImplementing<IDamageModifier>()
+				.Concat(self.Owner.PlayerActor.TraitsImplementing<IDamageModifier>())
+				.Select(t => t.GetDamageModifier(self, null));
+
+			if (Util.ApplyPercentageModifiers(100, modifiers) > 0)
 			{
-				if (self.IsDead)
-					return;
-
-				var modifiers = self.TraitsImplementing<IDamageModifier>()
-					.Concat(self.Owner.PlayerActor.TraitsImplementing<IDamageModifier>())
-					.Select(t => t.GetDamageModifier(self, null));
-
-				if (Util.ApplyPercentageModifiers(100, modifiers) > 0)
+				if (Info.DemolishPropagationDelay > 0)
 				{
-					if (Info.DemolishPropagationDelay > 0)
-					{
-						demolishStep = 0;
-						demolishSaboteur = saboteur;
-						demolishDamageTypes = damageTypes;
-						DemolishStep();
-					}
-					else
-						foreach (var s in segments.Values)
-							s.Demolish(saboteur, damageTypes);
+					demolishStep = 0;
+					demolishSaboteur = saboteur;
+					demolishDamageTypes = damageTypes;
+					DemolishStep();
 				}
-			}));
+				else
+					foreach (var s in segments.Values)
+						s.Demolish(saboteur, damageTypes);
+			}
 		}
 
 		public void DemolishStep()

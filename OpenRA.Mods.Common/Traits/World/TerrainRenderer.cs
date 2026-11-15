@@ -60,6 +60,7 @@ namespace OpenRA.Mods.Common.Traits
 		public override object Create(ActorInitializer init) { return new TerrainRenderer(init.World); }
 	}
 
+	[NotSaved("Draws the map's terrain, which the simulation never reads back.")]
 	public sealed class TerrainRenderer : IRenderTerrain, IWorldLoaded, INotifyActorDisposing, ITiledTerrainRenderer
 	{
 		readonly Map map;
@@ -118,7 +119,9 @@ namespace OpenRA.Mods.Common.Traits
 			map.Tiles.CellEntryChanged -= UpdateCell;
 			map.Height.CellEntryChanged -= UpdateCell;
 
-			spriteLayer.Dispose();
+			// The sprite layer is only created once a world renderer loads.
+			// A host without a display never loads one.
+			spriteLayer?.Dispose();
 
 			tileCache.Dispose();
 			disposed = true;

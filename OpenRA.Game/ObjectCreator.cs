@@ -55,12 +55,24 @@ namespace OpenRA
 
 			if (!ResolvedAssemblies.TryGetValue(hash, out var assembly))
 			{
-				var loader = new Support.AssemblyLoader(resolvedPath);
-				assembly = loader.LoadDefaultAssembly();
+				// A host that references a mod assembly directly, such as a test project,
+				// resolves it in the default context.
+				// A second copy in a separate context would give every trait type two identities.
+				assembly = IsHostDependency(resolvedPath)
+					? Assembly.Load(AssemblyName.GetAssemblyName(resolvedPath))
+					: new Support.AssemblyLoader(resolvedPath).LoadDefaultAssembly();
+
 				ResolvedAssemblies.Add(hash, assembly);
 			}
 
 			assemblyList.Add(assembly);
+		}
+
+		static bool IsHostDependency(string path)
+		{
+			var fullPath = Path.GetFullPath(path);
+			var trusted = AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES") as string ?? "";
+			return trusted.Split(Path.PathSeparator).Any(p => string.Equals(p, fullPath, StringComparison.OrdinalIgnoreCase));
 		}
 
 		Assembly ResolveAssembly(object sender, ResolveEventArgs e)
@@ -144,9 +156,10 @@ namespace OpenRA
 
 		public IEnumerable<Type> GetTypes()
 		{
-			return assemblies.Select(ma => ma.Assembly).Distinct()
-				.SelectMany(ma => ma.GetTypes());
+			return Assemblies.SelectMany(ma => ma.GetTypes());
 		}
+
+		public IEnumerable<Assembly> Assemblies => assemblies.Select(ma => ma.Assembly).Distinct();
 
 		public TLoader GetLoader<TLoader>(string format, string name)
 		{

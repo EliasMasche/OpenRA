@@ -25,6 +25,7 @@ namespace OpenRA.Mods.Common.Traits
 		}
 	}
 
+	[NotSaved("Radar colours, built from the map when the world loads.")]
 	public class PlayerRadarTerrain : IWorldLoaded
 	{
 		public bool IsInitialized { get; private set; }
@@ -34,6 +35,7 @@ namespace OpenRA.Mods.Common.Traits
 		CellLayer<(uint, uint)> terrainColor;
 		readonly Shroud shroud;
 
+		[NotSaved("Only the radar widget subscribes, again when it is created.")]
 		public event Action<MPos> CellTerrainColorChanged = null;
 
 		public PlayerRadarTerrain(Actor self)

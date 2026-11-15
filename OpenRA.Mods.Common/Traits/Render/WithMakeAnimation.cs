@@ -34,14 +34,23 @@ namespace OpenRA.Mods.Common.Traits.Render
 		public override object Create(ActorInitializer init) { return new WithMakeAnimation(init, this); }
 	}
 
-	public class WithMakeAnimation : INotifyCreated, INotifyDeployTriggered
+	public class WithMakeAnimation : INotifyCreated, INotifyDeployTriggered, IResumeAnimations
 	{
+		// The make animation's callback that this trait owns. A caller that passes its own callback resumes it
+		// itself, so this trait leaves External alone.
+		enum PendingMake { None, External, Created, QueueActivity, Deploy, Undeploy }
+
 		readonly WithMakeAnimationInfo info;
 		readonly WithSpriteBody[] wsbs;
 		readonly bool skipMakeAnimation;
 		WithMakeOverlay[] overlays;
 
 		int token = Actor.InvalidConditionToken;
+
+		PendingMake pending;
+		Activity pendingActivity;
+		bool pendingQueued;
+		bool deployNotified;
 
 		public WithMakeAnimation(ActorInitializer init, WithMakeAnimationInfo info)
 		{
@@ -55,7 +64,10 @@ namespace OpenRA.Mods.Common.Traits.Render
 		{
 			overlays = self.TraitsImplementing<WithMakeOverlay>().ToArray();
 			if (!skipMakeAnimation)
+			{
 				Forward(self, () => { });
+				pending = PendingMake.Created;
+			}
 		}
 
 		public void Forward(Actor self, Action onComplete)
@@ -68,17 +80,8 @@ namespace OpenRA.Mods.Common.Traits.Render
 			if (wsb == null)
 				return;
 
-			wsb.PlayCustomAnimation(self, info.Sequence, () =>
-			{
-				self.World.AddFrameEndTask(w =>
-				{
-					if (token != Actor.InvalidConditionToken)
-						token = self.RevokeCondition(token);
-
-					// TODO: Rewrite this to use a trait notification for save game support
-					onComplete();
-				});
-			});
+			pending = PendingMake.External;
+			wsb.PlayCustomAnimation(self, info.Sequence, () => MakeFinished(self, onComplete));
 
 			foreach (var overlay in overlays)
 				overlay.Forward();
@@ -94,111 +97,157 @@ namespace OpenRA.Mods.Common.Traits.Render
 			if (wsb == null)
 				return;
 
-			wsb.PlayCustomAnimationBackwards(self, info.Sequence, () =>
-			{
-				self.World.AddFrameEndTask(w =>
-				{
-					if (token != Actor.InvalidConditionToken)
-						token = self.RevokeCondition(token);
-
-					// TODO: Rewrite this to use a trait notification for save game support
-					onComplete();
-				});
-			});
+			pending = PendingMake.External;
+			wsb.PlayCustomAnimationBackwards(self, info.Sequence, () => MakeFinished(self, onComplete));
 
 			foreach (var overlay in overlays)
 				overlay.Reverse();
+		}
+
+		/// <summary>
+		/// Attaches <paramref name="onComplete"/> again to a make animation that <see cref="Forward"/>
+		/// or Reverse started and that is still playing. Both directions finish the same way.
+		/// </summary>
+		public void Continue(Actor self, Action onComplete)
+		{
+			var wsb = wsbs.FirstEnabledConditionalTraitOrDefault();
+			if (wsb != null && PlaysMakeSequence(self, wsb))
+				wsb.ContinueCustomAnimation(self, () => MakeFinished(self, onComplete));
+		}
+
+		// Another animation on the same body takes the place of the make animation, and of its callback. A callback
+		// that was lost that way must not come back after a load, so it is attached again only to the make
+		// sequence.
+		bool PlaysMakeSequence(Actor self, WithSpriteBody wsb)
+		{
+			return wsb.DefaultAnimation.CurrentSequence?.Name == wsb.NormalizeSequence(self, info.Sequence);
+		}
+
+		void MakeFinished(Actor self, Action onComplete)
+		{
+			pending = PendingMake.None;
+			self.World.AddFrameEndTask(w =>
+			{
+				if (token != Actor.InvalidConditionToken)
+					token = self.RevokeCondition(token);
+
+				// TODO: Rewrite this to use a trait notification for save game support
+				onComplete();
+			});
 		}
 
 		public void Reverse(Actor self, Activity activity, bool queued = true)
 		{
-			Reverse(self, () =>
-			{
-				// HACK: The actor remains alive and active for one tick before the followup activity
-				// (sell/transform/etc) runs. This causes visual glitches that we attempt to minimize
-				// by forcing the animation to frame 0 and regranting the make condition.
-				// These workarounds will break the actor if the followup activity doesn't dispose it!
-				wsbs.FirstEnabledConditionalTraitOrDefault()?.DefaultAnimation.PlayFetchIndex(info.Sequence, () => 0);
-
-				token = self.GrantCondition(info.Condition);
-
-				self.QueueActivity(queued, activity);
-			});
+			pendingActivity = activity;
+			pendingQueued = queued;
+			Reverse(self, QueuePendingActivity(self));
+			pending = PendingMake.QueueActivity;
 
 			foreach (var overlay in overlays)
 				overlay.Reverse();
+		}
+
+		// The callback that queues the activity waiting for the reverse animation. It binds the activity waiting
+		// now, so a later Reverse cannot swap it.
+		Action QueuePendingActivity(Actor self)
+		{
+			var activity = pendingActivity;
+			var queued = pendingQueued;
+			return () => QueueAfterReverse(self, activity, queued);
+		}
+
+		void QueueAfterReverse(Actor self, Activity activity, bool queued)
+		{
+			pendingActivity = null;
+
+			// HACK: The actor remains alive and active for one tick before the followup activity
+			// (sell/transform/etc) runs. This causes visual glitches that we attempt to minimize
+			// by forcing the animation to frame 0 and regranting the make condition.
+			// These workarounds will break the actor if the followup activity doesn't dispose it!
+			wsbs.FirstEnabledConditionalTraitOrDefault()?.DefaultAnimation.PlayFetchIndex(info.Sequence, () => 0);
+
+			token = self.GrantCondition(info.Condition);
+
+			self.QueueActivity(queued, activity);
 		}
 
 		// TODO: Make this use Forward instead
-		void INotifyDeployTriggered.Deploy(Actor self, bool skipMakeAnim)
-		{
-			var notified = false;
-			var notify = self.TraitsImplementing<INotifyDeployComplete>();
-
-			if (skipMakeAnim)
-			{
-				foreach (var n in notify)
-					n.FinishedDeploy(self);
-
-				return;
-			}
-
-			foreach (var wsb in wsbs)
-			{
-				if (wsb.IsTraitDisabled)
-					continue;
-
-				wsb.PlayCustomAnimation(self, info.Sequence, () =>
-				{
-					if (notified)
-						return;
-
-					foreach (var n in notify)
-					{
-						n.FinishedDeploy(self);
-						notified = true;
-					}
-				});
-			}
-
-			foreach (var overlay in overlays)
-				overlay.Forward();
-		}
+		void INotifyDeployTriggered.Deploy(Actor self, bool skipMakeAnim) { PlayDeploy(self, skipMakeAnim, false); }
 
 		// TODO: Make this use Reverse instead
-		void INotifyDeployTriggered.Undeploy(Actor self, bool skipMakeAnim)
-		{
-			var notified = false;
-			var notify = self.TraitsImplementing<INotifyDeployComplete>();
+		void INotifyDeployTriggered.Undeploy(Actor self, bool skipMakeAnim) { PlayDeploy(self, skipMakeAnim, true); }
 
+		void PlayDeploy(Actor self, bool skipMakeAnim, bool undeploy)
+		{
 			if (skipMakeAnim)
 			{
-				foreach (var n in notify)
-					n.FinishedUndeploy(self);
+				foreach (var n in self.TraitsImplementing<INotifyDeployComplete>())
+					NotifyDeployComplete(n, self, undeploy);
 
 				return;
 			}
 
+			deployNotified = false;
+			pending = undeploy ? PendingMake.Undeploy : PendingMake.Deploy;
 			foreach (var wsb in wsbs)
 			{
 				if (wsb.IsTraitDisabled)
 					continue;
 
-				wsb.PlayCustomAnimationBackwards(self, info.Sequence, () =>
-				{
-					if (notified)
-						return;
-
-					foreach (var n in notify)
-					{
-						n.FinishedUndeploy(self);
-						notified = true;
-					}
-				});
+				if (undeploy)
+					wsb.PlayCustomAnimationBackwards(self, info.Sequence, () => DeployFinished(self, true));
+				else
+					wsb.PlayCustomAnimation(self, info.Sequence, () => DeployFinished(self, false));
 			}
 
 			foreach (var overlay in overlays)
-				overlay.Reverse();
+			{
+				if (undeploy)
+					overlay.Reverse();
+				else
+					overlay.Forward();
+			}
+		}
+
+		void DeployFinished(Actor self, bool undeploy)
+		{
+			pending = PendingMake.None;
+			if (deployNotified)
+				return;
+
+			foreach (var n in self.TraitsImplementing<INotifyDeployComplete>())
+			{
+				NotifyDeployComplete(n, self, undeploy);
+				deployNotified = true;
+			}
+		}
+
+		static void NotifyDeployComplete(INotifyDeployComplete notify, Actor self, bool undeploy)
+		{
+			if (undeploy)
+				notify.FinishedUndeploy(self);
+			else
+				notify.FinishedDeploy(self);
+		}
+
+		void IResumeAnimations.ResumeAnimations(Actor self)
+		{
+			switch (pending)
+			{
+				case PendingMake.Created:
+					Continue(self, () => { });
+					break;
+				case PendingMake.QueueActivity:
+					Continue(self, QueuePendingActivity(self));
+					break;
+				case PendingMake.Deploy:
+				case PendingMake.Undeploy:
+					var undeploy = pending == PendingMake.Undeploy;
+					foreach (var wsb in wsbs)
+						if (!wsb.IsTraitDisabled && PlaysMakeSequence(self, wsb))
+							wsb.ContinueCustomAnimation(self, () => DeployFinished(self, undeploy));
+					break;
+			}
 		}
 	}
 }

@@ -29,6 +29,10 @@ namespace OpenRA.Mods.Common.Traits
 
 		List<MiniYamlNode> IGameSaveTraitData.IssueTraitData(Actor self)
 		{
+			// A world without a display has no viewport to save.
+			if (worldRenderer == null)
+				return null;
+
 			// HACK: Store the viewport state for the skirmish observer on the first bot's trait
 			// TODO: This won't make sense for MP saves
 			var localPlayer = worldRenderer.World.LocalPlayer;

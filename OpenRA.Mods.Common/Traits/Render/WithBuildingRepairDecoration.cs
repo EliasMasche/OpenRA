@@ -20,7 +20,7 @@ namespace OpenRA.Mods.Common.Traits.Render
 		public override object Create(ActorInitializer init) { return new WithBuildingRepairDecoration(init.Self, this); }
 	}
 
-	public class WithBuildingRepairDecoration : WithDecoration
+	public class WithBuildingRepairDecoration : WithDecoration, IResumeAnimations
 	{
 		readonly RepairableBuilding rb;
 		readonly WithBuildingRepairDecorationInfo info;
@@ -56,6 +56,13 @@ namespace OpenRA.Mods.Common.Traits.Render
 
 			if (++shownPlayer == rb.Repairers.Count)
 				shownPlayer = 0;
+		}
+
+		// The save holds the repairer on display, and not the callback that plays the animation again. Without this,
+		// the decoration stops at its last frame after a load, and never shows the next repairer.
+		void IResumeAnimations.ResumeAnimations(Actor self)
+		{
+			anim.ContinueThen(CycleRepairer);
 		}
 	}
 }

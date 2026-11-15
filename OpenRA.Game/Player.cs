@@ -42,11 +42,14 @@ namespace OpenRA
 		const string EnumeratedBotName = "enumerated-bot-name";
 
 		public readonly Actor PlayerActor;
+
+		[NotSaved("The lobby gives each player the name of the person in its slot. A save holds the name of the person who played the slot.")]
 		public readonly string PlayerName;
 		public readonly string InternalName;
 		public readonly FactionInfo Faction;
 		public readonly bool NonCombatant = false;
 		public readonly bool Playable = true;
+		[NotSaved("The lobby gives each player its client, and a loaded game runs in the lobby of its own server.")]
 		public readonly int ClientIndex;
 		public readonly CPos HomeLocation;
 		public readonly int Handicap;
@@ -84,6 +87,8 @@ namespace OpenRA
 		readonly INotifyPlayerDisconnected[] notifyDisconnected;
 
 		readonly IReadOnlyCollection<IBotInfo> botInfos;
+
+		[NotSaved("A cache of the name that PlayerName gives, which the lobby decides.")]
 		string resolvedPlayerName;
 
 		// Each player is identified with a unique bit in the set

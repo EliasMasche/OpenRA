@@ -18,6 +18,7 @@ using OpenRA.Primitives;
 
 namespace OpenRA.Mods.Common.Effects
 {
+	[NotSaved("Flashes a targeted actor on screen. The simulation never reads it.")]
 	public class FlashTarget : IEffect
 	{
 		readonly Actor target;

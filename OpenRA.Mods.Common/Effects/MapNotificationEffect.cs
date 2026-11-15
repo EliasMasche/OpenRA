@@ -17,6 +17,7 @@ using OpenRA.Primitives;
 
 namespace OpenRA.Mods.Common.Effects
 {
+	[NotSaved("Plays a delayed notification and radar ping. The simulation never reads it.")]
 	public class MapNotificationEffect : IEffect
 	{
 		readonly RadarPings radarPings;

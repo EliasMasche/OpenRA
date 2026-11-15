@@ -197,7 +197,7 @@ namespace OpenRA.Mods.Common.Traits
 		public override object Create(ActorInitializer init) { return new UpdatesPlayerStatistics(this, init.Self); }
 	}
 
-	public class UpdatesPlayerStatistics : INotifyKilled, INotifyCreated, INotifyOwnerChanged, INotifyActorDisposing
+	public class UpdatesPlayerStatistics : INotifyKilled, INotifyCreated, INotifyOwnerChanged, INotifyActorDisposing, IRebuildAfterLoad
 	{
 		readonly UpdatesPlayerStatisticsInfo info;
 		readonly string actorName;
@@ -265,12 +265,23 @@ namespace OpenRA.Mods.Common.Traits
 			if (includedInArmyValue)
 			{
 				playerStats.ArmyValue += cost;
-				playerStats.Units[actorName].Count++;
+
+				// A load also creates the dead actors that the snapshot holds, and they do not count. The count of a
+				// live actor comes after the load.
+				if (!self.World.IsLoadingSnapshot)
+					playerStats.Units[actorName].Count++;
 			}
 
 			includedInAssetsValue = info.AddToAssetsValue;
 			if (includedInAssetsValue)
 				playerStats.AssetsValue += cost;
+		}
+
+		// The count of the units of each type is not saved. The saved flag tells whether this actor counts.
+		void IRebuildAfterLoad.RebuildAfterLoad(Actor self)
+		{
+			if (includedInArmyValue)
+				playerStats.Units[actorName].Count++;
 		}
 
 		void INotifyOwnerChanged.OnOwnerChanged(Actor self, Player oldOwner, Player newOwner)

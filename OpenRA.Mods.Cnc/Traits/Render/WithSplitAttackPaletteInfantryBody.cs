@@ -54,5 +54,13 @@ namespace OpenRA.Mods.Cnc.Traits.Render
 				splitAnimation.PlayThen(sequence, () => visible = false);
 			}
 		}
+
+		// The save holds the visible flag, and not the callback that clears it. Without this, the second palette stays
+		// after a load.
+		protected override void ResumeAnimations(Actor self)
+		{
+			base.ResumeAnimations(self);
+			splitAnimation.ContinueThen(() => visible = false);
+		}
 	}
 }

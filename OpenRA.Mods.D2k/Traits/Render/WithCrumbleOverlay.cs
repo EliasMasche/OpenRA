@@ -37,6 +37,7 @@ namespace OpenRA.Mods.D2k.Traits.Render
 	{
 		readonly WithCrumbleOverlayInfo info;
 		readonly RenderSprites renderSprites;
+		[NotSaved("Plays once when a building is placed. A load creates the building without it, so a load ends the overlay.")]
 		readonly Animation overlay;
 		readonly AnimationWithOffset animation;
 

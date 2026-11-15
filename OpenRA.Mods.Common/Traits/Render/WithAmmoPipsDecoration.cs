@@ -48,6 +48,7 @@ namespace OpenRA.Mods.Common.Traits.Render
 	public class WithAmmoPipsDecoration : WithDecorationBase<WithAmmoPipsDecorationInfo>
 	{
 		readonly AmmoPool[] ammo;
+		[NotSaved("Rendering only. Each draw of the decoration plays the sequence of each pip again.")]
 		readonly Animation pips;
 
 		public WithAmmoPipsDecoration(Actor self, WithAmmoPipsDecorationInfo info)

@@ -358,6 +358,12 @@ namespace OpenRA.Mods.Common.Traits
 	{
 		void PlayDockAnimation(Actor self, Action after);
 		void PlayReverseDockAnimation(Actor self, Action after);
+
+		/// <summary>Attaches <paramref name="after"/> again to a dock animation that is still playing.</summary>
+		void ContinueDockAnimation(Actor self, Action after);
+
+		/// <summary>Attaches <paramref name="after"/> again to a reverse dock animation that is still playing.</summary>
+		void ContinueReverseDockAnimation(Actor self, Action after);
 	}
 
 	public interface IProvidesAssetBrowserPalettes

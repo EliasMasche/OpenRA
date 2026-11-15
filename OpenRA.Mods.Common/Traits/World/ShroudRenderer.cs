@@ -60,6 +60,7 @@ namespace OpenRA.Mods.Common.Traits
 		public override object Create(ActorInitializer init) { return new ShroudRenderer(init.World, this); }
 	}
 
+	[NotSaved("Rendering only. The simulation never reads it.")]
 	public sealed class ShroudRenderer : IRenderShroud, IWorldLoaded, INotifyActorDisposing
 	{
 		[Flags]
@@ -383,8 +384,8 @@ namespace OpenRA.Mods.Common.Traits
 			if (disposed)
 				return;
 
-			shroudLayer.Dispose();
-			fogLayer.Dispose();
+			shroudLayer?.Dispose();
+			fogLayer?.Dispose();
 			disposed = true;
 		}
 	}

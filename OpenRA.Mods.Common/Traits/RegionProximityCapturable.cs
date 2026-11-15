@@ -9,6 +9,7 @@
  */
 #endregion
 
+using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
 using OpenRA.Graphics;
@@ -47,6 +48,11 @@ namespace OpenRA.Mods.Common.Traits
 				region = Util.ExpandFootprint([self.Location], true).ToArray();
 
 			return self.World.ActorMap.AddCellTrigger(region, ActorEntered, ActorLeft);
+		}
+
+		protected override void RestoreTrigger(Actor self, int trigger, IEnumerable<Actor> inside)
+		{
+			self.World.ActorMap.RestoreCellTrigger(trigger, region, ActorEntered, ActorLeft, inside);
 		}
 
 		protected override void RemoveTrigger(Actor self, int trigger)

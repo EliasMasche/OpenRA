@@ -43,7 +43,7 @@ namespace OpenRA.Mods.Common.Traits.Render
 		public override object Create(ActorInitializer init) { return new WithAttackOverlay(init, this); }
 	}
 
-	public class WithAttackOverlay : INotifyAttack, ITick
+	public class WithAttackOverlay : INotifyAttack, ITick, IResumeAnimations
 	{
 		readonly Animation overlay;
 		readonly RenderSprites renderSprites;
@@ -102,6 +102,13 @@ namespace OpenRA.Mods.Common.Traits.Render
 		{
 			if (info.Delay > 0 && --tick == 0)
 				PlayOverlay();
+		}
+
+		// The save holds the attacking flag, and not the callback that clears it. Without this, the overlay stays
+		// visible after a load.
+		void IResumeAnimations.ResumeAnimations(Actor self)
+		{
+			overlay.ContinueThen(() => attacking = false);
 		}
 	}
 }

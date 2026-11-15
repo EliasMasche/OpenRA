@@ -43,6 +43,7 @@ namespace OpenRA.Mods.Common.Traits
 
 		public bool Enabled;
 
+		[NotSaved("The developer mode of the player of this client, which another client does not share.")]
 		DeveloperMode devMode;
 		World world;
 

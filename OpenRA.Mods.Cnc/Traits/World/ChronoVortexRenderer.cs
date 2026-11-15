@@ -108,8 +108,8 @@ namespace OpenRA.Mods.Cnc.Traits
 
 		void INotifyActorDisposing.Disposing(Actor self)
 		{
-			vortexSheet.Dispose();
-			vortexBuffer.Dispose();
+			vortexSheet?.Dispose();
+			vortexBuffer?.Dispose();
 		}
 	}
 }

@@ -32,6 +32,8 @@ namespace OpenRA.Traits
 		WorldRenderer worldRenderer;
 		readonly List<ShakeEffect> shakeEffects = [];
 		int ticks = 0;
+
+		[NotSaved("How far this client moved its own viewport. The viewport of a loaded game starts where the player puts it.")]
 		Vector2 previousOffset = Vector2.Zero;
 
 		public ScreenShaker(ScreenShakerInfo info)
@@ -45,11 +47,15 @@ namespace OpenRA.Traits
 		{
 			shakeEffects.RemoveAll(t => t.ExpiryTime == ticks);
 
-			var newOffset = shakeEffects.Count > 0 ? GetScrollOffset() : Vector2.Zero;
-			if (newOffset != previousOffset)
+			// Without a display there is no viewport to shake. The effects still expire on time.
+			if (worldRenderer != null)
 			{
-				worldRenderer.Viewport.Scroll(newOffset - previousOffset, true);
-				previousOffset = newOffset;
+				var newOffset = shakeEffects.Count > 0 ? GetScrollOffset() : Vector2.Zero;
+				if (newOffset != previousOffset)
+				{
+					worldRenderer.Viewport.Scroll(newOffset - previousOffset, true);
+					previousOffset = newOffset;
+				}
 			}
 
 			ticks++;

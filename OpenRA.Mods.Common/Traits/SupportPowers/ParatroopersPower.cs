@@ -103,60 +103,8 @@ namespace OpenRA.Mods.Common.Traits
 			var startEdge = target - (self.World.Map.DistanceToEdge(target, -delta) + info.Cordon).Length * delta / 1024;
 			var finishEdge = target + (self.World.Map.DistanceToEdge(target, delta) + info.Cordon).Length * delta / 1024;
 
-			Actor camera = null;
-			Beacon beacon = null;
-			var aircraftInRange = new Dictionary<Actor, bool>();
-
-			void OnEnterRange(Actor a)
-			{
-				// Spawn a camera and remove the beacon when the first plane enters the target area
-				if (info.CameraActor != null && camera == null && !aircraftInRange.Any(kv => kv.Value))
-				{
-					self.World.AddFrameEndTask(w =>
-					{
-						camera = w.CreateActor(info.CameraActor,
-						[
-							new LocationInit(self.World.Map.CellContaining(target)),
-							new OwnerInit(self.Owner),
-						]);
-					});
-				}
-
-				RemoveBeacon(beacon);
-
-				if (!aircraftInRange.Any(kv => kv.Value))
-				{
-					Game.Sound.PlayNotification(self.World.Map.Rules, self.Owner, "Speech",
-						info.ReinforcementsArrivedSpeechNotification, self.Owner.Faction.InternalName);
-
-					TextNotificationsManager.AddTransientLine(self.Owner, info.ReinforcementsArrivedTextNotification);
-				}
-
-				aircraftInRange[a] = true;
-			}
-
-			void OnExitRange(Actor a)
-			{
-				aircraftInRange[a] = false;
-
-				// Remove the camera when the final plane leaves the target area
-				if (!aircraftInRange.Any(kv => kv.Value))
-					RemoveCamera(camera);
-			}
-
-			void OnRemovedFromWorld(Actor a)
-			{
-				aircraftInRange[a] = false;
-
-				// Checking for attack range is not relevant here because
-				// aircraft may be shot down before entering the range.
-				// If at the map's edge, they may be removed from world before leaving.
-				if (aircraftInRange.All(kv => !kv.Key.IsInWorld))
-				{
-					RemoveCamera(camera);
-					RemoveBeacon(beacon);
-				}
-			}
+			var run = new SupportPowerAircraftRun(self, target, info.CameraActor, info.CameraRemoveDelay,
+				info.ReinforcementsArrivedSpeechNotification, info.ReinforcementsArrivedTextNotification);
 
 			// Create the actors immediately so they can be returned
 			for (var i = -info.SquadSize / 2; i <= info.SquadSize / 2; i++)
@@ -209,9 +157,7 @@ namespace OpenRA.Mods.Common.Traits
 
 					var drop = a.Trait<ParaDrop>();
 					drop.SetLZ(w.Map.CellContaining(target + targetOffset), !info.AllowImpassableCells);
-					drop.OnEnteredDropRange += OnEnterRange;
-					drop.OnExitedDropRange += OnExitRange;
-					drop.OnRemovedFromWorld += OnRemovedFromWorld;
+					drop.SetObserver(run);
 
 					var cargo = a.Trait<Cargo>();
 					foreach (var unit in units.Skip(added).Take(passengersPerPlane))
@@ -223,7 +169,7 @@ namespace OpenRA.Mods.Common.Traits
 					a.QueueActivity(new Fly(a, Target.FromPos(target + spawnOffset)));
 					a.QueueActivity(new Fly(a, Target.FromPos(finishEdge + spawnOffset)));
 					a.QueueActivity(new RemoveSelf());
-					aircraftInRange.Add(a, false);
+					run.AircraftInRange.Add(a, false);
 					distanceTestActor = a;
 				}
 
@@ -235,7 +181,7 @@ namespace OpenRA.Mods.Common.Traits
 				{
 					var distance = (target - startEdge).HorizontalLength;
 
-					beacon = new Beacon(
+					run.Beacon = new Beacon(
 						self.Owner,
 						target - new WVec(0, 0, altitude),
 						Info.BeaconPaletteIsPlayerPalette,
@@ -247,31 +193,14 @@ namespace OpenRA.Mods.Common.Traits
 						Info.ArrowSequence,
 						Info.CircleSequence,
 						Info.ClockSequence,
-						() => 1 - ((distanceTestActor.CenterPosition - target).HorizontalLength - info.BeaconDistanceOffset.Length) * 1f / distance,
+						new AircraftRunBeaconClock(distanceTestActor, target, info.BeaconDistanceOffset.Length, distance),
 						Info.BeaconDelay);
 
-					w.Add(beacon);
+					w.Add(run.Beacon);
 				}
 			});
 
 			return (aircraft.ToArray(), units.ToArray());
-		}
-
-		void RemoveCamera(Actor camera)
-		{
-			if (camera == null)
-				return;
-
-			camera.QueueActivity(new Wait(info.CameraRemoveDelay));
-			camera.QueueActivity(new RemoveSelf());
-		}
-
-		void RemoveBeacon(Beacon beacon)
-		{
-			if (beacon == null)
-				return;
-
-			Self.World.AddFrameEndTask(w => w.Remove(beacon));
 		}
 	}
 }

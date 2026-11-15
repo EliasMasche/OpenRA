@@ -9,7 +9,6 @@
  */
 #endregion
 
-using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
@@ -78,14 +77,14 @@ namespace OpenRA.Mods.Common.Traits
 		[VerifySync]
 		public bool IsAiming { get; set; }
 
-		public IEnumerable<Armament> Armaments => getArmaments();
+		public IEnumerable<Armament> Armaments => GetArmaments();
 
 		protected IFacing facing;
 		protected IPositionable positionable;
 		protected INotifyAiming[] notifyAiming;
-		protected Func<IEnumerable<Armament>> getArmaments;
 
 		readonly Actor self;
+		Armament[] armaments;
 
 		bool wasAiming;
 
@@ -101,7 +100,8 @@ namespace OpenRA.Mods.Common.Traits
 			positionable = self.OccupiesSpace as IPositionable;
 			notifyAiming = self.TraitsImplementing<INotifyAiming>().ToArray();
 
-			getArmaments = InitializeGetArmaments(self);
+			armaments = self.TraitsImplementing<Armament>()
+				.Where(a => Info.Armaments.Contains(a.Info.Name)).ToArray();
 
 			base.Created(self);
 		}
@@ -123,12 +123,9 @@ namespace OpenRA.Mods.Common.Traits
 			wasAiming = IsAiming;
 		}
 
-		protected virtual Func<IEnumerable<Armament>> InitializeGetArmaments(Actor self)
+		protected virtual IEnumerable<Armament> GetArmaments()
 		{
-			var armaments = self.TraitsImplementing<Armament>()
-				.Where(a => Info.Armaments.Contains(a.Info.Name)).ToArray();
-
-			return () => armaments;
+			return armaments;
 		}
 
 		public bool TargetInFiringArc(Actor self, in Target target, WAngle facingTolerance)

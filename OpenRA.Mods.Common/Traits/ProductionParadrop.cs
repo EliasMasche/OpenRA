@@ -11,7 +11,6 @@
 
 using System;
 using System.Collections.Generic;
-using OpenRA.Activities;
 using OpenRA.Mods.Common.Activities;
 using OpenRA.Primitives;
 using OpenRA.Traits;
@@ -39,7 +38,7 @@ namespace OpenRA.Mods.Common.Traits
 		public override object Create(ActorInitializer init) { return new ProductionParadrop(init, this); }
 	}
 
-	sealed class ProductionParadrop : Production
+	sealed class ProductionParadrop : Production, IDeliversProduction
 	{
 		readonly Lazy<RallyPoint> rp;
 
@@ -87,28 +86,21 @@ namespace OpenRA.Mods.Common.Traits
 				]);
 
 				actor.QueueActivity(new Fly(actor, Target.FromCell(w, dropPos)));
-				actor.QueueActivity(new CallFunc(() =>
-				{
-					if (!self.IsInWorld || self.IsDead)
-					{
-						owner.PlayerActor.Trait<PlayerResources>().RefundCash(refundableValue);
-						return;
-					}
-
-					foreach (var cargo in self.TraitsImplementing<INotifyDelivery>())
-						cargo.Delivered(self);
-
-					self.World.AddFrameEndTask(ww => DoProduction(self, producee, exit?.Info, productionType, inits));
-					Game.Sound.Play(SoundType.World, info.ChuteSound, self.CenterPosition);
-					Game.Sound.PlayNotification(self.World.Map.Rules, self.Owner, "Speech", info.ReadyAudio, self.Owner.Faction.InternalName);
-					TextNotificationsManager.AddTransientLine(self.Owner, info.ReadyTextNotification);
-				}));
+				actor.QueueActivity(new CompleteProductionDelivery(this, self, owner, producee, exit?.Info, productionType, inits, refundableValue));
 
 				actor.QueueActivity(new Fly(actor, Target.FromCell(w, endPos)));
 				actor.QueueActivity(new RemoveSelf());
 			});
 
 			return true;
+		}
+
+		public void PlayDeliveredNotifications(Actor self)
+		{
+			var info = (ProductionParadropInfo)Info;
+			Game.Sound.Play(SoundType.World, info.ChuteSound, self.CenterPosition);
+			Game.Sound.PlayNotification(self.World.Map.Rules, self.Owner, "Speech", info.ReadyAudio, self.Owner.Faction.InternalName);
+			TextNotificationsManager.AddTransientLine(self.Owner, info.ReadyTextNotification);
 		}
 
 		public override void DoProduction(Actor self, ActorInfo producee, ExitInfo exitinfo, string productionType, TypeDictionary inits)
@@ -151,7 +143,8 @@ namespace OpenRA.Mods.Common.Traits
 				var move = newUnit.TraitOrDefault<IMove>();
 				if (move != null)
 					foreach (var cell in exitLocations)
-						newUnit.QueueActivity(new AttackMoveActivity(newUnit, () => move.MoveTo(cell, 1, evaluateNearestMovableCell: true, targetLineColor: Color.OrangeRed)));
+						newUnit.QueueActivity(new AttackMoveActivity(newUnit,
+							MoveIntent.MoveTo(move, cell, 1, evaluateNearestMovableCell: true, targetLineColor: Color.OrangeRed)));
 
 				if (!self.IsDead)
 					foreach (var t in self.TraitsImplementing<INotifyProduction>())

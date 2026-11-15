@@ -72,7 +72,9 @@ namespace OpenRA.Traits
 	public class Shroud : ISync, INotifyCreated, ITick
 	{
 		public enum SourceType : byte { PassiveVisibility, Shroud, Visibility }
+		[NotSaved("FrozenActorLayer and PlayerRadarTerrain subscribe when they are created, the renderers when they load.")]
 		public event Action<PPos> OnShroudChanged;
+
 		public int RevealedCells { get; private set; }
 
 		enum ShroudCellType : byte { Shroud, Fog, Visible }
@@ -86,7 +88,13 @@ namespace OpenRA.Traits
 		readonly Map map;
 
 		// Individual shroud modifier sources (type and area)
+		[NotSaved("Each revealing actor adds its source again when it enters the world, and corrects its cells after a load.")]
 		readonly Dictionary<object, ShroudSource> sources = [];
+
+		// Which sources this shroud holds, and of which type. A save holds this and not the cells of a
+		// source. Who feeds a player's shroud is decided when a source is added, by the relationship of
+		// that moment, so it cannot be worked out again from the relationships a loaded world has.
+		readonly Dictionary<object, SourceType> sourceTypes = [];
 
 		// Per-cell count of each source type, used to resolve the final cell type
 		readonly ProjectedCellLayer<short> passiveVisibleCount;
@@ -271,10 +279,57 @@ namespace OpenRA.Traits
 			return ProjectedCellsInRange(map, map.CenterOfCell(cell), WDist.Zero, range, maxHeightDelta);
 		}
 
+		/// <summary>
+		/// Called after a load by whatever keeps the source <paramref name="key"/>, with the cells the
+		/// source had when the world was saved. If the saved shroud held the source, it is put back with
+		/// those cells. If it did not, the source that creating its owner added is dropped. Neither counts
+		/// a cell: the saved counts already hold what the saved sources added.
+		/// </summary>
+		public void RestoreSource(object key, PPos[] projectedCells)
+		{
+			if (sourceTypes.TryGetValue(key, out var type))
+				sources[key] = new ShroudSource(type, projectedCells);
+			else
+				sources.Remove(key);
+		}
+
+		/// <summary>
+		/// The first cell whose count differs from what the sources add up to, or null when every cell agrees.
+		/// Only adding and removing a source change the counts, so after a load they have to agree. A trait that
+		/// keeps a source and does not give it back after a load leaves a difference here.
+		/// </summary>
+		public PPos? FirstMismatchedCell()
+		{
+			var passive = new ProjectedCellLayer<short>(map);
+			var visible = new ProjectedCellLayer<short>(map);
+			var generated = new ProjectedCellLayer<short>(map);
+			foreach (var source in sources.Values)
+			{
+				var counts = source.Type switch
+				{
+					SourceType.PassiveVisibility => passive,
+					SourceType.Visibility => visible,
+					_ => generated,
+				};
+
+				foreach (var puv in source.ProjectedCells)
+					if (map.Contains(puv))
+						counts[counts.Index(puv)]++;
+			}
+
+			for (var index = 0; index < touched.MaxIndex; index++)
+				if (passive[index] != passiveVisibleCount[index] || visible[index] != visibleCount[index] || generated[index] != generatedShroudCount[index])
+					return touched.PPosFromIndex(index);
+
+			return null;
+		}
+
 		public void AddSource(object key, SourceType type, PPos[] projectedCells)
 		{
 			if (!sources.TryAdd(key, new ShroudSource(type, projectedCells)))
 				throw new InvalidOperationException("Attempting to add duplicate shroud source");
+
+			sourceTypes[key] = type;
 
 			foreach (var puv in projectedCells)
 			{
@@ -308,6 +363,8 @@ namespace OpenRA.Traits
 		{
 			if (!sources.Remove(key, out var state))
 				return;
+
+			sourceTypes.Remove(key);
 
 			foreach (var puv in state.ProjectedCells)
 			{

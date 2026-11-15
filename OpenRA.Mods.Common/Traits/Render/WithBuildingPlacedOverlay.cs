@@ -34,7 +34,8 @@ namespace OpenRA.Mods.Common.Traits.Render
 		public override object Create(ActorInitializer init) { return new WithBuildingPlacedOverlay(init.Self, this); }
 	}
 
-	public class WithBuildingPlacedOverlay : ConditionalTrait<WithBuildingPlacedOverlayInfo>, INotifyDamageStateChanged, INotifyBuildingPlaced
+	public class WithBuildingPlacedOverlay : ConditionalTrait<WithBuildingPlacedOverlayInfo>, INotifyDamageStateChanged, INotifyBuildingPlaced,
+		IResumeAnimations
 	{
 		readonly Animation overlay;
 		bool visible;
@@ -64,6 +65,13 @@ namespace OpenRA.Mods.Common.Traits.Render
 		{
 			visible = true;
 			overlay.PlayThen(overlay.CurrentSequence.Name, () => visible = false);
+		}
+
+		// The save holds the visible flag, and not the callback that clears it. Without this, the overlay stays visible
+		// after a load.
+		void IResumeAnimations.ResumeAnimations(Actor self)
+		{
+			overlay.ContinueThen(() => visible = false);
 		}
 	}
 }

@@ -9,7 +9,6 @@
  */
 #endregion
 
-using System;
 using System.Collections.Generic;
 using OpenRA.Activities;
 using OpenRA.Mods.Common.Traits;
@@ -19,7 +18,7 @@ namespace OpenRA.Mods.Common.Activities
 {
 	public class AttackMoveActivity : Activity
 	{
-		readonly Func<Activity> getMove;
+		readonly MoveIntent moveIntent;
 		readonly bool isAssaultMove;
 		readonly AutoTarget autoTarget;
 		readonly AttackMove attackMove;
@@ -28,9 +27,9 @@ namespace OpenRA.Mods.Common.Activities
 		int token = Actor.InvalidConditionToken;
 		Target target = Target.Invalid;
 
-		public AttackMoveActivity(Actor self, Func<Activity> getMove, bool assaultMoving = false)
+		public AttackMoveActivity(Actor self, in MoveIntent moveIntent, bool assaultMoving = false)
 		{
-			this.getMove = getMove;
+			this.moveIntent = moveIntent;
 			autoTarget = self.TraitOrDefault<AutoTarget>();
 			attackMove = self.TraitOrDefault<AttackMove>();
 			isAssaultMove = assaultMoving;
@@ -41,7 +40,7 @@ namespace OpenRA.Mods.Common.Activities
 		{
 			if (attackMove == null || autoTarget == null)
 			{
-				QueueChild(getMove());
+				QueueChild(moveIntent.Create(self));
 				return;
 			}
 
@@ -77,7 +76,7 @@ namespace OpenRA.Mods.Common.Activities
 				if (ChildActivity == null)
 				{
 					runningMoveActivity = true;
-					QueueChild(getMove());
+					QueueChild(moveIntent.Create(self));
 				}
 			}
 
@@ -101,7 +100,7 @@ namespace OpenRA.Mods.Common.Activities
 
 		public override IEnumerable<TargetLineNode> TargetLineNodes(Actor self)
 		{
-			foreach (var n in getMove().TargetLineNodes(self))
+			foreach (var n in moveIntent.Create(self).TargetLineNodes(self))
 				yield return n;
 		}
 	}

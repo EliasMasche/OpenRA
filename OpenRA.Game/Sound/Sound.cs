@@ -168,12 +168,12 @@ namespace OpenRA
 
 		public ISound Play(SoundType type, ImmutableArray<string> names, World world, Player player = null, float volumeModifier = 1f)
 		{
-			return Play(type, player, names.Random(world.LocalRandom), true, WPos.Zero, volumeModifier);
+			return Play(type, player, names.Random(Game.CosmeticRandom), true, WPos.Zero, volumeModifier);
 		}
 
 		public ISound Play(SoundType type, ImmutableArray<string> names, World world, WPos pos, Player player = null, float volumeModifier = 1f)
 		{
-			return Play(type, player, names.Random(world.LocalRandom), false, pos, volumeModifier);
+			return Play(type, player, names.Random(Game.CosmeticRandom), false, pos, volumeModifier);
 		}
 
 		public ISound Play(ISoundFormat soundFormat) => Play(soundFormat, MusicVolume);
@@ -227,6 +227,15 @@ namespace OpenRA
 		Action onMusicComplete;
 		public bool MusicPlaying { get; private set; }
 		public MusicInfo CurrentMusic { get; private set; }
+
+		/// <summary>
+		/// Whether <paramref name="then"/> runs when the loaded music ends. An engine without sound and a loop end
+		/// none.
+		/// </summary>
+		public bool MusicEndsIn(Action then)
+		{
+			return !DummyEngine && !Game.Settings.Sound.Repeat && music != null && onMusicComplete == then;
+		}
 
 		public void PlayMusicThen(MusicInfo m, Action then)
 		{

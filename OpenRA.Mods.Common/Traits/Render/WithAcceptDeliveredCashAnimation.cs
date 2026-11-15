@@ -27,7 +27,8 @@ namespace OpenRA.Mods.Common.Traits.Render
 		public override object Create(ActorInitializer init) { return new WithAcceptDeliveredCashAnimation(init.Self, this); }
 	}
 
-	public class WithAcceptDeliveredCashAnimation : ConditionalTrait<WithAcceptDeliveredCashAnimationInfo>, INotifyCashTransfer
+	public class WithAcceptDeliveredCashAnimation : ConditionalTrait<WithAcceptDeliveredCashAnimationInfo>, INotifyCashTransfer,
+		IResumeAnimations
 	{
 		readonly WithSpriteBody wsb;
 
@@ -48,5 +49,13 @@ namespace OpenRA.Mods.Common.Traits.Render
 		}
 
 		void INotifyCashTransfer.OnDeliveringCash(Actor self, Actor acceptor) { }
+
+		// The save holds the playing flag, and not the callback that clears it. Without this, no later delivery plays
+		// the animation.
+		void IResumeAnimations.ResumeAnimations(Actor self)
+		{
+			if (playing)
+				wsb.ContinueCustomAnimation(self, () => playing = false);
+		}
 	}
 }

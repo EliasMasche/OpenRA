@@ -9,6 +9,7 @@
  */
 #endregion
 
+using System;
 using System.Linq;
 using OpenRA.Mods.Cnc.Traits.Render;
 using OpenRA.Mods.Common.Traits;
@@ -46,7 +47,7 @@ namespace OpenRA.Mods.Cnc.Traits
 		public override object Create(ActorInitializer init) { return new AttackPopupTurreted(init, this); }
 	}
 
-	sealed class AttackPopupTurreted : AttackTurreted, INotifyIdle, IDamageModifier
+	sealed class AttackPopupTurreted : AttackTurreted, INotifyIdle, IDamageModifier, IResumeAnimations
 	{
 		enum PopupState { Open, Rotating, Transitioning, Closed }
 
@@ -56,6 +57,9 @@ namespace OpenRA.Mods.Cnc.Traits
 
 		int idleTicks = 0;
 		PopupState state = PopupState.Open;
+
+		// While transitioning: towards open rather than closed.
+		bool opening;
 		readonly bool skippedMakeAnimation;
 
 		public AttackPopupTurreted(ActorInitializer init, AttackPopupTurretedInfo info)
@@ -88,11 +92,8 @@ namespace OpenRA.Mods.Cnc.Traits
 			if (state == PopupState.Closed)
 			{
 				state = PopupState.Transitioning;
-				wsb.PlayCustomAnimation(self, info.OpeningSequence, () =>
-				{
-					state = PopupState.Open;
-					wsb.PlayCustomAnimationRepeating(self, wsb.Info.Sequence);
-				});
+				opening = true;
+				wsb.PlayCustomAnimation(self, info.OpeningSequence, TransitionFinished(self));
 
 				idleTicks = 0;
 			}
@@ -118,13 +119,34 @@ namespace OpenRA.Mods.Cnc.Traits
 			else if (state == PopupState.Rotating && turret.HasAchievedDesiredFacing)
 			{
 				state = PopupState.Transitioning;
-				wsb.PlayCustomAnimation(self, info.ClosingSequence, () =>
-				{
-					state = PopupState.Closed;
-					wsb.PlayCustomAnimationRepeating(self, info.ClosedIdleSequence);
-					turret.FaceTarget(self, Target.Invalid);
-				});
+				opening = false;
+				wsb.PlayCustomAnimation(self, info.ClosingSequence, TransitionFinished(self));
 			}
+		}
+
+		// The callback that ends the current transition. Playing and resuming both attach it.
+		Action TransitionFinished(Actor self)
+		{
+			return opening ? () => OpeningFinished(self) : () => ClosingFinished(self);
+		}
+
+		void OpeningFinished(Actor self)
+		{
+			state = PopupState.Open;
+			wsb.PlayCustomAnimationRepeating(self, wsb.Info.Sequence);
+		}
+
+		void ClosingFinished(Actor self)
+		{
+			state = PopupState.Closed;
+			wsb.PlayCustomAnimationRepeating(self, info.ClosedIdleSequence);
+			turret.FaceTarget(self, Target.Invalid);
+		}
+
+		void IResumeAnimations.ResumeAnimations(Actor self)
+		{
+			if (state == PopupState.Transitioning)
+				wsb.ContinueCustomAnimation(self, TransitionFinished(self));
 		}
 
 		int IDamageModifier.GetDamageModifier(Actor attacker, Damage damage)

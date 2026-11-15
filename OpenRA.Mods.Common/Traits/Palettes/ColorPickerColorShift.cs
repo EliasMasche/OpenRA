@@ -42,6 +42,7 @@ namespace OpenRA.Mods.Common.Traits
 		public override object Create(ActorInitializer init) { return new ColorPickerColorShift(this); }
 	}
 
+	[NotSaved("The colour that the settings of this client give. Rendering only.")]
 	sealed class ColorPickerColorShift : ILoadsPalettes, ITickRender
 	{
 		readonly ColorPickerColorShiftInfo info;

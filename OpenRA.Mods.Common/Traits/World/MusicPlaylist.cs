@@ -51,7 +51,10 @@ namespace OpenRA.Mods.Common.Traits
 		readonly MusicInfo[] random;
 		readonly MusicInfo[] playlist;
 
+		[NotSaved("The music that this client has installed.")]
 		public readonly bool IsMusicInstalled;
+
+		[NotSaved("The music that this client has installed.")]
 		public readonly bool IsMusicAvailable;
 		public readonly bool AllowMuteBackgroundMusic;
 
@@ -59,6 +62,7 @@ namespace OpenRA.Mods.Common.Traits
 
 		public bool CurrentSongIsBackground { get; private set; }
 
+		[CosmeticState("The song that this client plays. The player of each client picks it.")]
 		MusicInfo currentSong;
 		MusicInfo currentBackgroundSong;
 

@@ -30,6 +30,7 @@ namespace OpenRA.Mods.Common.Traits.Sound
 	{
 		readonly AnnounceOnKillInfo info;
 
+		[NotSaved("Wall-clock time of the last announcement. A load starts the clock over, and the next kill is announced.")]
 		long lastAnnounce;
 
 		public AnnounceOnKill(AnnounceOnKillInfo info)

@@ -36,7 +36,7 @@ namespace OpenRA.Mods.D2k.Traits.Render
 		public override object Create(ActorInitializer init) { return new WithDeliveryOverlay(init.Self, this); }
 	}
 
-	public class WithDeliveryOverlay : PausableConditionalTrait<WithDeliveryOverlayInfo>, INotifyDelivery
+	public class WithDeliveryOverlay : PausableConditionalTrait<WithDeliveryOverlayInfo>, INotifyDelivery, IResumeAnimations
 	{
 		readonly AnimationWithOffset anim;
 		bool delivering;
@@ -68,5 +68,12 @@ namespace OpenRA.Mods.D2k.Traits.Render
 
 		void INotifyDelivery.IncomingDelivery(Actor self) { delivering = true; PlayDeliveryOverlay(); }
 		void INotifyDelivery.Delivered(Actor self) { delivering = false; }
+
+		// The save holds the delivering flag, and not the animation that loops while the flag is set. A load leaves the
+		// animation as creation built it, so the loop starts again.
+		void IResumeAnimations.ResumeAnimations(Actor self)
+		{
+			PlayDeliveryOverlay();
+		}
 	}
 }

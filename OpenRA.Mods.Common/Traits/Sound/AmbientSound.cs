@@ -32,9 +32,10 @@ namespace OpenRA.Mods.Common.Traits.Sound
 		public override object Create(ActorInitializer init) { return new AmbientSound(init.Self, this); }
 	}
 
-	sealed class AmbientSound : ConditionalTrait<AmbientSoundInfo>, ITick, INotifyRemovedFromWorld
+	sealed class AmbientSound : ConditionalTrait<AmbientSoundInfo>, ITick, INotifyRemovedFromWorld, IRebuildAfterLoad
 	{
 		readonly bool loop;
+		[NotSaved("Handles of the sounds that are playing. A loaded world starts a loop that played again.")]
 		readonly HashSet<ISound> currentSounds = [];
 		WPos cachedPosition;
 		int delay;
@@ -106,5 +107,13 @@ namespace OpenRA.Mods.Common.Traits.Sound
 		protected override void TraitDisabled(Actor self) { StopSound(); }
 
 		void INotifyRemovedFromWorld.RemovedFromWorld(Actor self) { StopSound(); }
+
+		// A loop starts once, when its delay ends, and a snapshot holds no handle of a sound. So a loaded world starts
+		// each loop that played again. A sound that repeats starts at the end of its next interval.
+		void IRebuildAfterLoad.RebuildAfterLoad(Actor self)
+		{
+			if (loop && delay < 0 && !IsTraitDisabled)
+				StartSound(self);
+		}
 	}
 }

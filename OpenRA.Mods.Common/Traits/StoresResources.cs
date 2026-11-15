@@ -50,6 +50,7 @@ namespace OpenRA.Mods.Common.Traits
 		}
 
 		public int ContentsSum { get; private set; } = 0;
+		[NotSaved("A view of contents. A saved copy would no longer follow it.")]
 		public IReadOnlyDictionary<string, int> Contents { get; }
 		int IStoresResources.Capacity => info.Capacity;
 

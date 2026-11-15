@@ -27,7 +27,7 @@ namespace OpenRA
 {
 	public enum WorldType { Regular, Shellmap, Editor }
 
-	public sealed class World : IDisposable
+	public sealed partial class World : IDisposable
 	{
 		internal readonly TraitDictionary TraitDict = new();
 		readonly SortedDictionary<uint, Actor> actors = [];

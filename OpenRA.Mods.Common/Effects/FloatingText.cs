@@ -18,6 +18,7 @@ using OpenRA.Primitives;
 
 namespace OpenRA.Mods.Common.Effects
 {
+	[NotSaved("Text that floats up on screen. The simulation never reads it.")]
 	public class FloatingText : IEffect, IEffectAnnotation
 	{
 		static readonly WVec Velocity = new(0, 0, 86);

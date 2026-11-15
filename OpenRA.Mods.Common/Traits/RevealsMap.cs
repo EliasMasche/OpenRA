@@ -25,7 +25,7 @@ namespace OpenRA.Mods.Common.Traits
 		public override object Create(ActorInitializer init) { return new RevealsMap(this); }
 	}
 
-	public class RevealsMap : ConditionalTrait<RevealsMapInfo>, INotifyKilled, INotifyActorDisposing, INotifyOwnerChanged
+	public class RevealsMap : ConditionalTrait<RevealsMapInfo>, INotifyKilled, INotifyActorDisposing, INotifyOwnerChanged, IRebuildAfterLoad
 	{
 		readonly Shroud.SourceType type;
 
@@ -87,6 +87,15 @@ namespace OpenRA.Mods.Common.Traits
 		{
 			foreach (var player in self.World.Players)
 				RemoveCellsFromPlayerShroud(player);
+		}
+
+		// The trait adds its source when it becomes enabled, and a load does not enable it again when its condition
+		// comes from the snapshot. Each shroud knows whether it held this source at the save.
+		void IRebuildAfterLoad.RebuildAfterLoad(Actor self)
+		{
+			var cells = ProjectedCells(self);
+			foreach (var player in self.World.Players)
+				player.Shroud.RestoreSource(this, cells);
 		}
 	}
 }

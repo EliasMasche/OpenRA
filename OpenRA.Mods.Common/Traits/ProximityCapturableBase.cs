@@ -57,7 +57,13 @@ namespace OpenRA.Mods.Common.Traits
 		public Actor Self;
 
 		readonly List<Actor> actorsInRange = [];
+
+		// The actors inside the trigger, also those that cannot capture. A load registers the trigger again under its
+		// saved ID, with these actors inside. So it does not add a captor to actorsInRange a second time.
+		readonly HashSet<Actor> inside = [];
+
 		protected int trigger;
+
 		WPos prevPosition;
 		bool skipTriggerUpdate;
 
@@ -69,6 +75,9 @@ namespace OpenRA.Mods.Common.Traits
 		}
 
 		protected abstract int CreateTrigger(Actor self);
+
+		/// <summary>Registers the trigger <paramref name="trigger"/> of a snapshot again, with the actors <paramref name="inside"/> it.</summary>
+		protected abstract void RestoreTrigger(Actor self, int trigger, IEnumerable<Actor> inside);
 		protected abstract void RemoveTrigger(Actor self, int trigger);
 		protected abstract void TickInner(Actor self);
 		protected abstract IRenderable GetRenderable(Actor self, WorldRenderer wr);
@@ -78,7 +87,10 @@ namespace OpenRA.Mods.Common.Traits
 			if (skipTriggerUpdate)
 				return;
 
-			trigger = CreateTrigger(self);
+			if (self.World.IsLoadingSnapshot)
+				RestoreTrigger(self, trigger, inside);
+			else
+				trigger = CreateTrigger(self);
 		}
 
 		void INotifyRemovedFromWorld.RemovedFromWorld(Actor self)
@@ -88,6 +100,7 @@ namespace OpenRA.Mods.Common.Traits
 
 			RemoveTrigger(self, trigger);
 			actorsInRange.Clear();
+			inside.Clear();
 		}
 
 		void ITick.Tick(Actor self)
@@ -101,6 +114,7 @@ namespace OpenRA.Mods.Common.Traits
 
 		protected void ActorEntered(Actor other)
 		{
+			inside.Add(other);
 			if (skipTriggerUpdate || !CanBeCapturedBy(other))
 				return;
 
@@ -110,6 +124,7 @@ namespace OpenRA.Mods.Common.Traits
 
 		protected void ActorLeft(Actor other)
 		{
+			inside.Remove(other);
 			if (skipTriggerUpdate || !CanBeCapturedBy(other))
 				return;
 

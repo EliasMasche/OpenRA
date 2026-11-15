@@ -83,6 +83,10 @@ namespace OpenRA.Mods.Cnc.Traits.Render
 			after();
 		}
 
+		// The voxel body switches at once, so it never has an animation left to continue.
+		void IDockClientBody.ContinueDockAnimation(Actor self, Action after) { }
+		void IDockClientBody.ContinueReverseDockAnimation(Actor self, Action after) { }
+
 		Rectangle IAutoMouseBounds.AutoMouseoverBounds(Actor self, WorldRenderer wr)
 		{
 			return modelAnimation.ScreenBounds(self.CenterPosition, wr, rv.Info.Scale);

@@ -78,14 +78,13 @@ namespace OpenRA.Mods.Common.Warheads
 			{
 				Weapon = weapon,
 				Facing = (map.CenterOfCell(targetCell) - target.CenterPosition).Yaw,
-				CurrentMuzzleFacing = () => (map.CenterOfCell(targetCell) - target.CenterPosition).Yaw,
 
 				DamageModifiers = args.DamageModifiers,
 				InaccuracyModifiers = [],
 				RangeModifiers = [],
 
 				Source = target.CenterPosition,
-				CurrentSource = () => target.CenterPosition,
+				Muzzle = new CellDirectedMuzzleSource(target, map.CenterOfCell(targetCell)),
 				SourceActor = firedBy,
 				PassiveTarget = map.CenterOfCell(targetCell),
 				GuidedTarget = tc
@@ -114,5 +113,20 @@ namespace OpenRA.Mods.Common.Warheads
 					if (footprint[index++] == cellType)
 						yield return new CPos(x + i, y + j);
 		}
+	}
+
+	sealed class CellDirectedMuzzleSource : IMuzzleSource
+	{
+		readonly Target origin;
+		readonly WPos cellCenter;
+
+		public CellDirectedMuzzleSource(in Target origin, WPos cellCenter)
+		{
+			this.origin = origin;
+			this.cellCenter = cellCenter;
+		}
+
+		public WPos Position => origin.CenterPosition;
+		public WAngle Facing => (cellCenter - origin.CenterPosition).Yaw;
 	}
 }

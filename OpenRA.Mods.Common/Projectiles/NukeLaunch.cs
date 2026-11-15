@@ -18,10 +18,12 @@ using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Effects
 {
-	public class NukeLaunch : IProjectile, ISpatiallyPartitionable
+	public class NukeLaunch : IProjectile, ISpatiallyPartitionable, IRebuildAfterLoad, IBeaconClock
 	{
 		readonly Player firedBy;
-		readonly Animation anim;
+		[NotSaved("Built again after a load, from the image and how far the flight is.")]
+		Animation anim;
+		readonly string image;
 		readonly WeaponInfo weapon;
 		readonly string weaponPalette;
 		readonly string upSequence;
@@ -78,10 +80,26 @@ namespace OpenRA.Mods.Common.Effects
 			this.detonationAltitude = detonationAltitude;
 			this.removeOnDetonation = removeOnDetonation;
 
+			this.image = image;
 			if (!string.IsNullOrEmpty(image))
 				anim = new Animation(firedBy.World, image);
 
 			pos = skipAscent ? descendSource : ascendSource;
+		}
+
+		// A loaded missile has no animation. A missile in flight plays the sequence that its flight progress gives. A
+		// missile that waits for its launch starts the sequence at the launch.
+		void IRebuildAfterLoad.RebuildAfterLoad(Actor self)
+		{
+			if (string.IsNullOrEmpty(image))
+				return;
+
+			anim = new Animation(firedBy.World, image);
+			if (isLaunched)
+			{
+				anim.PlayRepeating(ticks >= turn ? downSequence : upSequence);
+				firedBy.World.ScreenMap.Add(this, pos, anim.Image);
+			}
 		}
 
 		public void Tick(World world)
@@ -169,5 +187,7 @@ namespace OpenRA.Mods.Common.Effects
 		}
 
 		public float FractionComplete => ticks * 1f / impactDelay;
+
+		float IBeaconClock.Fraction => FractionComplete;
 	}
 }

@@ -493,38 +493,7 @@ namespace OpenRA.Mods.Common.Traits
 						if (Info.PayUpFront && cost > playerResources.GetCashAndResources())
 							return;
 
-						var notified = false;
-						BeginProduction(new ProductionItem(this, order.TargetString, cost, playerPower, () => self.World.AddFrameEndTask(_ =>
-						{
-							// Make sure the item hasn't been invalidated between the ProductionItem ticking and this FrameEndTask running
-							if (!Queue.Any(i => i.Done && i.Item == unit.Name))
-							{
-								notified = false;
-								return;
-							}
-
-							var isBuilding = unit.HasTraitInfo<BuildingInfo>();
-							if (isBuilding && !notified)
-							{
-								Game.Sound.PlayNotification(rules, self.Owner, "Speech", Info.ReadyAudio, self.Owner.Faction.InternalName);
-								TextNotificationsManager.AddTransientLine(self.Owner, Info.ReadyTextNotification);
-								notified = true;
-							}
-							else if (!isBuilding)
-							{
-								if (BuildUnit(unit))
-								{
-									Game.Sound.PlayNotification(rules, self.Owner, "Speech", Info.ReadyAudio, self.Owner.Faction.InternalName);
-									TextNotificationsManager.AddTransientLine(self.Owner, Info.ReadyTextNotification);
-								}
-								else if (!notified && time > 0)
-								{
-									Game.Sound.PlayNotification(rules, self.Owner, "Speech", Info.BlockedAudio, self.Owner.Faction.InternalName);
-									TextNotificationsManager.AddTransientLine(self.Owner, Info.BlockedTextNotification);
-									notified = true;
-								}
-							}
-						})), !order.Queued);
+						BeginProduction(new ProductionItem(this, order.TargetString, cost, playerPower, new ProductionCompletion(unit, time)), !order.Queued);
 					}
 
 					break;
@@ -536,6 +505,49 @@ namespace OpenRA.Mods.Common.Traits
 					CancelProduction(order.TargetString, order.ExtraData);
 					break;
 			}
+		}
+
+		/// <summary>
+		/// Runs on every tick that a finished item waits.
+		/// A unit waits for a free exit, a building for its placement.
+		/// </summary>
+		protected internal virtual void OnItemComplete(ProductionItem item)
+		{
+			var completion = item.Completion;
+			var unit = completion.Unit;
+			Actor.World.AddFrameEndTask(_ =>
+			{
+				// Make sure the item hasn't been invalidated between the ProductionItem ticking and this FrameEndTask running
+				if (!Queue.Any(i => i.Done && i.Item == unit.Name))
+				{
+					completion.Notified = false;
+					return;
+				}
+
+				var rules = Actor.World.Map.Rules;
+				var owner = Actor.Owner;
+				var isBuilding = unit.HasTraitInfo<BuildingInfo>();
+				if (isBuilding && !completion.Notified)
+				{
+					Game.Sound.PlayNotification(rules, owner, "Speech", Info.ReadyAudio, owner.Faction.InternalName);
+					TextNotificationsManager.AddTransientLine(owner, Info.ReadyTextNotification);
+					completion.Notified = true;
+				}
+				else if (!isBuilding)
+				{
+					if (BuildUnit(unit))
+					{
+						Game.Sound.PlayNotification(rules, owner, "Speech", Info.ReadyAudio, owner.Faction.InternalName);
+						TextNotificationsManager.AddTransientLine(owner, Info.ReadyTextNotification);
+					}
+					else if (!completion.Notified && completion.BuildTime > 0)
+					{
+						Game.Sound.PlayNotification(rules, owner, "Speech", Info.BlockedAudio, owner.Faction.InternalName);
+						TextNotificationsManager.AddTransientLine(owner, Info.BlockedTextNotification);
+						completion.Notified = true;
+					}
+				}
+			});
 		}
 
 		public virtual int GetBuildTime(ActorInfo unit, BuildableInfo bi)
@@ -589,7 +601,7 @@ namespace OpenRA.Mods.Common.Traits
 				{
 					item.Infinite = false;
 					for (var i = 1; i < Info.InfiniteBuildLimit; i++)
-						Queue.Add(new ProductionItem(this, item.Item, item.TotalCost, playerPower, item.OnComplete));
+						Queue.Add(new ProductionItem(this, item.Item, item.TotalCost, playerPower, item.Completion));
 				}
 				else
 				{
@@ -615,7 +627,7 @@ namespace OpenRA.Mods.Common.Traits
 			Queue.Remove(item);
 
 			if (item.Infinite)
-				Queue.Add(new ProductionItem(this, item.Item, item.TotalCost, playerPower, item.OnComplete) { Infinite = true });
+				Queue.Add(new ProductionItem(this, item.Item, item.TotalCost, playerPower, item.Completion) { Infinite = true });
 		}
 
 		protected virtual void BeginProduction(ProductionItem item, bool hasPriority)
@@ -715,12 +727,29 @@ namespace OpenRA.Mods.Common.Traits
 		public bool Buildable = false;
 	}
 
+	/// <summary>
+	/// What completing a queued item builds, and whether its owner got the message that it is ready or blocked. Every
+	/// repeat of an infinitely repeated item shares one completion, so the owner gets the message only once.
+	/// </summary>
+	public sealed class ProductionCompletion
+	{
+		public readonly ActorInfo Unit;
+		public readonly int BuildTime;
+		public bool Notified;
+
+		public ProductionCompletion(ActorInfo unit, int buildTime)
+		{
+			Unit = unit;
+			BuildTime = buildTime;
+		}
+	}
+
 	public class ProductionItem
 	{
 		public readonly string Item;
 		public readonly ProductionQueue Queue;
 		public readonly int TotalCost;
-		public readonly Action OnComplete;
+		public readonly ProductionCompletion Completion;
 		public int TotalTime { get; private set; }
 		public int RemainingTime { get; private set; }
 		public int RemainingCost { get; set; }
@@ -740,13 +769,13 @@ namespace OpenRA.Mods.Common.Traits
 		readonly BuildableInfo bi;
 		readonly PowerManager pm;
 
-		public ProductionItem(ProductionQueue queue, string item, int cost, PowerManager pm, Action onComplete)
+		public ProductionItem(ProductionQueue queue, string item, int cost, PowerManager pm, ProductionCompletion completion)
 		{
 			Item = item;
 			RemainingTime = TotalTime = 1;
 			RemainingCost = TotalCost = cost;
 			ResourcesPaid = 0;
-			OnComplete = onComplete;
+			Completion = completion;
 			Queue = queue;
 			this.pm = pm;
 			ai = Queue.Actor.World.Map.Rules.Actors[Item];
@@ -767,7 +796,7 @@ namespace OpenRA.Mods.Common.Traits
 
 			if (Done)
 			{
-				OnComplete?.Invoke();
+				Queue.OnItemComplete(this);
 
 				return;
 			}

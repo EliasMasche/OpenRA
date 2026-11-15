@@ -16,8 +16,13 @@ using OpenRA.Traits;
 
 namespace OpenRA.Mods.Cnc.Effects
 {
-	public class DropPodImpact : IProjectile
+	public class DropPodImpact : IProjectile, IResumeAnimations
 	{
+		// Keeps the arguments of the constructor, so that a loader can run it again on the saved fields. That builds
+		// the animation, of which a save holds only the frame.
+		readonly World world;
+		readonly string entryEffect;
+		readonly string entrySequence;
 		readonly Target target;
 		readonly Animation entryAnimation;
 		readonly Player firedBy;
@@ -29,20 +34,23 @@ namespace OpenRA.Mods.Cnc.Effects
 		bool impacted = false;
 
 		public DropPodImpact(Player firedBy, WeaponInfo weapon, World world, WPos launchPos, in Target target,
-			int delay, string entryEffect, string entrySequence, string entryPalette)
+			int weaponDelay, string entryEffect, string entrySequence, string entryPalette)
 		{
 			this.target = target;
 			this.firedBy = firedBy;
 			this.weapon = weapon;
 			this.entryPalette = entryPalette;
-			weaponDelay = delay;
+			this.weaponDelay = weaponDelay;
+			this.world = world;
 			this.launchPos = launchPos;
+			this.entryEffect = entryEffect;
+			this.entrySequence = entrySequence;
 
-			entryAnimation = new Animation(world, entryEffect);
-			entryAnimation.PlayThen(entrySequence, () => Finish(world));
+			entryAnimation = new Animation(this.world, this.entryEffect);
+			entryAnimation.PlayThen(this.entrySequence, () => Finish(this.world));
 
 			if (weapon.Report != null && weapon.Report.Length > 0)
-				Game.Sound.Play(SoundType.World, weapon.Report, world, launchPos);
+				Game.Sound.Play(SoundType.World, weapon.Report, this.world, this.launchPos);
 		}
 
 		public void Tick(World world)
@@ -72,6 +80,11 @@ namespace OpenRA.Mods.Cnc.Effects
 		void Finish(World world)
 		{
 			world.AddFrameEndTask(w => w.Remove(this));
+		}
+
+		void IResumeAnimations.ResumeAnimations(Actor self)
+		{
+			entryAnimation.ContinueThen(() => Finish(firedBy.World));
 		}
 	}
 }

@@ -26,9 +26,8 @@ namespace OpenRA.GameRules
 		public int[] InaccuracyModifiers;
 		public int[] RangeModifiers;
 		public WAngle Facing;
-		public Func<WAngle> CurrentMuzzleFacing;
 		public WPos Source;
-		public Func<WPos> CurrentSource;
+		public IMuzzleSource Muzzle;
 		public Actor SourceActor;
 		public WPos PassiveTarget;
 		public Target GuidedTarget;

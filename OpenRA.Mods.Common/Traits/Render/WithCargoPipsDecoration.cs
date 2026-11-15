@@ -48,6 +48,7 @@ namespace OpenRA.Mods.Common.Traits.Render
 	public class WithCargoPipsDecoration : WithDecorationBase<WithCargoPipsDecorationInfo>
 	{
 		readonly Cargo cargo;
+		[NotSaved("Rendering only. Each draw of the decoration plays the sequence of each pip again.")]
 		readonly Animation pips;
 		readonly int pipCount;
 

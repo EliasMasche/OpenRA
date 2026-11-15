@@ -50,6 +50,7 @@ namespace OpenRA.Mods.Common.Traits.Render
 	public class WithStoresResourcesPipsDecoration : WithDecorationBase<WithStoresResourcesPipsDecorationInfo>
 	{
 		readonly IStoresResources storesResources;
+		[NotSaved("Rendering only. Each draw of the decoration plays the sequence of each pip again.")]
 		readonly Animation pips;
 
 		public WithStoresResourcesPipsDecoration(Actor self, WithStoresResourcesPipsDecorationInfo info)

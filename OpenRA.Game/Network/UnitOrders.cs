@@ -237,6 +237,10 @@ namespace OpenRA.Network
 
 				case "HandshakeRequest":
 				{
+					// A replay has no server to answer, and the connection discards the response.
+					if (orderManager.Connection is ReplayConnection)
+						break;
+
 					// Switch to the server's mod if we need and are able to
 					var mod = Game.ModData.Manifest;
 					var request = HandshakeRequest.Deserialize(order.TargetString, order.OrderString);

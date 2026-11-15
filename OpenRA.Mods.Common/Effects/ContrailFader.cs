@@ -16,6 +16,7 @@ using OpenRA.Mods.Common.Graphics;
 
 namespace OpenRA.Mods.Common.Effects
 {
+	[NotSaved("Fades a contrail on screen. The simulation never reads it.")]
 	public class ContrailFader : IEffect
 	{
 		readonly WPos pos;

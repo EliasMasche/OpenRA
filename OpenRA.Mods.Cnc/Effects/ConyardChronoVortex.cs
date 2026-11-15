@@ -9,7 +9,6 @@
  */
 #endregion
 
-using System;
 using System.Collections.Generic;
 using OpenRA.Effects;
 using OpenRA.Graphics;
@@ -25,15 +24,15 @@ namespace OpenRA.Mods.Cnc.Effects
 		static readonly WVec Offset = new(171, 0, 0);
 		readonly ChronoVortexRenderer renderer;
 		readonly WPos center;
-		readonly Action onCompletion;
+		readonly ConyardChronoReturn chronoReturn;
 		WPos pos;
 		WAngle angle;
 		int loops = 3;
 		int frame;
 
-		public ConyardChronoVortex(Actor launcher, Action onCompletion)
+		public ConyardChronoVortex(Actor launcher, ConyardChronoReturn chronoReturn)
 		{
-			this.onCompletion = onCompletion;
+			this.chronoReturn = chronoReturn;
 			renderer = launcher.World.WorldActor.Trait<ChronoVortexRenderer>();
 			center = launcher.CenterPosition;
 			pos = center + Offset.Rotate(WRot.FromYaw(angle));
@@ -52,7 +51,7 @@ namespace OpenRA.Mods.Cnc.Effects
 			pos = center + Offset.Rotate(WRot.FromYaw(angle));
 			world.ScreenMap.Update(this, pos, Size);
 			if (frame == 48)
-				world.AddFrameEndTask(w => { w.Remove(this); w.ScreenMap.Remove(this); onCompletion(); });
+				world.AddFrameEndTask(w => { w.Remove(this); w.ScreenMap.Remove(this); chronoReturn.VortexCompleted(); });
 		}
 
 		public IEnumerable<IRenderable> Render(WorldRenderer wr)

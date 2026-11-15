@@ -9,6 +9,7 @@
  */
 #endregion
 
+using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using OpenRA.Activities;
@@ -19,8 +20,10 @@ using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Activities
 {
-	public class Transform : Activity
+	public class Transform : Activity, IResumeAnimations
 	{
+		enum MakeWait { None, Reverse, ForwardAfterBlockedDeploy }
+
 		public readonly string ToActor;
 		public CVec Offset = CVec.Zero;
 		public WAngle Facing = new(384);
@@ -30,6 +33,8 @@ namespace OpenRA.Mods.Common.Activities
 		public int ForceHealthPercentage = 0;
 		public bool SkipMakeAnims = false;
 		public string Faction = null;
+
+		MakeWait waitingFor;
 
 		public Transform(string toActor)
 		{
@@ -64,14 +69,50 @@ namespace OpenRA.Mods.Common.Activities
 				// Once the make animation starts the activity must not be stopped anymore.
 				IsInterruptible = false;
 
-				// Wait forever
-				QueueChild(new WaitFor(() => false));
-				makeAnimation.Reverse(self, () => DoTransform(self, transforms, makeAnimation));
+				QueueChild(new WaitForever());
+				makeAnimation.Reverse(self, StartWaitingFor(MakeWait.Reverse, self));
 				return false;
 			}
 
 			DoTransform(self, transforms, null);
 			return true;
+		}
+
+		// Marks the wait and returns the callback that ends it.
+		Action StartWaitingFor(MakeWait wait, Actor self)
+		{
+			waitingFor = wait;
+			return CallbackFor(wait, self);
+		}
+
+		// The callback that ends wait. Playing and resuming both attach it.
+		Action CallbackFor(MakeWait wait, Actor self)
+		{
+			return wait switch
+			{
+				MakeWait.Reverse => () => ReverseFinished(self),
+				MakeWait.ForwardAfterBlockedDeploy => () => BlockedDeployFinished(self),
+				_ => null,
+			};
+		}
+
+		void ReverseFinished(Actor self)
+		{
+			waitingFor = MakeWait.None;
+			DoTransform(self, self.TraitOrDefault<Transforms>(), self.TraitOrDefault<WithMakeAnimation>());
+		}
+
+		void BlockedDeployFinished(Actor self)
+		{
+			waitingFor = MakeWait.None;
+			IsInterruptible = true;
+			Cancel(self, true);
+		}
+
+		void IResumeAnimations.ResumeAnimations(Actor self)
+		{
+			if (waitingFor != MakeWait.None)
+				self.Trait<WithMakeAnimation>().Continue(self, CallbackFor(waitingFor, self));
 		}
 
 		void DoTransform(Actor self, Transforms transforms, WithMakeAnimation makeAnimation)
@@ -89,7 +130,7 @@ namespace OpenRA.Mods.Common.Activities
 				if (transforms != null && !transforms.CanDeploy())
 				{
 					if (!SkipMakeAnims && makeAnimation != null)
-						makeAnimation.Forward(self, () => { IsInterruptible = true; Cancel(self, true); });
+						makeAnimation.Forward(self, StartWaitingFor(MakeWait.ForwardAfterBlockedDeploy, self));
 					else
 					{
 						IsInterruptible = true;

@@ -17,7 +17,7 @@ using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Activities
 {
-	public class MoveAdjacentTo : Activity
+	public class MoveAdjacentTo : Activity, IMovePathSource
 	{
 		protected readonly Mobile Mobile;
 		readonly Color? targetLineColor;
@@ -68,7 +68,7 @@ namespace OpenRA.Mods.Common.Activities
 
 		protected override void OnFirstRun(Actor self)
 		{
-			QueueChild(Mobile.MoveTo(check => CalculatePathToTarget(self, check)));
+			QueueChild(Mobile.MoveTo(this));
 		}
 
 		public override bool Tick(Actor self)
@@ -96,7 +96,7 @@ namespace OpenRA.Mods.Common.Activities
 			{
 				// Target has moved, but is still valid.
 				ChildActivity?.Cancel(self);
-				QueueChild(Mobile.MoveTo(check => CalculatePathToTarget(self, check)));
+				QueueChild(Mobile.MoveTo(this));
 			}
 
 			// The last queued child activity is guaranteed to be the inner move,
@@ -115,6 +115,11 @@ namespace OpenRA.Mods.Common.Activities
 		protected readonly List<CPos> SearchCells = [];
 
 		protected int searchCellsTick = -1;
+
+		(bool AlreadyAtDestination, List<CPos> Path) IMovePathSource.CalculatePath(Actor self, BlockedByActor check)
+		{
+			return CalculatePathToTarget(self, check);
+		}
 
 		protected virtual (bool AlreadyAtDestination, List<CPos> Path) CalculatePathToTarget(Actor self, BlockedByActor check)
 		{

@@ -72,7 +72,7 @@ namespace OpenRA.Mods.Common.Traits.Render
 		}
 	}
 
-	public class WithSpriteTurret : ConditionalTrait<WithSpriteTurretInfo>, INotifyDamageStateChanged
+	public class WithSpriteTurret : ConditionalTrait<WithSpriteTurretInfo>, INotifyDamageStateChanged, IResumeAnimations
 	{
 		public readonly Animation DefaultAnimation;
 		readonly BodyOrientation body;
@@ -135,6 +135,16 @@ namespace OpenRA.Mods.Common.Traits.Render
 				CancelCustomAnimation(self);
 				after?.Invoke();
 			});
+		}
+
+		// A custom animation ends with a return to the normal sequence. A snapshot holds the frame, not that end, so
+		// without this the turret stays on the last frame. A trait that plays towards a callback of its own attaches
+		// that callback itself. So this skips an animation that has a callback, and the order of the resumes does not
+		// matter.
+		void IResumeAnimations.ResumeAnimations(Actor self)
+		{
+			if (!DefaultAnimation.HasCallback)
+				DefaultAnimation.ContinueThen(() => CancelCustomAnimation(self));
 		}
 
 		public void CancelCustomAnimation(Actor self)

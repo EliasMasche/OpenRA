@@ -39,6 +39,7 @@ namespace OpenRA.Mods.Common.Traits
 		readonly ResourceStorageWarningInfo info;
 		readonly PlayerResources resources;
 
+		[NotSaved("Wall-clock time of the last notification. A load starts the clock over.")]
 		long lastSiloAdviceTime;
 
 		public ResourceStorageWarning(Actor self, ResourceStorageWarningInfo info)

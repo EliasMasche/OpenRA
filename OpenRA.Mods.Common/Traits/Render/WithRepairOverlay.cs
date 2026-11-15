@@ -43,7 +43,8 @@ namespace OpenRA.Mods.Common.Traits.Render
 		public override object Create(ActorInitializer init) { return new WithRepairOverlay(init.Self, this); }
 	}
 
-	public class WithRepairOverlay : PausableConditionalTrait<WithRepairOverlayInfo>, INotifyDamageStateChanged, INotifyResupply
+	public class WithRepairOverlay : PausableConditionalTrait<WithRepairOverlayInfo>, INotifyDamageStateChanged, INotifyResupply,
+		IResumeAnimations
 	{
 		readonly Animation overlay;
 		bool visible;
@@ -101,6 +102,17 @@ namespace OpenRA.Mods.Common.Traits.Render
 				visible = true;
 				overlay.PlayThen(Info.EndSequence, () => visible = false);
 			}
+		}
+
+		// The overlay waits for one of two sequences. The start sequence of a repair continues into the repeating
+		// sequence. It is the only sequence that plays once during a repair with a start sequence. Every other sequence
+		// hides the overlay at its end.
+		void IResumeAnimations.ResumeAnimations(Actor self)
+		{
+			if (Info.StartSequence != null && visible && repairing)
+				overlay.ContinueThen(() => overlay.PlayRepeating(RenderSprites.NormalizeSequence(overlay, self.GetDamageState(), Info.Sequence)));
+			else
+				overlay.ContinueThen(() => visible = false);
 		}
 	}
 }

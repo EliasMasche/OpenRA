@@ -109,6 +109,7 @@ namespace OpenRA.Mods.Common.Traits
 		public int Earned;
 		public int Spent;
 
+		[NotSaved("Wall-clock time of the last notification. A load starts the clock over.")]
 		long lastNotificationTime;
 
 		public int ChangeCash(int amount)

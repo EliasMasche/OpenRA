@@ -9,7 +9,6 @@
  */
 #endregion
 
-using System;
 using System.Collections.Generic;
 using OpenRA.Effects;
 using OpenRA.Graphics;
@@ -17,6 +16,16 @@ using OpenRA.Scripting;
 
 namespace OpenRA.Mods.Common.Effects
 {
+	/// <summary>The fraction of the time to an event that a beacon's clock shows, from 0 to 1.</summary>
+	public interface IBeaconClock
+	{
+		float Fraction { get; }
+	}
+
+	/// <summary>
+	/// A beacon only draws, but it marks a place for many seconds, so a save keeps it. A load runs the constructor
+	/// whose parameters have the names of the fields, and that builds the animations again.
+	/// </summary>
 	public class Beacon : IEffect, IScriptBindable, IEffectAboveShroud
 	{
 		const int MaxArrowHeight = 512;
@@ -25,8 +34,10 @@ namespace OpenRA.Mods.Common.Effects
 		readonly WPos position;
 		readonly bool isPlayerPalette;
 		readonly string beaconPalette, posterPalette;
-		readonly Animation arrow, beacon, circles, clock, poster;
+		readonly string beaconCollection, beaconSequence, arrowSequence, circleSequence, posterSequence, clockSequence;
+		readonly IBeaconClock clockSource;
 		readonly int duration;
+		Animation arrow, beacon, circles, clock, poster;
 
 		int delay;
 		int arrowHeight = MaxArrowHeight;
@@ -36,49 +47,67 @@ namespace OpenRA.Mods.Common.Effects
 		// Player-placed beacons are removed after a delay
 		public Beacon(Player owner, WPos position, int duration, string beaconPalette, bool isPlayerPalette,
 			string beaconCollection, string beaconSequence, string arrowSprite, string circleSprite, int delay = 0)
+			: this(owner, position, duration, delay, beaconPalette, isPlayerPalette, null,
+				beaconCollection, beaconSequence, arrowSprite, circleSprite, null, null, null)
+		{ }
+
+		// By default, support power beacons are expected to clean themselves up
+		public Beacon(Player owner, WPos position, bool isPlayerPalette, string palette, string posterCollection, string posterType, string posterPalette,
+			string beaconSequence, string arrowSequence, string circleSequence, string clockSequence, IBeaconClock clockFraction, int delay = 0, int duration = -1)
+			: this(owner, position, duration, delay, palette, isPlayerPalette, posterPalette,
+				posterCollection, beaconSequence, arrowSequence, circleSequence, posterType, clockSequence, clockFraction)
+		{ }
+
+		Beacon(Player owner, WPos position, int duration, int delay, string beaconPalette, bool isPlayerPalette, string posterPalette,
+			string beaconCollection, string beaconSequence, string arrowSequence, string circleSequence, string posterSequence,
+			string clockSequence, IBeaconClock clockSource)
 		{
 			this.owner = owner;
 			this.position = position;
 			this.beaconPalette = beaconPalette;
 			this.isPlayerPalette = isPlayerPalette;
+			this.posterPalette = posterPalette;
 			this.duration = duration;
 			this.delay = delay;
+			this.beaconCollection = beaconCollection;
+			this.beaconSequence = beaconSequence;
+			this.arrowSequence = arrowSequence;
+			this.circleSequence = circleSequence;
+			this.posterSequence = posterSequence;
+			this.clockSequence = clockSequence;
+			this.clockSource = clockSource;
+			PlayAnimations();
+		}
 
+		void PlayAnimations()
+		{
 			if (!string.IsNullOrEmpty(beaconSequence))
 			{
 				beacon = new Animation(owner.World, beaconCollection);
 				beacon.PlayRepeating(beaconSequence);
 			}
 
-			if (!string.IsNullOrEmpty(arrowSprite))
+			if (!string.IsNullOrEmpty(arrowSequence))
 			{
 				arrow = new Animation(owner.World, beaconCollection);
-				arrow.Play(arrowSprite);
+				arrow.Play(arrowSequence);
 			}
 
-			if (!string.IsNullOrEmpty(circleSprite))
+			if (!string.IsNullOrEmpty(circleSequence))
 			{
 				circles = new Animation(owner.World, beaconCollection);
-				circles.Play(circleSprite);
+				circles.Play(circleSequence);
 			}
-		}
 
-		// By default, support power beacons are expected to clean themselves up
-		public Beacon(Player owner, WPos position, bool isPlayerPalette, string palette, string posterCollection, string posterType, string posterPalette,
-			string beaconSequence, string arrowSequence, string circleSequence, string clockSequence, Func<float> clockFraction, int delay = 0, int duration = -1)
-				: this(owner, position, duration, palette, isPlayerPalette, posterCollection, beaconSequence, arrowSequence, circleSequence, delay)
-		{
-			this.posterPalette = posterPalette;
-
-			if (posterType != null)
+			if (posterSequence != null)
 			{
-				poster = new Animation(owner.World, posterCollection);
-				poster.Play(posterType);
+				poster = new Animation(owner.World, beaconCollection);
+				poster.Play(posterSequence);
 
-				if (clockFraction != null)
+				if (clockSource != null)
 				{
-					clock = new Animation(owner.World, posterCollection);
-					clock.PlayFetchIndex(clockSequence, () => ((int)(clockFraction() * (clock.CurrentSequence.Length - 1))).Clamp(0, clock.CurrentSequence.Length - 1));
+					clock = new Animation(owner.World, beaconCollection);
+					clock.PlayFetchIndex(clockSequence, () => ((int)(clockSource.Fraction * (clock.CurrentSequence.Length - 1))).Clamp(0, clock.CurrentSequence.Length - 1));
 				}
 			}
 		}

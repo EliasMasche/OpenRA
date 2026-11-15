@@ -89,6 +89,7 @@ namespace OpenRA
 		sealed class ConditionState
 		{
 			/// <summary>Delegates that have registered to be notified when this condition changes.</summary>
+			[NotSaved("Creating the actor registers every observer of its conditions again.")]
 			public readonly List<VariableObserverNotifier> Notifiers = [];
 
 			/// <summary>Unique integers identifying granted instances of the condition.</summary>
@@ -106,8 +107,10 @@ namespace OpenRA
 		readonly Dictionary<string, int> conditionCache = [];
 
 		/// <summary>Read-only version of conditionCache that is passed to IConditionConsumers.</summary>
+		[NotSaved("A view of conditionCache. A saved copy would no longer follow it.")]
 		readonly IReadOnlyDictionary<string, int> readOnlyConditionCache;
 
+		[NotSaved("The constructor collects the hash of every synced trait.")]
 		internal SyncHash[] SyncHashes { get; }
 
 		readonly IFacing facing;

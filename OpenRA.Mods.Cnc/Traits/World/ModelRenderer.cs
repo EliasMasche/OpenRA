@@ -44,6 +44,7 @@ namespace OpenRA.Mods.Cnc.Traits
 		public override object Create(ActorInitializer init) { return new ModelRenderer(this, init.Self); }
 	}
 
+	[NotSaved("Rendering only. The simulation never reads it.")]
 	public sealed class ModelRenderer : IDisposable, IRenderer, INotifyActorDisposing
 	{
 		// Static constants

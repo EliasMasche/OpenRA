@@ -42,12 +42,16 @@ namespace OpenRA.Mods.Common.Traits
 
 	public sealed class ModularBot : ITick, IBot, INotifyDamage
 	{
+		// Only the client of the admin runs the bots. Its player creation activates each bot. A copy of another client
+		// holds the other state, and a load must not write it over this client.
+		[NotSaved("Activate sets it on the client that runs the bots.")]
 		public bool IsEnabled;
 
 		readonly ModularBotInfo info;
 		readonly World world;
 		readonly Queue<Order> orders = [];
 
+		[NotSaved("Activate sets it on the client that runs the bots.")]
 		Player player;
 
 		IBotTick[] tickModules;
@@ -105,7 +109,8 @@ namespace OpenRA.Mods.Common.Traits
 
 		void INotifyDamage.Damaged(Actor self, AttackInfo e)
 		{
-			if (!IsEnabled || self.World.IsLoadingGameSave)
+			// Damage during a snapshot load is not an attack of the game, and the saved bot already knows each attack.
+			if (!IsEnabled || self.World.IsLoadingGameSave || self.World.IsLoadingSnapshot)
 				return;
 
 			using (new PerfSample("bot_attack_response"))

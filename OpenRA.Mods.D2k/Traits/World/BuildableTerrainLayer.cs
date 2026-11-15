@@ -37,10 +37,15 @@ namespace OpenRA.Mods.D2k.Traits
 	public class BuildableTerrainLayer : IRenderOverlay, IWorldLoaded, ITickRender, IRadarTerrainLayer, INotifyActorDisposing
 	{
 		readonly BuildableTerrainLayerInfo info;
+
+		[CosmeticState("The cosmetic random picks the tile of each concrete cell, and only the renderer reads the tiles that wait to be drawn.")]
 		readonly Dictionary<CPos, TerrainTile?> dirty = [];
+
 		readonly ITiledTerrainRenderer terrainRenderer;
 		readonly World world;
 		readonly CellLayer<int> strength;
+
+		[CosmeticState("The cosmetic random picks the radar colors of each concrete cell, and only the radar reads them.")]
 		readonly CellLayer<(Color, Color)> radarColor;
 
 		TerrainSpriteLayer render;
@@ -71,7 +76,7 @@ namespace OpenRA.Mods.D2k.Traits
 			var tileInfo = world.Map.Rules.TerrainInfo.GetTerrainInfo(tile);
 			world.Map.CustomTerrain[uv] = tileInfo.TerrainType;
 			strength[uv] = info.MaxStrength;
-			radarColor[uv] = (tileInfo.GetColor(world.LocalRandom), tileInfo.GetColor(world.LocalRandom));
+			radarColor[uv] = (tileInfo.GetColor(Game.CosmeticRandom), tileInfo.GetColor(Game.CosmeticRandom));
 			dirty[cell] = tile;
 		}
 
@@ -132,6 +137,7 @@ namespace OpenRA.Mods.D2k.Traits
 			render.Draw(wr.Viewport);
 		}
 
+		[NotSaved("Only the radar widget subscribes, again when it is created.")]
 		event Action<CPos> IRadarTerrainLayer.CellEntryChanged
 		{
 			add => radarColor.CellEntryChanged += value;
@@ -149,7 +155,7 @@ namespace OpenRA.Mods.D2k.Traits
 			if (disposed)
 				return;
 
-			render.Dispose();
+			render?.Dispose();
 			disposed = true;
 		}
 	}

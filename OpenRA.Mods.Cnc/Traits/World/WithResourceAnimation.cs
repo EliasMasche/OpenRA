@@ -51,6 +51,7 @@ namespace OpenRA.Mods.Cnc.Traits
 		public override object Create(ActorInitializer init) { return new WithResourceAnimation(init.Self, this); }
 	}
 
+	[NotSaved("Animates resources on screen and draws only from the cosmetic random.")]
 	public class WithResourceAnimation : IWorldLoaded, ITick
 	{
 		readonly WithResourceAnimationInfo info;
@@ -66,7 +67,7 @@ namespace OpenRA.Mods.Cnc.Traits
 			world = self.World;
 			this.info = info;
 
-			ticks = Common.Util.RandomInRange(world.LocalRandom, info.Interval);
+			ticks = Common.Util.RandomInRange(Game.CosmeticRandom, info.Interval);
 		}
 
 		void IWorldLoaded.WorldLoaded(World w, WorldRenderer wr)
@@ -94,15 +95,15 @@ namespace OpenRA.Mods.Cnc.Traits
 					cells.Add(cell);
 			}
 
-			var ratio = Common.Util.RandomInRange(world.LocalRandom, info.Ratio);
-			var positions = cells.Shuffle(world.LocalRandom)
+			var ratio = Common.Util.RandomInRange(Game.CosmeticRandom, info.Ratio);
+			var positions = cells.Shuffle(Game.CosmeticRandom)
 				.Take(Math.Max(1, cells.Count * ratio / 100))
 				.Select(world.Map.CenterOfCell);
 
 			foreach (var position in positions)
-				world.AddFrameEndTask(w => w.Add(new SpriteEffect(position, w, info.Image, info.Sequences.Random(w.LocalRandom), info.Palette)));
+				world.AddFrameEndTask(w => w.Add(new SpriteEffect(position, w, info.Image, info.Sequences.Random(Game.CosmeticRandom), info.Palette)));
 
-			ticks = Common.Util.RandomInRange(world.LocalRandom, info.Interval);
+			ticks = Common.Util.RandomInRange(Game.CosmeticRandom, info.Interval);
 		}
 	}
 }

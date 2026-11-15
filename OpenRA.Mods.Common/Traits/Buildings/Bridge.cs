@@ -13,8 +13,8 @@ using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.IO;
-using OpenRA.Effects;
 using OpenRA.GameRules;
+using OpenRA.Mods.Common.Effects;
 using OpenRA.Mods.Common.Terrain;
 using OpenRA.Primitives;
 using OpenRA.Traits;
@@ -94,7 +94,10 @@ namespace OpenRA.Mods.Common.Traits
 
 	public class Bridge : INotifyDamageStateChanged
 	{
+		[SavedTraits("The bridge layer links the neighbours when the world starts, not the bridge itself.")]
 		readonly Bridge[] neighbours = new Bridge[2];
+
+		[SavedTraits("Each hut adds itself when it is created, not the bridge itself.")]
 		readonly LegacyBridgeHut[] huts = new LegacyBridgeHut[2]; // Huts before this / first & after this / last
 		readonly ITemplatedTerrainInfo terrainInfo;
 		readonly Health health;
@@ -268,7 +271,7 @@ namespace OpenRA.Mods.Common.Traits
 			}
 		}
 
-		public void Repair(Actor repairer, int direction, Action onComplete)
+		public void Repair(Actor repairer, int direction, LegacyBridgeHut hut)
 		{
 			// Repair self
 			var initialDamage = health.DamageState;
@@ -283,7 +286,7 @@ namespace OpenRA.Mods.Common.Traits
 				else
 					health.InflictDamage(self, repairer, new Damage(-health.MaxHP), true);
 				if (direction < 0 ? neighbours[0] == null && neighbours[1] == null : Hut != null || neighbours[direction] == null)
-					onComplete(); // Done if single or reached other hut
+					hut.RepairDirectionCompleted(); // Done if single or reached other hut
 			});
 
 			// Repair adjacent spans onto next hut or end
@@ -292,8 +295,7 @@ namespace OpenRA.Mods.Common.Traits
 				var delay = initialDamage == DamageState.Undamaged || NeighbourIsDeadShore(neighbours[direction]) ?
 					0 : info.RepairPropagationDelay;
 
-				self.World.AddFrameEndTask(w => w.Add(new DelayedAction(delay, () =>
-					neighbours[direction].Repair(repairer, direction, onComplete))));
+				self.World.AddFrameEndTask(w => w.Add(new RepairStep(this, repairer, direction, hut, delay)));
 			}
 		}
 
@@ -342,8 +344,51 @@ namespace OpenRA.Mods.Common.Traits
 				var delay = initialDamage == DamageState.Dead || NeighbourIsDeadShore(neighbours[direction]) ?
 					0 : info.RepairPropagationDelay;
 
-				self.World.AddFrameEndTask(w => w.Add(new DelayedAction(delay, () =>
-					neighbours[direction].Demolish(saboteur, direction, damageTypes))));
+				self.World.AddFrameEndTask(w => w.Add(new DemolishStep(this, saboteur, direction, damageTypes, delay)));
+			}
+		}
+
+		sealed class RepairStep : DelayedSimEffect
+		{
+			readonly Bridge from;
+			readonly Actor repairer;
+			readonly int direction;
+			readonly LegacyBridgeHut hut;
+
+			public RepairStep(Bridge from, Actor repairer, int direction, LegacyBridgeHut hut, int delay)
+				: base(delay)
+			{
+				this.from = from;
+				this.repairer = repairer;
+				this.direction = direction;
+				this.hut = hut;
+			}
+
+			protected override void Run(World world)
+			{
+				from.neighbours[direction].Repair(repairer, direction, hut);
+			}
+		}
+
+		sealed class DemolishStep : DelayedSimEffect
+		{
+			readonly Bridge from;
+			readonly Actor saboteur;
+			readonly int direction;
+			readonly BitSet<DamageType> damageTypes;
+
+			public DemolishStep(Bridge from, Actor saboteur, int direction, BitSet<DamageType> damageTypes, int delay)
+				: base(delay)
+			{
+				this.from = from;
+				this.saboteur = saboteur;
+				this.direction = direction;
+				this.damageTypes = damageTypes;
+			}
+
+			protected override void Run(World world)
+			{
+				from.neighbours[direction].Demolish(saboteur, direction, damageTypes);
 			}
 		}
 	}

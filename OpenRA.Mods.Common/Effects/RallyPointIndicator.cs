@@ -18,6 +18,7 @@ using OpenRA.Widgets;
 
 namespace OpenRA.Mods.Common.Effects
 {
+	[NotSaved("Draws the selected rally point. The simulation never reads it.")]
 	public class RallyPointIndicator : IEffect, IEffectAboveShroud, IEffectAnnotation
 	{
 		readonly Actor building;

@@ -70,6 +70,8 @@ namespace OpenRA.Mods.Common.Traits
 	{
 		WVec offset;
 		IFacing facing;
+
+		[CosmeticState("The cosmetic random picks the delay to the next sprite, and the simulation never reads it.")]
 		int ticks;
 		int duration;
 
@@ -115,9 +117,9 @@ namespace OpenRA.Mods.Common.Traits
 
 			if (--ticks < 0)
 			{
-				ticks = Util.RandomInRange(self.World.LocalRandom, Info.SpawnFrequency);
+				ticks = Util.RandomInRange(Game.CosmeticRandom, Info.SpawnFrequency);
 
-				var spawnFacing = (!Info.RandomFacing && facing != null) ? facing.Facing : WAngle.FromFacing(self.World.LocalRandom.Next(256));
+				var spawnFacing = (!Info.RandomFacing && facing != null) ? facing.Facing : WAngle.FromFacing(Game.CosmeticRandom.Next(256));
 				self.World.AddFrameEndTask(w => w.Add(new FloatingSprite(self, Info.Image, Info.Sequences, Info.Palette, Info.IsPlayerPalette,
 					Info.Lifetime, Info.Speed, Info.Gravity, Info.TurnRate, Info.RandomRate, self.CenterPosition + offset, spawnFacing)));
 			}

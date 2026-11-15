@@ -20,9 +20,11 @@ using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Activities
 {
-	public class GenericDockSequence : Activity
+	public class GenericDockSequence : Activity, IResumeAnimations
 	{
 		protected enum DockingState { Wait, Drag, Dock, Loop, Undock, Complete }
+
+		protected enum DockAnimation { None, ClientDock, HostDock, HostUndock, ClientUndock, ClientUndockAfterHost }
 
 		protected readonly Actor DockHostActor;
 		protected readonly IDockHost DockHost;
@@ -35,6 +37,7 @@ namespace OpenRA.Mods.Common.Activities
 		protected readonly WPos EndDrag;
 
 		protected DockingState dockingState;
+		protected DockAnimation waitingFor;
 
 		readonly INotifyDockClient[] notifyDockClients;
 		readonly INotifyDockHost[] notifyDockHosts;
@@ -126,21 +129,51 @@ namespace OpenRA.Mods.Common.Activities
 
 		public virtual void PlayDockAnimations(Actor self)
 		{
-			PlayDockCientAnimation(self, () =>
+			PlayDockCientAnimation(self, StartWaitingFor(DockAnimation.ClientDock, self));
+		}
+
+		// Marks the wait for animation and returns the callback that ends it.
+		Action StartWaitingFor(DockAnimation animation, Actor self)
+		{
+			waitingFor = animation;
+			return CallbackFor(animation, self);
+		}
+
+		// The callback that ends the wait for animation. Playing and resuming both attach it.
+		Action CallbackFor(DockAnimation animation, Actor self)
+		{
+			return animation switch
 			{
-				if (DockHostSpriteOverlay != null && !DockHostSpriteOverlay.Visible)
-				{
-					dockingState = DockingState.Wait;
-					DockHostSpriteOverlay.Visible = true;
-					DockHostSpriteOverlay.WithOffset.Animation.PlayThen(DockHostSpriteOverlay.Info.Sequence, () =>
-					{
-						dockingState = DockingState.Loop;
-						DockHostSpriteOverlay.Visible = false;
-					});
-				}
-				else
-					dockingState = DockingState.Loop;
-			});
+				DockAnimation.ClientDock => () => ClientDockFinished(self),
+				DockAnimation.HostDock => HostDockFinished,
+				DockAnimation.HostUndock => () => HostUndockFinished(self),
+				DockAnimation.ClientUndock => () => ClientUndockFinished(false),
+				DockAnimation.ClientUndockAfterHost => () => ClientUndockFinished(true),
+				_ => null,
+			};
+		}
+
+		void ClientDockFinished(Actor self)
+		{
+			if (DockHostSpriteOverlay != null && !DockHostSpriteOverlay.Visible)
+			{
+				dockingState = DockingState.Wait;
+				DockHostSpriteOverlay.Visible = true;
+				DockHostSpriteOverlay.WithOffset.Animation.PlayThen(DockHostSpriteOverlay.Info.Sequence,
+					StartWaitingFor(DockAnimation.HostDock, self));
+			}
+			else
+			{
+				waitingFor = DockAnimation.None;
+				dockingState = DockingState.Loop;
+			}
+		}
+
+		void HostDockFinished()
+		{
+			waitingFor = DockAnimation.None;
+			dockingState = DockingState.Loop;
+			DockHostSpriteOverlay.Visible = false;
 		}
 
 		public virtual void PlayDockCientAnimation(Actor self, Action after)
@@ -160,17 +193,43 @@ namespace OpenRA.Mods.Common.Activities
 			{
 				dockingState = DockingState.Wait;
 				DockHostSpriteOverlay.Visible = true;
-				DockHostSpriteOverlay.WithOffset.Animation.PlayBackwardsThen(DockHostSpriteOverlay.Info.Sequence, () =>
-				{
-					PlayUndockClientAnimation(self, () =>
-					{
-						dockingState = DockingState.Complete;
-						DockHostSpriteOverlay.Visible = false;
-					});
-				});
+				DockHostSpriteOverlay.WithOffset.Animation.PlayBackwardsThen(DockHostSpriteOverlay.Info.Sequence,
+					StartWaitingFor(DockAnimation.HostUndock, self));
 			}
 			else
-				PlayUndockClientAnimation(self, () => dockingState = DockingState.Complete);
+				PlayUndockClientAnimation(self, StartWaitingFor(DockAnimation.ClientUndock, self));
+		}
+
+		void HostUndockFinished(Actor self)
+		{
+			PlayUndockClientAnimation(self, StartWaitingFor(DockAnimation.ClientUndockAfterHost, self));
+		}
+
+		void ClientUndockFinished(bool hideHostOverlay)
+		{
+			waitingFor = DockAnimation.None;
+			dockingState = DockingState.Complete;
+			if (hideHostOverlay)
+				DockHostSpriteOverlay.Visible = false;
+		}
+
+		void IResumeAnimations.ResumeAnimations(Actor self)
+		{
+			var callback = CallbackFor(waitingFor, self);
+			switch (waitingFor)
+			{
+				case DockAnimation.ClientDock:
+					DockClientBody?.ContinueDockAnimation(self, callback);
+					break;
+				case DockAnimation.HostDock:
+				case DockAnimation.HostUndock:
+					DockHostSpriteOverlay.WithOffset.Animation.ContinueThen(callback);
+					break;
+				case DockAnimation.ClientUndock:
+				case DockAnimation.ClientUndockAfterHost:
+					DockClientBody?.ContinueReverseDockAnimation(self, callback);
+					break;
+			}
 		}
 
 		public virtual void PlayUndockClientAnimation(Actor self, Action after)

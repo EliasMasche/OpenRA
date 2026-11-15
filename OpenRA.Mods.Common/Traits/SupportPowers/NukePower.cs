@@ -200,7 +200,7 @@ namespace OpenRA.Mods.Common.Traits
 					Info.ArrowSequence,
 					Info.CircleSequence,
 					Info.ClockSequence,
-					() => missile.FractionComplete,
+					missile,
 					Info.BeaconDelay,
 					info.FlightDelay - info.BeaconRemoveAdvance);
 

@@ -16,6 +16,7 @@ using OpenRA.Graphics;
 
 namespace OpenRA.Mods.Common.Effects
 {
+	[NotSaved("A drifting sprite on screen. The simulation never reads it, and it draws from the cosmetic random.")]
 	public sealed class FloatingSprite : IEffect, ISpatiallyPartitionable
 	{
 		readonly ImmutableArray<WDist> speed;
@@ -47,9 +48,9 @@ namespace OpenRA.Mods.Common.Effects
 			this.facing = facing;
 
 			anim = new Animation(world, image, () => facing);
-			anim.PlayRepeating(sequences.Random(world.LocalRandom));
+			anim.PlayRepeating(sequences.Random(Game.CosmeticRandom));
 			world.ScreenMap.Add(this, pos, anim.Image);
-			this.lifetime = Util.RandomInRange(world.LocalRandom, lifetime);
+			this.lifetime = Util.RandomInRange(Game.CosmeticRandom, lifetime);
 
 			this.palette = isPlayerPalette ? palette + emitter.Owner.InternalName : palette;
 		}
@@ -64,13 +65,13 @@ namespace OpenRA.Mods.Common.Effects
 
 			if (--ticks < 0)
 			{
-				var forward = Util.RandomDistance(world.LocalRandom, speed).Length;
-				var height = Util.RandomDistance(world.LocalRandom, gravity).Length;
+				var forward = Util.RandomDistance(Game.CosmeticRandom, speed).Length;
+				var height = Util.RandomDistance(Game.CosmeticRandom, gravity).Length;
 
 				offset = new WVec(forward, 0, height);
 
 				if (turnRate > 0)
-					facing = WAngle.FromFacing(Util.NormalizeFacing(facing.Facing + world.LocalRandom.Next(-turnRate, turnRate)));
+					facing = WAngle.FromFacing(Util.NormalizeFacing(facing.Facing + Game.CosmeticRandom.Next(-turnRate, turnRate)));
 
 				offset = offset.Rotate(WRot.FromYaw(facing));
 

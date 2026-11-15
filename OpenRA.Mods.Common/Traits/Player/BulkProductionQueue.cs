@@ -139,6 +139,18 @@ namespace OpenRA.Mods.Common.Traits
 			return productionActor;
 		}
 
+		protected internal override void OnItemComplete(ProductionItem item)
+		{
+			var unit = item.Completion.Unit;
+			self.World.AddFrameEndTask(_ =>
+			{
+				// Make sure the item hasn't been invalidated between the ProductionItem ticking and this FrameEndTask running
+				if (!Queue.Any(i => i.Done && i.Item == unit.Name))
+					return;
+				BuildUnit(unit);
+			});
+		}
+
 		protected override bool BuildUnit(ActorInfo unit)
 		{
 			// Find a production structure to build this actor
@@ -223,13 +235,7 @@ namespace OpenRA.Mods.Common.Traits
 					{
 						if (Info.PayUpFront && cost > playerResources.GetCashAndResources())
 							return;
-						BeginProduction(new ProductionItem(this, order.TargetString, cost, playerPower, () => self.World.AddFrameEndTask(_ =>
-						{
-							// Make sure the item hasn't been invalidated between the ProductionItem ticking and this FrameEndTask running
-							if (!Queue.Any(i => i.Done && i.Item == unit.Name))
-								return;
-							BuildUnit(unit);
-						})), !order.Queued);
+						BeginProduction(new ProductionItem(this, order.TargetString, cost, playerPower, new ProductionCompletion(unit, time)), !order.Queued);
 					}
 
 					break;

@@ -13,10 +13,11 @@ using System.Collections.Generic;
 using OpenRA.Effects;
 using OpenRA.Graphics;
 using OpenRA.Mods.Cnc.Traits;
+using OpenRA.Traits;
 
 namespace OpenRA.Mods.Cnc.Effects
 {
-	sealed class SatelliteLaunch : IEffect, ISpatiallyPartitionable
+	sealed class SatelliteLaunch : IEffect, ISpatiallyPartitionable, IResumeAnimations
 	{
 		readonly GpsPowerInfo info;
 		readonly Actor launcher;
@@ -30,11 +31,20 @@ namespace OpenRA.Mods.Cnc.Effects
 			this.launcher = launcher;
 
 			doors = new Animation(launcher.World, info.DoorImage);
-			doors.PlayThen(info.DoorSequence,
-				() => launcher.World.AddFrameEndTask(w => { w.Remove(this); w.ScreenMap.Remove(this); }));
+			doors.PlayThen(info.DoorSequence, DoorsClosed);
 
 			pos = launcher.CenterPosition;
 			launcher.World.ScreenMap.Add(this, pos, doors.Image);
+		}
+
+		void DoorsClosed()
+		{
+			launcher.World.AddFrameEndTask(w => { w.Remove(this); w.ScreenMap.Remove(this); });
+		}
+
+		void IResumeAnimations.ResumeAnimations(Actor self)
+		{
+			doors.ContinueThen(DoorsClosed);
 		}
 
 		public void Tick(World world)

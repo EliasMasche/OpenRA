@@ -47,6 +47,8 @@ namespace OpenRA.Mods.Common.Traits
 	{
 		readonly DrawLineToTargetInfo info;
 		readonly List<IRenderable> renderableCache = [];
+
+		[NotSaved("Holds the run time of this process, which another process does not share.")]
 		long lifetime;
 
 		public DrawLineToTarget(DrawLineToTargetInfo info)

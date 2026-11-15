@@ -19,6 +19,7 @@ using OpenRA.Traits;
 
 namespace OpenRA.Mods.Cnc.Effects
 {
+	[NotSaved("Draws an actor's GPS dot. The simulation never reads it.")]
 	sealed class GpsDotEffect : IEffect, IEffectAnnotation
 	{
 		readonly Actor actor;

@@ -40,12 +40,28 @@ namespace OpenRA.Mods.Common.Traits.Render
 
 		void IDockClientBody.PlayDockAnimation(Actor self, Action after)
 		{
-			wsb.PlayCustomAnimation(self, info.DockSequence, () => { wsb.PlayCustomAnimationRepeating(self, info.DockLoopSequence); after(); });
+			wsb.PlayCustomAnimation(self, info.DockSequence, () => DockAnimationFinished(self, after));
 		}
 
 		void IDockClientBody.PlayReverseDockAnimation(Actor self, Action after)
 		{
 			wsb.PlayCustomAnimationBackwards(self, info.DockSequence, () => after());
+		}
+
+		void IDockClientBody.ContinueDockAnimation(Actor self, Action after)
+		{
+			wsb.ContinueCustomAnimation(self, () => DockAnimationFinished(self, after));
+		}
+
+		void IDockClientBody.ContinueReverseDockAnimation(Actor self, Action after)
+		{
+			wsb.ContinueCustomAnimation(self, () => after());
+		}
+
+		void DockAnimationFinished(Actor self, Action after)
+		{
+			wsb.PlayCustomAnimationRepeating(self, info.DockLoopSequence);
+			after();
 		}
 	}
 }

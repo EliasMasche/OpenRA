@@ -79,9 +79,17 @@ namespace OpenRA.Traits
 		static readonly IRenderable[] NoRenderables = [];
 		static readonly Rectangle[] NoBounds = [];
 
+		// The flash of an order that the player of this client gives. Another client does not show it.
+		[CosmeticState("The flash of an order of the player of this client.")]
 		int flashTicks;
+
+		[CosmeticState("The flash of an order of the player of this client.")]
 		TintModifiers flashModifiers;
+
+		[CosmeticState("The flash of an order of the player of this client.")]
 		Vector3 flashTint;
+
+		[CosmeticState("The flash of an order of the player of this client.")]
 		float? flashAlpha;
 
 		public FrozenActor(Actor actor, ICreatesFrozenActors frozenTrait, PPos[] footprint, Player viewer, bool startsRevealed)

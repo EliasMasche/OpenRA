@@ -75,12 +75,15 @@ namespace OpenRA.Mods.Common.Traits
 		ITargetableCells targetableCells;
 		Turreted turret;
 
+		// A cache of a pure function. The renderer of a client can fill it, so each client can hold another value.
+		[NotSaved("A cache of TargetablePositions, which the first call after the load fills again.")]
 		((CPos Cell, SubCell SubCell)[] TargetableCells,
 			WPos? SelfCenterPosition,
 			WRot? SelfOrientation,
 			WRot? TurretLocalOrientation,
 			WVec? TurretOffset) cacheInput;
 
+		[NotSaved("A cache of TargetablePositions, which the first call after the load fills again.")]
 		WPos[] cachedTargetablePositions;
 
 		public HitShape(Actor self, HitShapeInfo info)

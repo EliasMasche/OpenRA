@@ -67,13 +67,18 @@ namespace OpenRA.Mods.Common.Traits.Render
 		}
 	}
 
-	public class WithDamageOverlay : ConditionalTrait<WithDamageOverlayInfo>, INotifyDamage, ITick
+	public class WithDamageOverlay : ConditionalTrait<WithDamageOverlayInfo>, INotifyDamage, ITick, IResumeAnimations
 	{
 		readonly WithDamageOverlayInfo info;
 		readonly Animation anim;
 
 		bool isPlayingAnimation;
 		int loopCount;
+
+		// The number of loops that started, and whether the end sequence plays. A load attaches the callback of the
+		// sequence that plays again, and these two values identify that sequence.
+		int loopsStarted;
+		bool isEnding;
 
 		int delay = -1;
 
@@ -138,28 +143,42 @@ namespace OpenRA.Mods.Common.Traits.Render
 			delay = -1;
 			loopCount = Util.RandomInRange(self.World.SharedRandom, info.LoopCount);
 			isPlayingAnimation = true;
+			loopsStarted = 0;
+			isEnding = false;
 
 			if (!string.IsNullOrEmpty(info.StartSequence))
-				anim.PlayThen(info.StartSequence, () => PlayAnimation());
+				anim.PlayThen(info.StartSequence, PlayAnimation);
 			else
 				PlayAnimation();
 		}
 
-		void PlayAnimation(int animationState = -1)
+		void PlayAnimation()
 		{
 			if (!isPlayingAnimation)
 				return;
 
-			animationState++;
-			if (animationState < loopCount && !string.IsNullOrEmpty(info.LoopSequence))
-				anim.PlayThen(info.LoopSequence, () => PlayAnimation(animationState));
-			else
+			if (loopsStarted < loopCount && !string.IsNullOrEmpty(info.LoopSequence))
 			{
-				if (!string.IsNullOrEmpty(info.EndSequence))
-					anim.PlayThen(info.EndSequence, () => isPlayingAnimation = false);
-				else
-					isPlayingAnimation = false;
+				loopsStarted++;
+				anim.PlayThen(info.LoopSequence, PlayAnimation);
 			}
+			else if (!string.IsNullOrEmpty(info.EndSequence))
+			{
+				isEnding = true;
+				anim.PlayThen(info.EndSequence, StopAnimation);
+			}
+			else
+				isPlayingAnimation = false;
+		}
+
+		void StopAnimation()
+		{
+			isPlayingAnimation = false;
+		}
+
+		void IResumeAnimations.ResumeAnimations(Actor self)
+		{
+			anim.ContinueThen(isEnding ? StopAnimation : PlayAnimation);
 		}
 	}
 }

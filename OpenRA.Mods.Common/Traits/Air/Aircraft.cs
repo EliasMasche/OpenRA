@@ -229,13 +229,15 @@ namespace OpenRA.Mods.Common.Traits
 
 	public class Aircraft : PausableConditionalTrait<AircraftInfo>, ITick, ISync, IFacing, IPositionable, IMove,
 		INotifyAddedToWorld, INotifyRemovedFromWorld, INotifyActorDisposing, INotifyBecomingIdle, ICreationActivity,
-		IActorPreviewInitModifier, IDeathActorInitModifier, IIssueDeployOrder, IIssueOrder, IResolveOrder, IOrderVoice
+		IActorPreviewInitModifier, IDeathActorInitModifier, IIssueDeployOrder, IIssueOrder, IResolveOrder, IOrderVoice,
+		IRebuildAfterLoad
 	{
 		readonly Actor self;
 
 		Repairable repairable;
 		Rearmable rearmable;
 		IAircraftCenterPositionOffset[] positionOffsets;
+		[NotSaved("The handle that ends the reservation. Both of its sides are saved, and the host makes the handle again.")]
 		IDisposable reservation;
 		IEnumerable<int> speedModifiers;
 		INotifyMoving[] notifyMoving;
@@ -562,6 +564,20 @@ namespace OpenRA.Mods.Common.Traits
 				reservation = reservable.Reserve(target, self, this);
 				ReservedActor = target;
 			}
+		}
+
+		// The save holds both sides of a reservation, and not the handle that ends it. The host must not take this for
+		// a new reservation, which would send away an aircraft that may yield. So the aircraft does not yield while the
+		// host makes the handle.
+		void IRebuildAfterLoad.RebuildAfterLoad(Actor self)
+		{
+			if (reservation != null || ReservedActor == null)
+				return;
+
+			var mayYield = MayYieldReservation;
+			MayYieldReservation = false;
+			reservation = ReservedActor.Trait<Reservable>().Reserve(ReservedActor, self, this);
+			MayYieldReservation = mayYield;
 		}
 
 		public void AllowYieldingReservation()
@@ -942,7 +958,7 @@ namespace OpenRA.Mods.Common.Traits
 		public Activity LocalMove(Actor self, WPos fromPos, WPos toPos)
 		{
 			// TODO: Ignore repulsion when moving
-			var activities = new CallFunc(() => SetCenterPosition(self, fromPos));
+			var activities = new SetCenterPositionActivity(this, fromPos);
 			activities.Queue(new Fly(self, Target.FromPos(toPos)));
 			return activities;
 		}
@@ -1223,6 +1239,24 @@ namespace OpenRA.Mods.Common.Traits
 			return null;
 		}
 
+		sealed class SetCenterPositionActivity : Activity
+		{
+			readonly Aircraft aircraft;
+			readonly WPos position;
+
+			public SetCenterPositionActivity(Aircraft aircraft, WPos position)
+			{
+				this.aircraft = aircraft;
+				this.position = position;
+			}
+
+			public override bool Tick(Actor self)
+			{
+				aircraft.SetCenterPosition(self, position);
+				return true;
+			}
+		}
+
 		sealed class AssociateWithAirfieldActivity : Activity
 		{
 			readonly Aircraft aircraft;
@@ -1300,7 +1334,7 @@ namespace OpenRA.Mods.Common.Traits
 
 				if (rallyPoint != null && rallyPoint.Length > 0)
 					foreach (var cell in rallyPoint)
-						QueueChild(new AttackMoveActivity(self, () => aircraft.MoveTo(cell, 1, evaluateNearestMovableCell: true, targetLineColor: Color.OrangeRed)));
+						QueueChild(new AttackMoveActivity(self, MoveIntent.MoveTo(aircraft, cell, 1, evaluateNearestMovableCell: true, targetLineColor: Color.OrangeRed)));
 
 				if (!creationByMap)
 					aircraft.UnReserve();

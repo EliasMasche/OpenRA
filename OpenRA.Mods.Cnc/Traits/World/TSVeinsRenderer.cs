@@ -111,6 +111,7 @@ namespace OpenRA.Mods.Cnc.Traits
 		public override object Create(ActorInitializer init) { return new TSVeinsRenderer(init.Self, this); }
 	}
 
+	[NotSaved("Rendering only. The simulation never reads it.")]
 	public class TSVeinsRenderer : IResourceRenderer, IWorldLoaded, IRenderOverlay, ITickRender, INotifyActorDisposing, IRadarTerrainLayer
 	{
 		[Flags]

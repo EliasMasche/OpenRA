@@ -36,9 +36,7 @@ namespace OpenRA.Mods.Common.Traits
 		[VerifySync]
 		bool facingTarget = true;
 
-		public event Action<Actor> OnRemovedFromWorld = self => { };
-		public event Action<Actor> OnEnteredAttackRange = self => { };
-		public event Action<Actor> OnExitedAttackRange = self => { };
+		IAircraftRunObserver observer;
 
 		public AttackBomber(Actor self, AttackBomberInfo info)
 			: base(self, info)
@@ -74,17 +72,19 @@ namespace OpenRA.Mods.Common.Traits
 			}
 
 			if (inAttackRange && !wasInAttackRange)
-				OnEnteredAttackRange(self);
+				observer?.EnteredTargetArea(self);
 
 			if (!inAttackRange && wasInAttackRange)
-				OnExitedAttackRange(self);
+				observer?.ExitedTargetArea(self);
 		}
 
 		public void SetTarget(WPos pos) { target = Target.FromPos(pos); }
 
+		public void SetObserver(IAircraftRunObserver observer) { this.observer = observer; }
+
 		void INotifyRemovedFromWorld.RemovedFromWorld(Actor self)
 		{
-			OnRemovedFromWorld(self);
+			observer?.RemovedFromWorld(self);
 		}
 
 		public override Activity GetAttackActivity(Actor self, AttackSource source, in Target newTarget, bool allowMove, bool forceAttack, Color? targetLineColor)

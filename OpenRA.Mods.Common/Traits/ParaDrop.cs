@@ -35,9 +35,7 @@ namespace OpenRA.Mods.Common.Traits
 		readonly Actor self;
 		readonly Cargo cargo;
 
-		public event Action<Actor> OnRemovedFromWorld = self => { };
-		public event Action<Actor> OnEnteredDropRange = self => { };
-		public event Action<Actor> OnExitedDropRange = self => { };
+		IAircraftRunObserver observer;
 
 		[VerifySync]
 		bool inDropRange;
@@ -63,6 +61,8 @@ namespace OpenRA.Mods.Common.Traits
 			checkForSuitableCell = checkLandingCell;
 		}
 
+		public void SetObserver(IAircraftRunObserver observer) { this.observer = observer; }
+
 		void ITick.Tick(Actor self)
 		{
 			if (dropDelay > 0)
@@ -75,10 +75,10 @@ namespace OpenRA.Mods.Common.Traits
 			inDropRange = target.IsInRange(self.CenterPosition, info.DropRange);
 
 			if (inDropRange && !wasInDropRange)
-				OnEnteredDropRange(self);
+				observer?.EnteredTargetArea(self);
 
 			if (!inDropRange && wasInDropRange)
-				OnExitedDropRange(self);
+				observer?.ExitedTargetArea(self);
 
 			// Are we able to drop the next trooper?
 			if (!inDropRange || cargo.IsEmpty() || !self.World.Map.Contains(self.Location))
@@ -115,7 +115,7 @@ namespace OpenRA.Mods.Common.Traits
 
 		void INotifyRemovedFromWorld.RemovedFromWorld(Actor self)
 		{
-			OnRemovedFromWorld(self);
+			observer?.RemovedFromWorld(self);
 		}
 	}
 }

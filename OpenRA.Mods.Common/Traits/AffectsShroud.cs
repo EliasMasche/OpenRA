@@ -33,11 +33,21 @@ namespace OpenRA.Mods.Common.Traits
 	}
 
 	public abstract class AffectsShroud : ConditionalTrait<AffectsShroudInfo>, ISync, INotifyAddedToWorld,
-		INotifyRemovedFromWorld, INotifyMoving, INotifyCenterPositionChanged, ITick
+		INotifyRemovedFromWorld, INotifyMoving, INotifyCenterPositionChanged, ITick, IRebuildAfterLoad
 	{
 		static readonly PPos[] NoCells = [];
 
 		readonly HashSet<PPos> footprint;
+
+		// The cells that the actor occupied at the last computation of its footprint source. The save holds them,
+		// because a load must compute the same source from them.
+		readonly List<CPos> occupiedCells = [];
+
+		// The position and the range of the last computation of the source. A change of range or of the disabled state
+		// computes the source again from the current position. It leaves cachedPos for the next move to compare with.
+		// So neither cachedPos nor the current range gives the cells that a load must give the source.
+		WPos sourcePos;
+		WDist sourceRange;
 
 		[VerifySync]
 		CPos cachedLocation;
@@ -62,23 +72,48 @@ namespace OpenRA.Mods.Common.Traits
 
 		PPos[] ProjectedCells(Actor self)
 		{
+			if (Info.Type == VisibilityType.Footprint)
+			{
+				// PERF: Reuse collection to avoid allocations.
+				occupiedCells.Clear();
+				foreach (var (cell, _) in self.OccupiesSpace.OccupiedCells())
+					occupiedCells.Add(cell);
+			}
+
+			sourcePos = self.CenterPosition;
+			sourceRange = Range;
+			return ProjectedCells(self, sourcePos, sourceRange);
+		}
+
+		// A load adds the source from the current position. The saved counts hold the cells of the last computation of
+		// the source. Those cells come off at the next computation.
+		void IRebuildAfterLoad.RebuildAfterLoad(Actor self)
+		{
+			if (!self.IsInWorld)
+				return;
+
+			var cells = ProjectedCells(self, sourcePos, sourceRange);
+			foreach (var p in self.World.Players)
+				p.Shroud.RestoreSource(this, cells);
+		}
+
+		PPos[] ProjectedCells(Actor self, WPos pos, WDist maxRange)
+		{
 			var map = self.World.Map;
 			var minRange = Info.MinRange;
-			var maxRange = Range;
 			if (maxRange <= minRange)
 				return NoCells;
 
 			if (Info.Type == VisibilityType.Footprint)
 			{
 				// PERF: Reuse collection to avoid allocations.
-				footprint.UnionWith(self.OccupiesSpace.OccupiedCells()
-					.SelectMany(kv => Shroud.ProjectedCellsInRange(map, map.CenterOfCell(kv.Cell), minRange, maxRange, Info.MaxHeightDelta)));
+				footprint.UnionWith(occupiedCells
+					.SelectMany(cell => Shroud.ProjectedCellsInRange(map, map.CenterOfCell(cell), minRange, maxRange, Info.MaxHeightDelta)));
 				var cells = footprint.ToArray();
 				footprint.Clear();
 				return cells;
 			}
 
-			var pos = self.CenterPosition;
 			if (Info.Type == VisibilityType.GroundPosition)
 				pos -= new WVec(WDist.Zero, WDist.Zero, self.World.Map.DistanceAboveTerrain(pos));
 

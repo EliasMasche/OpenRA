@@ -111,7 +111,7 @@ namespace OpenRA.Mods.Common.Warheads
 			if (actorAtImpact == ImpactActorType.None && !IsValidAgainstTerrain(world, pos))
 				return;
 
-			var explosion = Explosions.RandomOrDefault(world.LocalRandom);
+			var explosion = Explosions.RandomOrDefault(Game.CosmeticRandom);
 			if (Image != null && explosion != null)
 			{
 				if (Inaccuracy.Length > 0)
@@ -130,8 +130,8 @@ namespace OpenRA.Mods.Common.Warheads
 				world.AddFrameEndTask(w => w.Add(new SpriteEffect(pos, w, Image, explosion, palette)));
 			}
 
-			var impactSound = ImpactSounds.RandomOrDefault(world.LocalRandom);
-			if (impactSound != null && world.LocalRandom.Next(0, 100) < ImpactSoundChance)
+			var impactSound = ImpactSounds.RandomOrDefault(Game.CosmeticRandom);
+			if (impactSound != null && Game.CosmeticRandom.Next(0, 100) < ImpactSoundChance)
 				Game.Sound.Play(SoundType.World, impactSound, pos);
 		}
 

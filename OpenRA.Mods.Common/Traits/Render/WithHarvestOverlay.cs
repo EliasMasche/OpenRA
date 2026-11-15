@@ -30,7 +30,7 @@ namespace OpenRA.Mods.Common.Traits.Render
 		public override object Create(ActorInitializer init) { return new WithHarvestOverlay(init.Self, this); }
 	}
 
-	sealed class WithHarvestOverlay : INotifyHarvestAction
+	sealed class WithHarvestOverlay : INotifyHarvestAction, IResumeAnimations
 	{
 		readonly WithHarvestOverlayInfo info;
 		readonly Animation anim;
@@ -65,6 +65,13 @@ namespace OpenRA.Mods.Common.Traits.Render
 
 		void INotifyHarvestAction.MovingToResources(Actor self, CPos targetCell) { }
 		void INotifyHarvestAction.MovementCancelled(Actor self) { }
+
+		// The save holds the visible flag, and not the callback that clears it. Without this, the overlay stays visible
+		// after a load, and no later harvest plays it.
+		void IResumeAnimations.ResumeAnimations(Actor self)
+		{
+			anim.ContinueThen(() => visible = false);
+		}
 
 		public static int ZOffsetFromCenter(Actor self, WPos pos, int offset)
 		{

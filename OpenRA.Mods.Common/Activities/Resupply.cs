@@ -231,7 +231,8 @@ namespace OpenRA.Mods.Common.Activities
 					{
 						moveCooldownHelper.NotifyMoveQueued();
 						foreach (var cell in rp.Path)
-							QueueChild(new AttackMoveActivity(self, () => move.MoveTo(
+							QueueChild(new AttackMoveActivity(self, MoveIntent.MoveTo(
+								move,
 								cell,
 								1,
 								ignoreActor: repairableNear != null ? null : host.Actor,
@@ -258,7 +259,8 @@ namespace OpenRA.Mods.Common.Activities
 				{
 					if (rp != null && rp.Path.Count > 0)
 						foreach (var cell in rp.Path)
-							QueueChild(new AttackMoveActivity(self, () => move.MoveTo(cell, 1, repairableNear != null ? null : host.Actor, true, moveInfo.GetTargetLineColor())));
+							QueueChild(new AttackMoveActivity(self,
+								MoveIntent.MoveTo(move, cell, 1, repairableNear != null ? null : host.Actor, true, moveInfo.GetTargetLineColor())));
 					else if (repairableNear == null)
 						QueueChild(move.MoveToTarget(self, host));
 				}

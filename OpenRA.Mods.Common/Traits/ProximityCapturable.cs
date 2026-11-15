@@ -9,6 +9,7 @@
  */
 #endregion
 
+using System.Collections.Generic;
 using OpenRA.Graphics;
 using OpenRA.Mods.Common.Graphics;
 using OpenRA.Primitives;
@@ -37,6 +38,11 @@ namespace OpenRA.Mods.Common.Traits
 		protected override int CreateTrigger(Actor self)
 		{
 			return self.World.ActorMap.AddProximityTrigger(self.CenterPosition, Info.Range, WDist.Zero, ActorEntered, ActorLeft);
+		}
+
+		protected override void RestoreTrigger(Actor self, int trigger, IEnumerable<Actor> inside)
+		{
+			self.World.ActorMap.RestoreProximityTrigger(trigger, self.CenterPosition, Info.Range, WDist.Zero, ActorEntered, ActorLeft, inside);
 		}
 
 		protected override void RemoveTrigger(Actor self, int trigger)

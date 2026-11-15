@@ -43,6 +43,7 @@ namespace OpenRA.Mods.Common.Traits.Render
 
 	public class WithResourceStoragePipsDecoration : WithDecorationBase<WithResourceStoragePipsDecorationInfo>, INotifyOwnerChanged
 	{
+		[NotSaved("Rendering only. Each draw of the decoration plays the sequence of each pip again.")]
 		readonly Animation pips;
 		PlayerResources player;
 

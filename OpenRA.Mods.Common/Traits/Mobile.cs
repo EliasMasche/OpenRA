@@ -811,7 +811,7 @@ namespace OpenRA.Mods.Common.Traits
 			CrushAction(self, (notifyCrushed) => notifyCrushed.WarnCrush);
 		}
 
-		public Activity MoveTo(Func<BlockedByActor, (bool AlreadyAtDestination, List<CPos> Path)> pathFunc) { return new Move(self, pathFunc); }
+		public Activity MoveTo(IMovePathSource pathSource) { return new Move(self, pathSource); }
 
 		Activity LocalMove(Actor self, WPos fromPos, WPos toPos, CPos cell)
 		{
@@ -1011,7 +1011,7 @@ namespace OpenRA.Mods.Common.Traits
 
 				if (rallyPoint != null)
 					foreach (var cell in rallyPoint)
-						QueueChild(new AttackMoveActivity(self, () => mobile.MoveTo(cell, 1, evaluateNearestMovableCell: true, targetLineColor: Color.OrangeRed)));
+						QueueChild(new AttackMoveActivity(self, MoveIntent.MoveTo(mobile, cell, 1, evaluateNearestMovableCell: true, targetLineColor: Color.OrangeRed)));
 			}
 
 			public override IEnumerable<Target> GetTargets(Actor self)

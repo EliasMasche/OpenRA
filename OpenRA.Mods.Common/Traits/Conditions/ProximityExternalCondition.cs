@@ -49,7 +49,13 @@ namespace OpenRA.Mods.Common.Traits
 
 		readonly Dictionary<Actor, int> tokens = [];
 
+		// The actors inside the trigger, also those that took no condition. A load registers the trigger again under
+		// its saved ID, with these actors inside. So the trigger reports only an actor that enters or leaves after the
+		// load.
+		readonly HashSet<Actor> inside = [];
+
 		int proximityTrigger;
+
 		WPos cachedPosition;
 		WDist cachedRange;
 		WDist desiredRange;
@@ -67,7 +73,10 @@ namespace OpenRA.Mods.Common.Traits
 		void INotifyAddedToWorld.AddedToWorld(Actor self)
 		{
 			cachedPosition = self.CenterPosition;
-			proximityTrigger = self.World.ActorMap.AddProximityTrigger(cachedPosition, cachedRange, cachedVRange, ActorEntered, ActorExited);
+			if (self.World.IsLoadingSnapshot)
+				self.World.ActorMap.RestoreProximityTrigger(proximityTrigger, cachedPosition, cachedRange, cachedVRange, ActorEntered, ActorExited, inside);
+			else
+				proximityTrigger = self.World.ActorMap.AddProximityTrigger(cachedPosition, cachedRange, cachedVRange, ActorEntered, ActorExited);
 		}
 
 		void INotifyRemovedFromWorld.RemovedFromWorld(Actor self)
@@ -102,6 +111,7 @@ namespace OpenRA.Mods.Common.Traits
 
 		void ActorEntered(Actor a)
 		{
+			inside.Add(a);
 			if (a.Disposed || self.Disposed)
 				return;
 
@@ -148,6 +158,7 @@ namespace OpenRA.Mods.Common.Traits
 
 		void ActorExited(Actor a)
 		{
+			inside.Remove(a);
 			if (a.Disposed)
 				return;
 

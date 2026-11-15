@@ -113,6 +113,9 @@ namespace OpenRA.Mods.Common.Traits
 	public class MapStartingLocations : IWorldLoaded, INotifyCreated, IAssignSpawnPoints
 	{
 		readonly MapStartingLocationsInfo info;
+
+		[NotSaved("It holds the clients of the lobby, and each player takes its spawn point again when it is created. "
+			+ "A saved copy would write the clients of the saved game over the lobby of the server that the loaded game runs on.")]
 		readonly Dictionary<int, Session.Client> occupiedSpawnPoints = [];
 		bool separateTeamSpawns;
 		CPos[] spawnLocations;

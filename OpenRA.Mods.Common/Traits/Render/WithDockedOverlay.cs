@@ -34,7 +34,7 @@ namespace OpenRA.Mods.Common.Traits.Render
 		public override object Create(ActorInitializer init) { return new WithDockedOverlay(init.Self, this); }
 	}
 
-	public class WithDockedOverlay : PausableConditionalTrait<WithDockedOverlayInfo>, INotifyDockHost
+	public class WithDockedOverlay : PausableConditionalTrait<WithDockedOverlayInfo>, INotifyDockHost, IResumeAnimations
 	{
 		readonly AnimationWithOffset anim;
 		bool docked;
@@ -63,5 +63,12 @@ namespace OpenRA.Mods.Common.Traits.Render
 
 		void INotifyDockHost.Docked(Actor self, Actor client) { docked = true; PlayDockingOverlay(); }
 		void INotifyDockHost.Undocked(Actor self, Actor client) { docked = false; }
+
+		// The save holds the docked flag, and not the animation that loops while the flag is set. A load leaves the
+		// animation as creation built it, so the loop starts again.
+		void IResumeAnimations.ResumeAnimations(Actor self)
+		{
+			PlayDockingOverlay();
+		}
 	}
 }

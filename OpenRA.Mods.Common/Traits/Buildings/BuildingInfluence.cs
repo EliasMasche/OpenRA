@@ -30,6 +30,8 @@ namespace OpenRA.Mods.Common.Traits
 		}
 
 		readonly Map map;
+
+		[NotSaved("Each building adds its footprint again when it enters the world.")]
 		readonly CellLayer<InfluenceNode> influence;
 
 		public BuildingInfluence(World world)

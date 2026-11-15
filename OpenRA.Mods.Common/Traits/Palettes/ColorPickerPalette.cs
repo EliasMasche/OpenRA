@@ -41,6 +41,7 @@ namespace OpenRA.Mods.Common.Traits
 		public override object Create(ActorInitializer init) { return new ColorPickerPalette(this); }
 	}
 
+	[NotSaved("The colour that the settings of this client give. Rendering only.")]
 	sealed class ColorPickerPalette : ILoadsPalettes, IProvidesAssetBrowserColorPickerPalettes, ITickRender
 	{
 		readonly ColorPickerPaletteInfo info;

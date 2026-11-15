@@ -85,6 +85,7 @@ namespace OpenRA.Mods.Common.Traits
 		public override object Create(ActorInitializer init) { return new SmudgeLayer(init.Self, this); }
 	}
 
+	[CosmeticState("The cosmetic random picks the variant of each smudge, and the simulation never reads the layer.")]
 	public class SmudgeLayer : IRenderOverlay, IWorldLoaded, ITickRender, INotifyActorDisposing
 	{
 		struct Smudge
@@ -267,7 +268,7 @@ namespace OpenRA.Mods.Common.Traits
 			world.Map.CustomTerrain.CellEntryChanged -= RemoveUnacceptableSmudgeOnCellChange;
 			world.Map.Ramp.CellEntryChanged -= RemoveUnacceptableSmudgeOnCellChange;
 			world.Map.Height.CellEntryChanged -= RemoveUnacceptableSmudgeOnCellChange;
-			render.Dispose();
+			render?.Dispose();
 			disposed = true;
 		}
 	}

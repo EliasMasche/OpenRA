@@ -47,7 +47,8 @@ namespace OpenRA.Mods.Common.Traits
 		{
 			// Actors can be created without being added to the world
 			// We want to make sure that this only triggers once they are inserted into the world
-			if (lifetime == 0 && self.IsInWorld)
+			// A load adds the actor to the world again, which is no event of the game: ITick kills it on its saved tick.
+			if (lifetime == 0 && self.IsInWorld && !self.World.IsLoadingSnapshot)
 				self.World.AddFrameEndTask(w => Kill(self));
 		}
 

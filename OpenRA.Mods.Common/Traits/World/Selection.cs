@@ -21,6 +21,7 @@ namespace OpenRA.Mods.Common.Traits
 	}
 
 	[TraitLocation(SystemActors.World | SystemActors.EditorWorld)]
+	[CosmeticState("The selection of the player of this client. Another client has its own, and the simulation never reads it.")]
 	public class Selection : ISelection, INotifyCreated, INotifyOwnerChanged, ITick, IGameSaveTraitData
 	{
 		public int Hash { get; private set; }

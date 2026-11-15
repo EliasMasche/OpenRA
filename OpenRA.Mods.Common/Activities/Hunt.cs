@@ -19,14 +19,18 @@ namespace OpenRA.Mods.Common.Activities
 {
 	public class Hunt : Activity
 	{
-		readonly IEnumerable<Actor> targets;
 		readonly IMove move;
+		readonly AttackBase attack;
 
 		public Hunt(Actor self)
 		{
 			move = self.Trait<IMove>();
-			var attack = self.Trait<AttackBase>();
-			targets = self.World.ActorsHavingTrait<Huntable>().Where(
+			attack = self.Trait<AttackBase>();
+		}
+
+		IEnumerable<Actor> Targets(Actor self)
+		{
+			return self.World.ActorsHavingTrait<Huntable>().Where(
 				a => self != a && !a.IsDead && a.IsInWorld && a.AppearsHostileTo(self)
 				&& a.IsTargetableBy(self) && attack.HasAnyValidWeapons(Target.FromActor(a)));
 		}
@@ -36,12 +40,12 @@ namespace OpenRA.Mods.Common.Activities
 			if (IsCanceling)
 				return true;
 
-			var targetActor = targets.ClosestToWithPathFrom(self);
+			var targetActor = Targets(self).ClosestToWithPathFrom(self);
 			if (targetActor == null)
 				return false;
 
 			// We want to keep 2 cells of distance from the target to prevent the pathfinder from thinking the target position is blocked.
-			QueueChild(new AttackMoveActivity(self, () => move.MoveWithinRange(Target.FromCell(self.World, targetActor.Location), WDist.FromCells(2))));
+			QueueChild(new AttackMoveActivity(self, MoveIntent.MoveWithinRangeOfActorCell(move, targetActor, WDist.FromCells(2))));
 			QueueChild(new Wait(25));
 			return false;
 		}

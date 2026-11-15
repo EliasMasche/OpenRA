@@ -61,7 +61,7 @@ namespace OpenRA.Mods.Common.Traits.Render
 		}
 	}
 
-	public class WithSpriteBody : PausableConditionalTrait<WithSpriteBodyInfo>, INotifyDamageStateChanged, IAutoMouseBounds
+	public class WithSpriteBody : PausableConditionalTrait<WithSpriteBodyInfo>, INotifyDamageStateChanged, IAutoMouseBounds, IResumeAnimations
 	{
 		public readonly Animation DefaultAnimation;
 		readonly Animation boundsAnimation;
@@ -126,6 +126,30 @@ namespace OpenRA.Mods.Common.Traits.Render
 				CancelCustomAnimation(self);
 				after?.Invoke();
 			});
+		}
+
+		/// <summary>
+		/// Attaches <paramref name="after"/> again to a custom animation that is still playing, from its current frame.
+		/// Both directions finish the same way, so this serves both PlayCustomAnimation and PlayCustomAnimationBackwards.
+		/// </summary>
+		public virtual void ContinueCustomAnimation(Actor self, Action after)
+		{
+			DefaultAnimation.ContinueThen(() =>
+			{
+				CancelCustomAnimation(self);
+				after?.Invoke();
+			});
+		}
+
+		// A custom animation ends with a return to the normal sequence. A snapshot holds the frame, not that end, so
+		// without this the body stays on the last frame. The actor that started the animation can be gone, as the unit
+		// whose teleport lights up a chronosphere is. A trait that plays towards a callback of its own attaches that
+		// callback itself, so this skips an animation that has a callback. So the order of the resumes does not matter,
+		// and a second resume changes nothing.
+		void IResumeAnimations.ResumeAnimations(Actor self)
+		{
+			if (!DefaultAnimation.HasCallback)
+				ContinueCustomAnimation(self, null);
 		}
 
 		public virtual void CancelCustomAnimation(Actor self)

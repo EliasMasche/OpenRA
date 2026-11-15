@@ -39,10 +39,77 @@ namespace OpenRA.Mods.Common.Traits
 		sealed class Bin
 		{
 			public readonly List<Actor> Actors = [];
+
+			[NotSaved("The trait that registered the trigger registers it again when its actor is added to the world.")]
 			public readonly List<ProximityTrigger> ProximityTriggers = [];
 		}
 
-		sealed class CellTrigger
+		interface ITrigger
+		{
+			void Tick(ActorMap actorMap);
+		}
+
+		// The triggers of one kind, by ID, in the order of the IDs. They tick in that order. A load gives each trigger
+		// its old ID, so a loaded world ticks them in the order of the saved world. A trigger that a function removes
+		// during the tick of the triggers does not tick after its removal.
+		[NotSaved("The trait that registered each trigger registers it again under its saved ID when its actor is added to the world.")]
+		sealed class TriggersById<T> where T : class, ITrigger
+		{
+			readonly List<int> ids = [];
+			readonly List<T> triggers = [];
+
+			// The index of the trigger that ticks, or -1.
+			int ticking = -1;
+
+			public void Add(int id, T trigger)
+			{
+				var index = ids.BinarySearch(id);
+				if (index >= 0)
+					throw new InvalidOperationException($"Two triggers have the ID {id}.");
+
+				index = ~index;
+				ids.Insert(index, id);
+				triggers.Insert(index, trigger);
+				if (ticking >= 0 && index <= ticking)
+					ticking++;
+			}
+
+			public bool TryGetValue(int id, out T trigger)
+			{
+				var index = ids.BinarySearch(id);
+				trigger = index >= 0 ? triggers[index] : null;
+				return index >= 0;
+			}
+
+			public bool Remove(int id, out T trigger)
+			{
+				var index = ids.BinarySearch(id);
+				if (index < 0)
+				{
+					trigger = null;
+					return false;
+				}
+
+				trigger = triggers[index];
+				ids.RemoveAt(index);
+				triggers.RemoveAt(index);
+				if (index <= ticking)
+					ticking--;
+
+				return true;
+			}
+
+			public void Tick(ActorMap actorMap)
+			{
+				for (ticking = 0; ticking < triggers.Count; ticking++)
+					triggers[ticking].Tick(actorMap);
+
+				ticking = -1;
+			}
+		}
+
+		[NotSaved("The trait that registered the trigger registers it again when its actor is added to the world.")]
+		sealed class CellTrigger : ITrigger
 		{
 			public readonly CPos[] Footprint;
 			public bool Dirty;
@@ -52,12 +119,13 @@ namespace OpenRA.Mods.Common.Traits
 			readonly HashSet<Actor> oldActors = [];
 			readonly HashSet<Actor> currentActors = [];
 
-			public CellTrigger(CPos[] footprint, Action<Actor> onActorEntered, Action<Actor> onActorExited)
+			public CellTrigger(CPos[] footprint, Action<Actor> onActorEntered, Action<Actor> onActorExited, IEnumerable<Actor> inside)
 			{
 				Footprint = footprint;
 
 				this.onActorEntered = onActorEntered;
 				this.onActorExited = onActorExited;
+				currentActors.UnionWith(inside);
 
 				// Notify any actors that are initially inside the trigger zone
 				Dirty = true;
@@ -89,7 +157,8 @@ namespace OpenRA.Mods.Common.Traits
 			}
 		}
 
-		sealed class ProximityTrigger : IDisposable
+		[NotSaved("The trait that registered the trigger registers it again when its actor is added to the world.")]
+		sealed class ProximityTrigger : ITrigger, IDisposable
 		{
 			public WPos TopLeft { get; private set; }
 			public WPos BottomRight { get; private set; }
@@ -105,10 +174,11 @@ namespace OpenRA.Mods.Common.Traits
 			WDist range;
 			WDist vRange;
 
-			public ProximityTrigger(WPos pos, WDist range, WDist vRange, Action<Actor> onActorEntered, Action<Actor> onActorExited)
+			public ProximityTrigger(WPos pos, WDist range, WDist vRange, Action<Actor> onActorEntered, Action<Actor> onActorExited, IEnumerable<Actor> inside)
 			{
 				this.onActorEntered = onActorEntered;
 				this.onActorExited = onActorExited;
+				currentActors.UnionWith(inside);
 
 				Update(pos, range, vRange);
 			}
@@ -166,17 +236,27 @@ namespace OpenRA.Mods.Common.Traits
 
 		readonly ActorMapInfo info;
 		readonly Map map;
-		readonly Dictionary<int, CellTrigger> cellTriggers = [];
+		readonly TriggersById<CellTrigger> cellTriggers = new();
 		readonly Dictionary<CPos, List<CellTrigger>> cellTriggerInfluence = [];
-		readonly Dictionary<int, ProximityTrigger> proximityTriggers = [];
+		readonly TriggersById<ProximityTrigger> proximityTriggers = new();
+
+		// Each trigger keeps its ID in a snapshot. So a trigger that a caller adds after a load gets the ID that it
+		// would get in the saved world.
 		int nextTriggerId;
 
+		// The actors of a cell, in the order that they entered it, newest first. A search uses that order, so the save
+		// holds the influence as it is. Adding the actors again would put them in another order.
 		CellLayer<InfluenceNode>[] influence;
 
 		// Index 0 is kept null as layer 0 is used for the ground layer.
 		public ICustomMovementLayer[] CustomMovementLayers = [null];
+		[NotSaved("Locomotors and the pathfinder subscribe when they are created.")]
 		public event Action<CPos> CellUpdated;
+
+		// A search returns the actors of a bin in the order that they entered it. Target choice follows that order, so
+		// the save holds the bins as they are. Adding the actors again would put them in another order.
 		readonly Bin[] bins;
+
 		readonly int rows, cols;
 
 		// Position updates are done in one pass
@@ -501,17 +581,20 @@ namespace OpenRA.Mods.Common.Traits
 
 			addActorPosition.Clear();
 
-			foreach (var t in cellTriggers)
-				t.Value.Tick(this);
-
-			foreach (var t in proximityTriggers)
-				t.Value.Tick(this);
+			cellTriggers.Tick(this);
+			proximityTriggers.Tick(this);
 		}
 
 		public int AddCellTrigger(CPos[] cells, Action<Actor> onEntry, Action<Actor> onExit)
 		{
 			var id = nextTriggerId++;
-			var t = new CellTrigger(cells, onEntry, onExit);
+			RestoreCellTrigger(id, cells, onEntry, onExit, []);
+			return id;
+		}
+
+		public void RestoreCellTrigger(int id, CPos[] cells, Action<Actor> onEntry, Action<Actor> onExit, IEnumerable<Actor> inside)
+		{
+			var t = new CellTrigger(cells, onEntry, onExit, inside);
 			cellTriggers.Add(id, t);
 
 			var layer = influence[0];
@@ -525,8 +608,6 @@ namespace OpenRA.Mods.Common.Traits
 
 				cellTriggerInfluence[c].Add(t);
 			}
-
-			return id;
 		}
 
 		public IEnumerable<CPos> TriggerPositions()
@@ -536,7 +617,7 @@ namespace OpenRA.Mods.Common.Traits
 
 		public void RemoveCellTrigger(int id)
 		{
-			if (!cellTriggers.TryGetValue(id, out var trigger))
+			if (!cellTriggers.Remove(id, out var trigger))
 				return;
 
 			foreach (var c in trigger.Footprint)
@@ -551,18 +632,22 @@ namespace OpenRA.Mods.Common.Traits
 		public int AddProximityTrigger(WPos pos, WDist range, WDist vRange, Action<Actor> onEntry, Action<Actor> onExit)
 		{
 			var id = nextTriggerId++;
-			var t = new ProximityTrigger(pos, range, vRange, onEntry, onExit);
+			RestoreProximityTrigger(id, pos, range, vRange, onEntry, onExit, []);
+			return id;
+		}
+
+		public void RestoreProximityTrigger(int id, WPos pos, WDist range, WDist vRange, Action<Actor> onEntry, Action<Actor> onExit, IEnumerable<Actor> inside)
+		{
+			var t = new ProximityTrigger(pos, range, vRange, onEntry, onExit, inside);
 			proximityTriggers.Add(id, t);
 
 			foreach (var bin in BinsInBox(t.TopLeft, t.BottomRight))
 				bin.ProximityTriggers.Add(t);
-
-			return id;
 		}
 
 		public void RemoveProximityTrigger(int id)
 		{
-			if (!proximityTriggers.TryGetValue(id, out var t))
+			if (!proximityTriggers.Remove(id, out var t))
 				return;
 
 			foreach (var bin in BinsInBox(t.TopLeft, t.BottomRight))

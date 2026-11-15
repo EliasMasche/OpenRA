@@ -33,7 +33,7 @@ namespace OpenRA.Mods.Cnc.Traits.Render
 		public override object Create(ActorInitializer init) { return new WithTeslaChargeOverlay(init, this); }
 	}
 
-	public class WithTeslaChargeOverlay : INotifyTeslaCharging, INotifyDamageStateChanged, INotifySold
+	public class WithTeslaChargeOverlay : INotifyTeslaCharging, INotifyDamageStateChanged, INotifySold, IResumeAnimations
 	{
 		readonly Animation overlay;
 		readonly WithTeslaChargeOverlayInfo info;
@@ -67,6 +67,13 @@ namespace OpenRA.Mods.Cnc.Traits.Render
 		void INotifySold.Selling(Actor self)
 		{
 			charging = false;
+		}
+
+		// The save holds the charging flag, and not the callback that clears it. Without this, the overlay stays
+		// visible after a load.
+		void IResumeAnimations.ResumeAnimations(Actor self)
+		{
+			overlay.ContinueThen(() => charging = false);
 		}
 	}
 }

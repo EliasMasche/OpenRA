@@ -123,7 +123,7 @@ namespace OpenRA.Mods.D2k.Projectiles
 				var adjustedModifiers = args.DamageModifiers.Append(GetFalloff((args.Source - pos).Length));
 				var warheadArgs = new WarheadArgs(args)
 				{
-					ImpactOrientation = new WRot(WAngle.Zero, Common.Util.GetVerticalAngle(args.Source, target), args.CurrentMuzzleFacing()),
+					ImpactOrientation = new WRot(WAngle.Zero, Common.Util.GetVerticalAngle(args.Source, target), args.Muzzle.Facing),
 					ImpactPosition = pos,
 					DamageModifiers = adjustedModifiers.ToArray(),
 				};

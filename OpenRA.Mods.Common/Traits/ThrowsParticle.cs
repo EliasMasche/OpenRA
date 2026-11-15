@@ -45,6 +45,7 @@ namespace OpenRA.Mods.Common.Traits
 		public override object Create(ActorInitializer init) { return new ThrowsParticle(init, this); }
 	}
 
+	[CosmeticState("The cosmetic random decides where the particle is thrown, and every field follows from that.")]
 	sealed class ThrowsParticle : ITick
 	{
 		WVec pos;

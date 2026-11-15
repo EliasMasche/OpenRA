@@ -78,7 +78,7 @@ namespace OpenRA.Mods.Common.Traits
 		}
 	}
 
-	public class AttackGarrisoned : AttackFollow, INotifyPassengerEntered, INotifyPassengerExited, IRender
+	public class AttackGarrisoned : AttackFollow, INotifyPassengerEntered, INotifyPassengerExited, IRender, IResumeAnimations
 	{
 		public new readonly AttackGarrisonedInfo Info;
 		INotifyAttack[] notifyAttacks;
@@ -107,9 +107,9 @@ namespace OpenRA.Mods.Common.Traits
 			base.Created(self);
 		}
 
-		protected override Func<IEnumerable<Armament>> InitializeGetArmaments(Actor self)
+		protected override IEnumerable<Armament> GetArmaments()
 		{
-			return () => armaments;
+			return armaments;
 		}
 
 		void INotifyPassengerEntered.OnPassengerEntered(Actor self, Actor passenger)
@@ -205,6 +205,12 @@ namespace OpenRA.Mods.Common.Traits
 					muzzleAnim.PlayThen(sequence, () => muzzles.Remove(muzzleFlash));
 				}
 			}
+		}
+
+		void IResumeAnimations.ResumeAnimations(Actor self)
+		{
+			foreach (var muzzleFlash in muzzles.ToArray())
+				muzzleFlash.Animation.ContinueThen(() => muzzles.Remove(muzzleFlash));
 		}
 
 		IEnumerable<IRenderable> IRender.Render(Actor self, WorldRenderer wr)

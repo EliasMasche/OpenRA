@@ -106,7 +106,7 @@ namespace OpenRA.Mods.Common.Projectiles
 		}
 	}
 
-	public class LaserZap : IProjectile, ISync
+	public class LaserZap : IProjectile, ISync, IResumeAnimations
 	{
 		readonly ProjectileArgs args;
 		readonly LaserZapInfo info;
@@ -148,12 +148,23 @@ namespace OpenRA.Mods.Common.Projectiles
 			hasLaunchEffect = !string.IsNullOrEmpty(info.LaunchEffectImage) && !string.IsNullOrEmpty(info.LaunchEffectSequence);
 		}
 
+		// The zap stays until its hit animation ends.
+		void HitAnimationFinished()
+		{
+			showHitAnim = false;
+		}
+
+		void IResumeAnimations.ResumeAnimations(Actor self)
+		{
+			hitanim?.ContinueThen(HitAnimationFinished);
+		}
+
 		public void Tick(World world)
 		{
-			source = args.CurrentSource();
+			source = args.Muzzle.Position;
 
 			if (hasLaunchEffect && ticks == 0)
-				world.AddFrameEndTask(w => w.Add(new SpriteEffect(args.CurrentSource, args.CurrentMuzzleFacing, world,
+				world.AddFrameEndTask(w => w.Add(new SpriteEffect(() => args.Muzzle.Position, () => args.Muzzle.Facing, world,
 					info.LaunchEffectImage, info.LaunchEffectSequence, info.LaunchEffectPalette)));
 
 			// Beam tracks target
@@ -170,7 +181,7 @@ namespace OpenRA.Mods.Common.Projectiles
 			{
 				var warheadArgs = new WarheadArgs(args)
 				{
-					ImpactOrientation = new WRot(WAngle.Zero, Util.GetVerticalAngle(source, target), args.CurrentMuzzleFacing()),
+					ImpactOrientation = new WRot(WAngle.Zero, Util.GetVerticalAngle(source, target), args.Muzzle.Facing),
 					ImpactPosition = target,
 				};
 
@@ -181,7 +192,7 @@ namespace OpenRA.Mods.Common.Projectiles
 			if (showHitAnim)
 			{
 				if (ticks == 0)
-					hitanim.PlayThen(info.HitAnimSequence, () => showHitAnim = false);
+					hitanim.PlayThen(info.HitAnimSequence, HitAnimationFinished);
 
 				hitanim.Tick();
 			}

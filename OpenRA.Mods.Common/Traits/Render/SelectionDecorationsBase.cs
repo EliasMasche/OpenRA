@@ -30,6 +30,7 @@ namespace OpenRA.Mods.Common.Traits.Render
 
 		protected readonly SelectionDecorationsBaseInfo Info;
 
+		[NotSaved("The developer mode of the player of this client, which another client does not share.")]
 		DeveloperMode developerMode;
 
 		protected SelectionDecorationsBase(SelectionDecorationsBaseInfo info)
