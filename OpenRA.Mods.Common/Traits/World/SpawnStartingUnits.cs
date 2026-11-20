@@ -12,7 +12,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using OpenRA.Graphics;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Traits
@@ -57,7 +56,7 @@ namespace OpenRA.Mods.Common.Traits
 		public override object Create(ActorInitializer init) { return new SpawnStartingUnits(this); }
 	}
 
-	public class SpawnStartingUnits : IWorldLoaded
+	public class SpawnStartingUnits : ICreateStartupActors
 	{
 		readonly SpawnStartingUnitsInfo info;
 
@@ -66,7 +65,7 @@ namespace OpenRA.Mods.Common.Traits
 			this.info = info;
 		}
 
-		public void WorldLoaded(World world, WorldRenderer wr)
+		void ICreateStartupActors.CreateStartupActors(World world)
 		{
 			foreach (var p in world.Players)
 				if (p.Playable)

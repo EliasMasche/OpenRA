@@ -372,6 +372,13 @@ namespace OpenRA.Traits
 
 	public interface IWorldLoaded { void WorldLoaded(World w, WorldRenderer wr); }
 	public interface IPostWorldLoaded { void PostWorldLoaded(World w, WorldRenderer wr); }
+
+	/// <summary>
+	/// Creates the actors that a world starts with, right after the WorldLoaded of the same trait, only when the world
+	/// starts from its map. A world that loads a snapshot gets every actor from the snapshot.
+	/// </summary>
+	[RequireExplicitImplementation]
+	public interface ICreateStartupActors { void CreateStartupActors(World w); }
 	public interface INotifyGameLoading { void GameLoading(World w); }
 	public interface INotifyGameLoaded { void GameLoaded(World w); }
 	public interface INotifyGameSaved { void GameSaved(World w, bool isAutoSave); }

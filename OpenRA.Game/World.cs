@@ -271,14 +271,20 @@ namespace OpenRA
 			using (new PerfTimer("ScreenMap.WorldLoaded"))
 				ScreenMap.WorldLoaded(this, wr);
 
-			foreach (var iwl in WorldActor.TraitsImplementing<IWorldLoaded>())
+			// One pass in construct order, so a trait creates its startup actors right after its own WorldLoaded.
+			foreach (var trait in WorldActor.TraitsImplementing<object>())
 			{
 				// These have already been initialized
-				if (iwl == ScreenMap)
+				if (trait == ScreenMap)
 					continue;
 
-				using (new PerfTimer(iwl.GetType().Name + ".WorldLoaded"))
-					iwl.WorldLoaded(this, wr);
+				if (trait is IWorldLoaded iwl)
+					using (new PerfTimer(iwl.GetType().Name + ".WorldLoaded"))
+						iwl.WorldLoaded(this, wr);
+
+				if (trait is ICreateStartupActors creator)
+					using (new PerfTimer(creator.GetType().Name + ".CreateStartupActors"))
+						creator.CreateStartupActors(this);
 			}
 
 			foreach (var p in Players)

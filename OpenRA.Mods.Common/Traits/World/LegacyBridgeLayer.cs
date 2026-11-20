@@ -28,7 +28,7 @@ namespace OpenRA.Mods.Common.Traits
 		public override object Create(ActorInitializer init) { return new LegacyBridgeLayer(init.Self, this); }
 	}
 
-	public class LegacyBridgeLayer : IWorldLoaded
+	public class LegacyBridgeLayer : IWorldLoaded, ICreateStartupActors
 	{
 		readonly LegacyBridgeLayerInfo info;
 		readonly Dictionary<ushort, (string Template, int Health)> bridgeTypes = [];
@@ -55,7 +55,10 @@ namespace OpenRA.Mods.Common.Traits
 				foreach (var template in bi.Templates)
 					bridgeTypes.Add(template.Template, (bridge, template.Health));
 			}
+		}
 
+		void ICreateStartupActors.CreateStartupActors(World w)
+		{
 			// Take all templates to overlay from the map
 			foreach (var cell in w.Map.AllCells.Where(cell => bridgeTypes.ContainsKey(w.Map.Tiles[cell].Type)))
 				ConvertBridgeToActor(w, cell);

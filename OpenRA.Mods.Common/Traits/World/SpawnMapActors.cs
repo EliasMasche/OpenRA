@@ -11,7 +11,6 @@
 
 using System.Collections.Generic;
 using System.Linq;
-using OpenRA.Graphics;
 using OpenRA.Traits;
 
 namespace OpenRA.Mods.Common.Traits
@@ -20,12 +19,12 @@ namespace OpenRA.Mods.Common.Traits
 	[Desc("Spawns the initial units for each player upon game start.")]
 	public class SpawnMapActorsInfo : TraitInfo<SpawnMapActors> { }
 
-	public class SpawnMapActors : IWorldLoaded
+	public class SpawnMapActors : ICreateStartupActors
 	{
 		public Dictionary<string, Actor> Actors = [];
 		public uint LastMapActorID { get; private set; }
 
-		public void WorldLoaded(World world, WorldRenderer wr)
+		void ICreateStartupActors.CreateStartupActors(World world)
 		{
 			var preventMapSpawns = world.WorldActor.TraitsImplementing<IPreventMapSpawn>()
 				.Concat(world.WorldActor.Owner.PlayerActor.TraitsImplementing<IPreventMapSpawn>())
